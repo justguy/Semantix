@@ -1,0 +1,12 @@
+{
+  "name": "@semantix/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:ui": "node scripts/build-ui.js",
+    "preview:ui": "npm run build:ui && npm start",
+    "start": "node src/index.js",
+    "test": "node --test --test-force-exit tests/*.test.js"
+  }
+}

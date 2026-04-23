@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Semantix — Exploration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    button { font-family: inherit; }
+    textarea { font-family: inherit; }
+    /* Subtle scrollbars inside artboards */
+    .dc-card *::-webkit-scrollbar { width: 8px; height: 8px; }
+    .dc-card *::-webkit-scrollbar-track { background: transparent; }
+    .dc-card *::-webkit-scrollbar-thumb { background: rgba(128,128,128,.2); border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="../shared/semantix-fixtures.js"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="scenarios.jsx"></script>
+  <script type="text/babel" src="ui.jsx"></script>
+  <script type="text/babel" src="graph.jsx"></script>
+  <script type="text/babel" src="inspector.jsx"></script>
+  <script type="text/babel" src="diff.jsx"></script>
+  <script type="text/babel" src="phases.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+  <script type="text/babel" src="cli.jsx"></script>
+  <script type="text/babel" src="decision.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    // Wraps a SemantixApp instance so the artboard is a framed "screen"
+    // rather than a full viewport takeover. embedded=true drops the 100vh.
+    function Frame({ w, h, children }) {
+      return (
+        <div style={{ width: w, height: h, background: '#fff', overflow: 'hidden' }}>
+          {children}
+        </div>
+      );
+    }
+
+    // Instance of the main app, scoped to a fixed-size artboard. Each
+    // artboard keeps its own React state tree.
+    function App({ theme = 'light', layout = 'vertical', scenario = 'swe', phase = 'prompt', preApprove = false, w, h }) {
+      return (
+        <Frame w={w} h={h}>
+          <SemantixApp embedded forceTheme={theme} forceLayout={layout}
+            initialScenario={scenario} initialPhase={phase} preApprove={preApprove} />
+        </Frame>
+      );
+    }
+
+    const AB_W = 980, AB_H = 620;
+
+    function Root() {
+      return (
+        <DesignCanvas>
+          <DCSection id="v1" title="Decision mode · v1 proposal"
+            subtitle="One job: understand this change and decide. Single column of proposed changes, per-card verdict, risk only where it matters. The plan is a drawer, not a panel.">
+            <DCArtboard id="decision-fresh" label="A · fresh review · one attention item expanded" width={820} height={AB_H}>
+              <DecisionMode scenarioKey="swe" width={820} height={AB_H} />
+            </DCArtboard>
+            <DCArtboard id="decision-withplan" label="B · plan drawer open" width={820} height={AB_H}>
+              <DecisionMode scenarioKey="swe" width={820} height={AB_H} showPlanDefault />
+            </DCArtboard>
+            <DCArtboard id="decision-ready" label="C · ready to run" width={820} height={AB_H}>
+              <DecisionMode scenarioKey="swe" width={820} height={AB_H} preApprove />
+            </DCArtboard>
+            <DCArtboard id="decision-support" label="D · support scenario" width={820} height={AB_H}>
+              <DecisionMode scenarioKey="support" width={820} height={AB_H} />
+            </DCArtboard>
+            <DCPostIt top={-44} left={820 + 60} rotate={-2}>
+              Debug-mode vs decision-mode. Graph, grounding taxonomy,
+              constraint classifications — those are the right primitives
+              but they're the pilot's preflight, not the captain's wheel.
+              Surface them when asked, not by default.
+            </DCPostIt>
+          </DCSection>
+
+          <DCSection id="overview" title="Full control surface · 3-panel (debug mode)"
+            subtitle="Same run, full detail: execution graph, node inspector, state diff. The answer to 'why did it think that?' — not the default view.">
+            <DCArtboard id="prompt" label="new run · prompt" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="prompt" />
+            </DCArtboard>
+            <DCArtboard id="review-light" label="review · 3-panel · light" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" />
+            </DCArtboard>
+            <DCArtboard id="review-dark" label="review · 3-panel · dark" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" theme="dark" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="layouts" title="Graph layout · explorations"
+            subtitle="The execution graph is the entry point to everything else. Vertical is the default (top-down plan); horizontal reads left-to-right; radial centers on the root intent.">
+            <DCArtboard id="vertical" label="vertical · default" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" layout="vertical" />
+            </DCArtboard>
+            <DCArtboard id="horizontal" label="horizontal · long plans" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" layout="horizontal" />
+            </DCArtboard>
+            <DCArtboard id="radial" label="radial · emphasizes intent" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" layout="radial" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="states" title="Review states · over time"
+            subtitle="The surface should be legible at every moment in the loop — fresh compile, mid-review (some approved, some blocked), ready to execute, and post-run.">
+            <DCArtboard id="compile" label="1 · compiling" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="compiling" />
+            </DCArtboard>
+            <DCArtboard id="fresh" label="2 · fresh review" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" />
+            </DCArtboard>
+            <DCArtboard id="approved" label="3 · ready to authorize" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" preApprove />
+            </DCArtboard>
+            <DCArtboard id="running" label="4 · executing" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="running" preApprove />
+            </DCArtboard>
+            <DCArtboard id="done" label="5 · complete" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="done" preApprove />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="scenarios" title="Not just code · same loop, different agent"
+            subtitle="The control surface is agent-agnostic. The state diff just changes shape: tickets instead of files, compliance artifacts instead of routes.">
+            <DCArtboard id="support" label="support · refund flow" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" scenario="support" />
+            </DCArtboard>
+            <DCArtboard id="compliance" label="compliance · vendor review" width={AB_W} height={AB_H}>
+              <App w={AB_W} h={AB_H} phase="review" scenario="compliance" />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="cli" title="CLI-first · same primitives, different surface"
+            subtitle="For power users, the whole review loop collapses into a shell. Plan as ascii tree, state diff as +/~/✉ lines, approvals as commands.">
+            <DCArtboard id="stx" label="stx · review loop in a terminal" width={760} height={560}>
+              <SemantixCLI width={760} height={560} />
+            </DCArtboard>
+            <DCPostIt top={0} left={800} rotate={-2}>
+              If the UI and the CLI share the same verbs (approve, block,
+              intervene, revoke) and the same objects (n4, smtp://…, the
+              diff), then handoff between reviewers works — someone can
+              triage in the UI and another can batch-approve from a script.
+            </DCPostIt>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+  </script>
+</body>
+</html>

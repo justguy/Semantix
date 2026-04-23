@@ -1,0 +1,774 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Semantix — Implementation Guide</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #faf8f4;
+      --panel: #ffffff;
+      --ink: #1d1b17;
+      --ink-2: #3a3730;
+      --ink-3: #58544c;
+      --ink-4: #8a8578;
+      --border: #e8e4dc;
+      --border-2: #d8d2c6;
+      --accent: #2d6a4f;
+      --accent-soft: #e6f0ea;
+      --warn: #b8791f;
+      --warn-soft: #fbf2df;
+      --block: #a8413a;
+      --block-soft: #f8e9e6;
+      --info: #3a5f7f;
+      --info-soft: #e6eef4;
+      --code-bg: #1d1b17;
+      --code-ink: #e8e4dc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font-family: 'Source Serif 4', Georgia, serif;
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+    .doc {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 64px 56px 120px;
+    }
+    .masthead {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 28px;
+      margin-bottom: 48px;
+    }
+    .masthead .eyebrow {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .masthead h1 {
+      font-family: 'Source Serif 4', serif;
+      font-weight: 500;
+      font-size: 40px;
+      line-height: 1.15;
+      letter-spacing: -0.015em;
+      margin: 10px 0 14px;
+      text-wrap: balance;
+    }
+    .masthead .sub {
+      font-size: 17px;
+      color: var(--ink-3);
+      max-width: 620px;
+      text-wrap: pretty;
+    }
+    .masthead .meta {
+      margin-top: 20px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      color: var(--ink-4);
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+    .masthead .meta span::before { content: '· '; margin-right: 4px; color: var(--border-2); }
+    .masthead .meta span:first-child::before { content: ''; margin: 0; }
+
+    h2 {
+      font-family: 'Source Serif 4', serif;
+      font-weight: 500;
+      font-size: 28px;
+      line-height: 1.25;
+      letter-spacing: -0.01em;
+      margin: 64px 0 8px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border);
+    }
+    h2 .num {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      display: block;
+      margin-bottom: 6px;
+    }
+    h3 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+      margin: 36px 0 10px;
+      color: var(--ink);
+    }
+    h4 {
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-3);
+      margin: 24px 0 8px;
+    }
+    p { margin: 0 0 14px; text-wrap: pretty; }
+    p + p { margin-top: 0; }
+    ul, ol { margin: 8px 0 16px; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    li::marker { color: var(--ink-4); }
+    strong { font-weight: 600; color: var(--ink); }
+    em { color: var(--ink-2); }
+    a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+
+    code, .mono {
+      font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+      font-size: 0.88em;
+    }
+    p code, li code, td code {
+      background: var(--accent-soft);
+      color: var(--accent);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    pre {
+      background: var(--code-bg);
+      color: var(--code-ink);
+      padding: 18px 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.6;
+      margin: 16px 0 20px;
+    }
+    pre code { background: none; color: inherit; padding: 0; white-space: pre; font-weight: 400; }
+    .token-key { color: #b8d6a8; }
+    .token-str { color: #e8c27a; }
+    .token-com { color: #8a8578; font-style: italic; }
+    .token-kw { color: #e89a9a; }
+
+    /* callouts */
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 14px 18px;
+      border-radius: 0 6px 6px 0;
+      margin: 20px 0;
+      font-size: 14.5px;
+    }
+    .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+    .callout.block { border-color: var(--block); background: var(--block-soft); }
+    .callout .label {
+      font-family: 'Inter', sans-serif;
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .callout.warn .label { color: var(--warn); }
+    .callout.block .label { color: var(--block); }
+    .callout p:last-child { margin-bottom: 0; }
+
+    /* mapping table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      margin: 16px 0 24px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--ink-4);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-2);
+    }
+    td:first-child { font-weight: 600; color: var(--ink); width: 30%; }
+    td code { font-size: 12px; }
+
+    /* field mapping row */
+    .map {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 6px;
+      background: var(--panel);
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+    }
+    .map .from { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--info); }
+    .map .arrow { color: var(--ink-4); }
+    .map .to { color: var(--ink-2); }
+
+    /* chip */
+    .chip {
+      display: inline-block;
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: var(--border);
+      color: var(--ink-2);
+      letter-spacing: 0.01em;
+      vertical-align: 1px;
+    }
+    .chip.green { background: var(--accent-soft); color: var(--accent); }
+    .chip.yellow { background: var(--warn-soft); color: var(--warn); }
+    .chip.orange { background: #f5e6d4; color: #9a5b18; }
+    .chip.red { background: var(--block-soft); color: var(--block); }
+    .chip.info { background: var(--info-soft); color: var(--info); }
+
+    /* two-column file list */
+    .files {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 16px;
+      margin: 12px 0 20px;
+    }
+    .files .f {
+      font-family: 'Inter', sans-serif;
+      font-size: 12.5px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+    }
+    .files .f .name { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--ink); display: block; }
+    .files .f .desc { color: var(--ink-3); font-size: 12px; margin-top: 2px; display: block; }
+
+    /* TOC */
+    .toc {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin: 0 0 48px;
+      font-family: 'Inter', sans-serif;
+      font-size: 13.5px;
+      columns: 2;
+      column-gap: 32px;
+    }
+    .toc-title {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-4);
+      margin-bottom: 10px;
+      column-span: all;
+    }
+    .toc ol { margin: 0; padding: 0; list-style: none; }
+    .toc li { margin-bottom: 6px; break-inside: avoid; }
+    .toc li a { color: var(--ink-2); border: none; display: flex; gap: 10px; }
+    .toc li a:hover { color: var(--accent); }
+    .toc .n { color: var(--ink-4); font-variant-numeric: tabular-nums; font-size: 12px; min-width: 20px; }
+
+    /* flow diagram */
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 0;
+      margin: 16px 0 24px;
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+    }
+    .flow .step {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 12px 14px;
+      position: relative;
+    }
+    .flow .step:first-child { border-radius: 8px 0 0 8px; }
+    .flow .step:last-child { border-radius: 0 8px 8px 0; }
+    .flow .step + .step { border-left: none; }
+    .flow .step .s-num {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+    }
+    .flow .step .s-title {
+      font-weight: 600;
+      color: var(--ink);
+      margin: 4px 0 2px;
+      font-size: 13px;
+    }
+    .flow .step .s-code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: var(--ink-4);
+      display: block;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    footer {
+      margin-top: 80px;
+      padding-top: 28px;
+      border-top: 1px solid var(--border);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      color: var(--ink-4);
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+    }
+  </style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="masthead">
+    <div class="eyebrow">Semantix · Implementation Guide</div>
+    <h1>From spec to control surface: how the three md files map onto the Review Surface we built</h1>
+    <div class="sub">
+      A walkthrough connecting the Semantix overview, the Control Plane UI spec, and the v1 Review Surface spec to the concrete React components in this project. Use this to land a new engineer, and to audit that the prototype honors the spec.
+    </div>
+    <div class="meta">
+      <span>Audience: implementers, reviewers</span>
+      <span>Status: v1 prototype · reference for production build</span>
+      <span>Companion files: <code>Semantix Chat.html</code>, <code>Semantix Canvas.html</code></span>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <div class="toc-title">Contents</div>
+    <ol>
+      <li><a href="#a"><span class="n">01</span><span>The spec-to-UI mental model</span></a></li>
+      <li><a href="#b"><span class="n">02</span><span>File-by-file map</span></a></li>
+      <li><a href="#c"><span class="n">03</span><span>Data model: scenarios.jsx</span></a></li>
+      <li><a href="#d"><span class="n">04</span><span>The Intent Contract, rendered</span></a></li>
+      <li><a href="#e"><span class="n">05</span><span>Execution Graph</span></a></li>
+      <li><a href="#f"><span class="n">06</span><span>Node Inspector</span></a></li>
+      <li><a href="#g"><span class="n">07</span><span>State Diff Panel</span></a></li>
+      <li><a href="#h"><span class="n">08</span><span>Decision Mode (simple view)</span></a></li>
+      <li><a href="#i"><span class="n">09</span><span>The chat shell</span></a></li>
+      <li><a href="#j"><span class="n">10</span><span>Freshness, invalidation, approvals</span></a></li>
+      <li><a href="#k"><span class="n">11</span><span>From prototype to production</span></a></li>
+      <li><a href="#l"><span class="n">12</span><span>Acceptance checklist</span></a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 01 ============ -->
+  <h2 id="a"><span class="num">01 — Orientation</span>The spec-to-UI mental model</h2>
+
+  <p>
+    The three specification documents each describe the same artifact from a different altitude. Holding them in your head as one stack is the fastest way to read the code without getting lost:
+  </p>
+
+  <table>
+    <thead><tr><th>Document</th><th>Altitude</th><th>What it governs in the UI</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>semantix-overview.md</code></td>
+        <td>Philosophy &amp; architecture</td>
+        <td>The <em>reasons</em> each panel exists — fenced semantic computation, four invariants, silicon speed vs human speed, the &quot;BS layer.&quot; Use it when deciding what to build, not what to render.</td>
+      </tr>
+      <tr>
+        <td><code>Semantix Control Plane UI.md</code></td>
+        <td>Product contract</td>
+        <td>The normative layout, DTOs, acceptance criteria, and freshness rules. This is the file every component must obey. When the overview and this spec conflict, this one wins.</td>
+      </tr>
+      <tr>
+        <td><code>semantix-review-surface-spec.md</code></td>
+        <td>Surface-level detail</td>
+        <td>Per-panel field lists, interaction flows, the sample &quot;email verification&quot; scenario. Use it as the checklist when wiring an individual panel.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    The UI resolves them by treating the <strong>ReviewControlContract</strong> from the Control Plane spec as the source of truth, and using the other two to fill in rationale and field detail. Every panel in the prototype is a visual realization of one DTO.
+  </p>
+
+  <div class="callout">
+    <div class="label">Core principle</div>
+    <p>Humans approve <strong>structure</strong>, not vibes. Every design decision — what to surface, what to hide, when to slow down — follows from that line. If a component is making the reviewer approve a reassuring paragraph instead of a compiled artifact, it&#39;s wrong.</p>
+  </div>
+
+  <!-- ============ 02 ============ -->
+  <h2 id="b"><span class="num">02 — Code tour</span>File-by-file map</h2>
+
+  <p>
+    The project splits the surface into small Babel-loaded JSX files so you can edit one panel without rebuilding the world. Every file below exports its component onto <code>window</code> (required because each <code>&lt;script type=&quot;text/babel&quot;&gt;</code> gets its own scope).
+  </p>
+
+  <div class="files">
+    <div class="f">
+      <span class="name">scenarios.jsx</span>
+      <span class="desc">Three canned runs — SWE, Support, Compliance — shaped exactly like the <code>ExecutionPlan</code> DTO. Swap these for real backend payloads.</span>
+    </div>
+    <div class="f">
+      <span class="name">app.jsx</span>
+      <span class="desc">Advanced three-panel layout: intent bar · graph · inspector · diff · action bar. The canonical Control Surface.</span>
+    </div>
+    <div class="f">
+      <span class="name">decision.jsx</span>
+      <span class="desc">Decision Mode — the one-column "just tell me what to approve" view. Same data, progressive disclosure.</span>
+    </div>
+    <div class="f">
+      <span class="name">advanced.jsx</span>
+      <span class="desc">Wrapper around <code>app.jsx</code> for the chat overlay. Handles the Simple/Advanced toggle cross-talk.</span>
+    </div>
+    <div class="f">
+      <span class="name">graph.jsx</span>
+      <span class="desc">SVG execution graph. Layout, edges, risk coloring, hover/select.</span>
+    </div>
+    <div class="f">
+      <span class="name">inspector.jsx</span>
+      <span class="desc">Per-node inspector: the 10 sections from Control Plane §10.2, conditionally rendered.</span>
+    </div>
+    <div class="f">
+      <span class="name">diff.jsx</span>
+      <span class="desc">State Diff panel. Files, API calls, external actions with policy + reversibility badges.</span>
+    </div>
+    <div class="f">
+      <span class="name">phases.jsx</span>
+      <span class="desc">Silicon-speed / human-speed timeline used in the canvas variants.</span>
+    </div>
+    <div class="f">
+      <span class="name">ui.jsx</span>
+      <span class="desc">Shared primitives: Pill, RiskDot, SectionHeader, DiffLine.</span>
+    </div>
+    <div class="f">
+      <span class="name">cli.jsx</span>
+      <span class="desc">CLI artboard — how <code>semantix run</code> emits the same DTOs rendered above.</span>
+    </div>
+    <div class="f">
+      <span class="name">Semantix Chat.html</span>
+      <span class="desc">Conversational shell. Prompt → review overlay → collapses back as a summary turn.</span>
+    </div>
+    <div class="f">
+      <span class="name">Semantix Canvas.html</span>
+      <span class="desc">Design canvas variant — Decision Mode, Debug Mode, graph layouts, state view, CLI side-by-side.</span>
+    </div>
+  </div>
+
+  <!-- ============ 03 ============ -->
+  <h2 id="c"><span class="num">03 — Data shape</span>scenarios.jsx ↔ the Semantix DTOs</h2>
+
+  <p>
+    The scenarios file is not a UI concern — it is the <strong>pretend backend</strong>. Every property maps 1:1 to an abstraction defined in Control Plane §11. When you replace this file with a live API, keep the field names identical and the UI will keep working.
+  </p>
+
+  <h3>Scenario → ExecutionPlan</h3>
+  <div class="map"><span class="from">scenario.intent</span><span class="arrow">→</span><span class="to"><code>IntentContract</code> (Control Plane §11.3)</span></div>
+  <div class="map"><span class="from">scenario.nodes[]</span><span class="arrow">→</span><span class="to"><code>ExecutionNode[]</code> (§11.4)</span></div>
+  <div class="map"><span class="from">scenario.edges[]</span><span class="arrow">→</span><span class="to"><code>ExecutionNode.dependsOn</code> (edge list form)</span></div>
+  <div class="map"><span class="from">scenario.diff[]</span><span class="arrow">→</span><span class="to"><code>ProposedChange[]</code> / <code>StateEffect[]</code> (§11.6, §12)</span></div>
+  <div class="map"><span class="from">scenario.cli</span><span class="arrow">→</span><span class="to">Provenance hint — the command that would produce this plan</span></div>
+
+  <h3>Node fields used across the surface</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Appears in</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><code>nodeType</code></td><td>Graph shape, Inspector badge</td><td><code>semantic · deterministic · tool · policy_gate · approval · hybrid</code>. Controls node geometry in <code>graph.jsx</code>.</td></tr>
+      <tr><td><code>risk</code></td><td>Graph color, Decision Mode strip</td><td>One of <span class="chip green">green</span> <span class="chip yellow">yellow</span> <span class="chip orange">orange</span> <span class="chip red">red</span>. Derived from confidence score + policy state per Control Plane §9.4.</td></tr>
+      <tr><td><code>grounding</code></td><td>Inspector · Section F</td><td><code>grounded · transformed · bridged · unsupported</code>. The &quot;show me where you&#39;re guessing&quot; signal.</td></tr>
+      <tr><td><code>critique</code></td><td>Inspector · Section G; Decision Mode risk strip</td><td>The CT-MCP hook. Only populated when there&#39;s something to say; the UI conditionally renders the section.</td></tr>
+      <tr><td><code>approval</code>, <code>sideEffect</code></td><td>Graph glyphs, Action Bar counters</td><td>Drive the &quot;pending approvals&quot; and &quot;blocked actions&quot; tallies.</td></tr>
+      <tr><td><code>owner</code></td><td>Inspector · Overview; provenance chips</td><td>Which subsystem gates this node — <code>semantix · phalanx · hoplon · ct_mcp · guardrail</code>. Single-valued per §11.4.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <div class="label">Fidelity gap to close for production</div>
+    <p>The prototype carries <code>risk</code> as a pre-baked color. The spec wants a normalized <code>confidenceScore</code> derived from four signals (<code>provenanceStrength · verifierAgreement · retryStability · changeSafety</code>) and banded per §11.4. When you wire a real runtime, compute the score server-side and let the UI band it — don&#39;t let the client invent confidence.</p>
+  </div>
+
+  <!-- ============ 04 ============ -->
+  <h2 id="d"><span class="num">04 — Top bar</span>The Intent Contract, rendered</h2>
+
+  <p>
+    The top bar is the frozen-goal anchor from overview §&quot;Why This Solves The Fix Older Issues Problem.&quot; It&#39;s implemented in <code>app.jsx</code> as the <code>&lt;IntentBar&gt;</code> section at the top of the three-panel layout.
+  </p>
+
+  <h4>Required fields (Control Plane §7.2)</h4>
+  <ul>
+    <li><strong>primary directive</strong> → large headline</li>
+    <li><strong>strict boundaries</strong> → bullet list with a ⛔ prefix</li>
+    <li><strong>success state</strong> → italic trailing line</li>
+    <li><strong>status, planVersion, freshness badge</strong> → chips in the right corner</li>
+  </ul>
+
+  <h4>Actions</h4>
+  <p>
+    <span class="chip">edit</span> <span class="chip">approve</span> <span class="chip">reject</span> <span class="chip">view history</span> — approving the intent is a <em>separate</em> review event from approving the graph. The prototype currently stubs these; production needs a second approval endpoint.
+  </p>
+
+  <div class="callout">
+    <div class="label">Why this matters more than it looks</div>
+    <p>The Intent Contract is the leash described in the overview: &quot;semantic drift is allowed to exist as an internal failed branch, but it is not allowed to harden into authoritative state.&quot; Every downstream panel can reference the contract hash; any edit invalidates the entire graph per §14. Treat this card as the root of the dependency tree, not a header decoration.</p>
+  </div>
+
+  <!-- ============ 05 ============ -->
+  <h2 id="e"><span class="num">05 — Panel A</span>Execution Graph</h2>
+
+  <p>
+    Implemented in <code>graph.jsx</code> as an SVG canvas with pre-computed node positions. Production should swap the hard-coded <code>x,y</code> for an automatic layout engine (React Flow with dagre or elkjs is the spec&#39;s suggestion, §18).
+  </p>
+
+  <h3>Node geometry</h3>
+  <ul>
+    <li><strong>Rounded rectangle</strong> → semantic / deterministic / hybrid work nodes</li>
+    <li><strong>Diamond</strong> → policy gates and validation gates</li>
+    <li><strong>Shield outline</strong> → approval gates</li>
+    <li><strong>Cylinder / tool glyph</strong> → tool nodes (external calls)</li>
+  </ul>
+
+  <h3>Edge semantics (Review Surface §9.6)</h3>
+  <p>Edges currently render as a single style. The spec distinguishes five types; before shipping, encode them as stroke patterns:</p>
+  <ul>
+    <li><strong>Solid</strong> — execution order</li>
+    <li><strong>Dashed</strong> — data dependency</li>
+    <li><strong>Dotted</strong> — approval dependency</li>
+    <li><strong>Dashed + muted</strong> — fallback path</li>
+    <li><strong>Circular arrow</strong> — retry loop</li>
+  </ul>
+
+  <h3>Coloring rule</h3>
+  <p>
+    The four bands from Control Plane §9.4 drive both node fill and the legend at the top-right. When the score is ambiguous, the UI must round <em>down</em>, never up — &quot;risk visibility before convenience&quot; (§4.3).
+  </p>
+
+  <pre><code><span class="token-com">// graph.jsx — color resolution, simplified</span>
+<span class="token-kw">const</span> risk = node.risk;  <span class="token-com">// server-provided</span>
+<span class="token-kw">const</span> fill = {
+  green:  <span class="token-str">'var(--accent-soft)'</span>,
+  yellow: <span class="token-str">'var(--warn-soft)'</span>,
+  orange: <span class="token-str">'#f5e6d4'</span>,
+  red:    <span class="token-str">'var(--block-soft)'</span>,
+}[risk];</code></pre>
+
+  <!-- ============ 06 ============ -->
+  <h2 id="f"><span class="num">06 — Panel B</span>Node Inspector</h2>
+
+  <p>
+    Implemented in <code>inspector.jsx</code>. Ten sections from Control Plane §10.2, rendered conditionally — an empty section is <strong>omitted entirely</strong> (§10.3). This is load-bearing: a reviewer who stares at empty cards for capabilities that don&#39;t apply stops trusting the surface.
+  </p>
+
+  <h3>Section ↔ data source</h3>
+  <table>
+    <thead><tr><th>Section</th><th>Populated from</th><th>Owner system</th></tr></thead>
+    <tbody>
+      <tr><td>1. Overview</td><td><code>node.title, type, status, purpose</code></td><td>Semantix + runtime</td></tr>
+      <tr><td>2. Intent linkage</td><td>Back-ref to <code>IntentContract</code></td><td>Semantix</td></tr>
+      <tr><td>3. Context</td><td><code>node.inputs[]</code></td><td>Runtime (Phalanx)</td></tr>
+      <tr><td>4. Constraints</td><td><code>node.constraints.{hard, soft}</code></td><td>Semantix</td></tr>
+      <tr><td>5. Output preview</td><td><code>node.output</code></td><td>Semantix</td></tr>
+      <tr><td>6. CT-MCP critique</td><td><code>node.critique</code> <span class="chip">optional</span></td><td>CT-MCP</td></tr>
+      <tr><td>7. Tooling</td><td><code>node.tools_visible[]</code></td><td>Runtime + Guardrail</td></tr>
+      <tr><td>8. Proposed changes</td><td>Filter <code>diff</code> by <code>node</code> id</td><td>Hoplon</td></tr>
+      <tr><td>9. Approvals &amp; gates</td><td><code>node.approval, sideEffect</code></td><td>Runtime</td></tr>
+      <tr><td>10. Replay / audit</td><td>LLM Tracker refs <span class="chip">v2</span></td><td>LLM Tracker</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Interventions</h3>
+  <p>Five actions per §10.4: <span class="chip">edit context</span> <span class="chip">edit constraints</span> <span class="chip">split node</span> <span class="chip">regenerate</span> <span class="chip">mark approval-required</span>. All are stubbed in the prototype. In production, each mutates the backend plan and triggers the invalidation set from §14 — never a client-local toggle.</p>
+
+  <!-- ============ 07 ============ -->
+  <h2 id="g"><span class="num">07 — Panel C</span>State Diff Panel</h2>
+
+  <p>
+    Implemented in <code>diff.jsx</code>. Each <code>ProposedChange</code> renders as a row with four must-show signals per Control Plane §12:
+  </p>
+
+  <ul>
+    <li><strong>Kind</strong> — file / api / database / message / external_action icon</li>
+    <li><strong>Policy state</strong> — <span class="chip green">pass</span> <span class="chip yellow">review_required</span> <span class="chip red">block</span></li>
+    <li><strong>Reversibility</strong> — <span class="chip green">reversible</span> <span class="chip yellow">reversible_within_window</span> <span class="chip red">irreversible</span>. First-class badge, never buried.</li>
+    <li><strong>Hoplon enforcement</strong> — AST/scope check result</li>
+  </ul>
+
+  <div class="callout block">
+    <div class="label">Hard rule from §12.6</div>
+    <p>If <code>policyState === 'block'</code>, the surface <strong>must not render an approval path</strong> for that change. Not a disabled button — no button at all. In the code, this is the early-return at the top of <code>&lt;DiffRow&gt;</code>&#39;s action cluster. Don&#39;t let product &quot;soften&quot; it.</p>
+  </div>
+
+  <h3>Diff preview rendering</h3>
+  <p>
+    For file changes, the prototype shows a simple <code>+ / −</code> plaintext block. Production should use Monaco (per §18) with syntax highlighting and a <span class="chip">!</span> gutter for Hoplon-flagged lines — see <code>scenarios.swe.diff[1]</code> where the <code>signToken</code> bridged assumption is flagged at line level.
+  </p>
+
+  <!-- ============ 08 ============ -->
+  <h2 id="h"><span class="num">08 — Decision Mode</span>The simple view</h2>
+
+  <p>
+    <code>decision.jsx</code> is the &quot;just tell me what to approve&quot; surface — the answer to the pushback that the full control room is too much for 90% of runs. It compresses the three panels into one column:
+  </p>
+
+  <ol>
+    <li>Intent (one sentence, directive only)</li>
+    <li>Proposed changes, each with inline approve / block</li>
+    <li>Per-card expansion reveals the diff preview and — <em>only if risky</em> — a single risk strip with the critique and suggestion</li>
+    <li>Execution plan is a drawer behind a &quot;See plan&quot; secondary button</li>
+  </ol>
+
+  <p>
+    The Simple/Advanced toggle in the chat overlay (<code>Semantix Chat.html</code>) flips between <code>DecisionMode</code> and the full <code>app.jsx</code> layout using the same underlying scenario data. This is important: one data source, two projections.
+  </p>
+
+  <div class="callout">
+    <div class="label">Design intent</div>
+    <p>Decision Mode is not a dumbed-down Debug Mode — it&#39;s the <strong>default</strong>. Users escalate to Advanced when a card surfaces real risk or when the overall plan needs scrutiny. The control surface should feel like a release PR, not a debugger.</p>
+  </div>
+
+  <!-- ============ 09 ============ -->
+  <h2 id="i"><span class="num">09 — Chat shell</span>Prompt → review → collapse</h2>
+
+  <p>
+    <code>Semantix Chat.html</code> wraps the review artifact in a conversation. The end-to-end loop from overview §An End-To-End Picture maps to these UI states:
+  </p>
+
+  <div class="flow">
+    <div class="step">
+      <div class="s-num">01</div>
+      <div class="s-title">Compose</div>
+      <div>User writes a prompt in the composer.</div>
+      <span class="s-code">onSend()</span>
+    </div>
+    <div class="step">
+      <div class="s-num">02</div>
+      <div class="s-title">Planning</div>
+      <div>Pending turn with spinner — backend compiles the blueprint.</div>
+      <span class="s-code">kind: 'review-pending'</span>
+    </div>
+    <div class="step">
+      <div class="s-num">03</div>
+      <div class="s-title">Review</div>
+      <div>Overlay opens with Decision or Advanced view.</div>
+      <span class="s-code">setReviewing(...)</span>
+    </div>
+    <div class="step">
+      <div class="s-num">04</div>
+      <div class="s-title">Approve</div>
+      <div>Per-change decisions accumulate.</div>
+      <span class="s-code">approvals[diffId]</span>
+    </div>
+    <div class="step">
+      <div class="s-num">05</div>
+      <div class="s-title">Collapse</div>
+      <div>Overlay closes, summary card replaces the pending turn.</div>
+      <span class="s-code">kind: 'review-summary'</span>
+    </div>
+  </div>
+
+  <p>
+    The summary card is not cosmetic — it&#39;s the audit stub. Each one carries <code>runId</code>, scenario, approved/blocked counts, and the intent directive. In production this card should link to the persisted review artifact from Control Plane §17 (the durable record with <code>artifactHash</code>, reviewer identity, timestamp, etc).
+  </p>
+
+  <!-- ============ 10 ============ -->
+  <h2 id="j"><span class="num">10 — Invariants</span>Freshness, invalidation, approvals</h2>
+
+  <p>
+    These are the three rules the prototype <em>stubs</em> but that a real implementation must enforce server-side. They are the difference between a demo and a governance layer.
+  </p>
+
+  <h3>Freshness (§5, §13)</h3>
+  <p>
+    Every rendered view is keyed to <code>{planVersion, graphVersion, artifactHash, intentContractVersion}</code>. Every mutating action submits those versions; the backend rejects mismatches with a stale-state error. The UI must surface this as a first-class path — refresh + re-open — not an exception toast.
+  </p>
+
+  <h3>Invalidation set (§14)</h3>
+  <table>
+    <thead><tr><th>Edit</th><th>Invalidates</th><th>Preserves</th></tr></thead>
+    <tbody>
+      <tr><td>Intent contract</td><td>Entire graph, all approvals, all diffs</td><td>Prior audit history</td></tr>
+      <tr><td>Context on node N</td><td>N, descendants, their critiques, affected diff entries</td><td>Unrelated sibling branches</td></tr>
+      <tr><td>Constraint on node N</td><td>N, validators using those constraints, descendants</td><td>Unrelated nodes</td></tr>
+      <tr><td>Tool/capability binding</td><td>N, descendants, capability overlays, prior-capability approvals</td><td>Unaffected branches</td></tr>
+      <tr><td>Verifier/model swap</td><td>Confidence, critique, approvals for affected nodes</td><td>Deterministic ancestors</td></tr>
+    </tbody>
+  </table>
+
+  <p>Invalidated nodes must transition to <code>stale</code>; any approval attached to a stale node is <strong>void until re-reviewed</strong>. In the UI this is a status color change plus an inline banner on the inspector. Never silently auto-re-approve.</p>
+
+  <h3>Policy-blocked ≠ disabled button</h3>
+  <p>
+    Per §16 acceptance criterion 7 and §12.6: a policy-blocked action must not be approvable through <em>any</em> UI path. The diff row in <code>diff.jsx</code> hides the approve control entirely when <code>policy === 'block'</code>. Don&#39;t regress this to a greyed-out button — users learn to double-click greyed controls.
+  </p>
+
+  <!-- ============ 11 ============ -->
+  <h2 id="k"><span class="num">11 — Path forward</span>From prototype to production</h2>
+
+  <p>The prototype covers the surface. Here&#39;s what needs backend contracts and what stays client-side:</p>
+
+  <h3>Backend work</h3>
+  <ul>
+    <li>Emit <code>ExecutionPlan</code> DTOs matching the shape in <code>scenarios.jsx</code>. Preserve field names.</li>
+    <li>Compute <code>confidenceScore</code> server-side from the four signals; client bands it per §11.4 thresholds.</li>
+    <li>Persist every review event as the durable record from §17 (<code>artifactId</code>, reviewer, action, reason, timestamp, hash).</li>
+    <li>Implement the invalidation set from §14 as a pure function; expose it to both the runtime and the replay tooling.</li>
+    <li>Version-check every mutating endpoint; return stale-state errors with current metadata so the UI can offer &quot;re-open on latest.&quot;</li>
+  </ul>
+
+  <h3>Client work</h3>
+  <ul>
+    <li>Replace hard-coded <code>x,y</code> in <code>graph.jsx</code> with a layout engine (dagre/elkjs under React Flow).</li>
+    <li>Normalize client state by <code>{nodeId, revision}</code> in a Zustand store.</li>
+    <li>Swap the plaintext diff preview for Monaco with Hoplon gutter markers.</li>
+    <li>Wire real intervention endpoints for the five actions in §10.4; treat each as a plan mutation, not a local toggle.</li>
+    <li>Add WebSocket updates so a long-running plan streams node status changes without full-page re-fetches.</li>
+  </ul>
+
+  <h3>What to leave for v2 (explicitly)</h3>
+  <p>The spec is clear about deferrals. Don&#39;t get talked into any of these early:</p>
+  <ul>
+    <li>Export UI for audit bundles (recording is v1; <em>export</em> is v2)</li>
+    <li>Multi-user presence / threaded review comments</li>
+    <li>Token-level provenance rendering</li>
+    <li>Real-time execution playback studio</li>
+    <li>Branch comparison / scenario simulation</li>
+  </ul>
+
+  <!-- ============ 12 ============ -->
+  <h2 id="l"><span class="num">12 — Acceptance checklist</span>Before calling it v1</h2>
+
+  <p>Control Plane §16 + Review Surface §16, inlined so you can tick them off against what&#39;s built:</p>
+
+  <ol>
+    <li>A reviewer can inspect the frozen intent contract, status, and plan version before approving.</li>
+    <li>The execution graph renders node types, dependencies, risk colors, approval gates, and <em>conditional</em> summary fields — no placeholder dashes.</li>
+    <li>The Node Inspector renders only populated sections and supports local interventions.</li>
+    <li>The State Diff panel shows proposed changes, policy state, Hoplon enforcement, and reversibility class.</li>
+    <li>Every mutating review action is freshness-checked; stale approvals are rejected server-side.</li>
+    <li>Every approve/reject/edit/execute event persists a durable review artifact record.</li>
+    <li>A policy-blocked action is never approvable through any UI path.</li>
+    <li>A reviewer can challenge one node and the system regenerates only the affected subgraph.</li>
+  </ol>
+
+  <div class="callout">
+    <div class="label">The one-line test</div>
+    <p>When a non-Semantix engineer opens the review surface for an unfamiliar run, within 30 seconds they should be able to say what the system is about to do, where it&#39;s guessing, and what needs their approval. If they can&#39;t, no amount of additional fidelity fixes it — the information architecture is wrong.</p>
+  </div>
+
+  <footer>
+    <div>Semantix Review Surface · Implementation Guide · v1 prototype reference</div>
+    <div>Cross-refs: <code>semantix-overview.md</code> · <code>Semantix Control Plane UI.md</code> · <code>semantix-review-surface-spec.md</code></div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+data/
+dist/
+*.log
+
+# Generated STX/control-plane runtime state.
+control-plane/data/
+control-plane/dist/
+packages/stx/data/
+packages/stx/dist/
+
+# Local design archive; keep the extracted design source instead.
+Design.zip

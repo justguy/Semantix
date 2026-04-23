@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Semantix — Control Surface</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    button { font-family: inherit; }
+    textarea { font-family: inherit; }
+    *::-webkit-scrollbar { width: 10px; height: 10px; }
+    *::-webkit-scrollbar-track { background: transparent; }
+    *::-webkit-scrollbar-thumb { background: rgba(128,128,128,.25); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+    *::-webkit-scrollbar-thumb:hover { background: rgba(128,128,128,.4); background-clip: content-box; border: 2px solid transparent; }
+    .tweaks-panel { position: fixed; bottom: 16px; right: 16px; z-index: 100; width: 260px;
+      background: var(--panel, #fff); border: 1px solid var(--border, #e7e5e0); border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.08); padding: 14px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="scenarios.jsx"></script>
+  <script type="text/babel" src="ui.jsx"></script>
+  <script type="text/babel" src="graph.jsx"></script>
+  <script type="text/babel" src="inspector.jsx"></script>
+  <script type="text/babel" src="diff.jsx"></script>
+  <script type="text/babel" src="phases.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "theme": "light",
+      "layout": "vertical"
+    }/*EDITMODE-END*/;
+
+    function Root() {
+      const [tweaks, setTweaks] = React.useState(TWEAK_DEFAULTS);
+      const [editMode, setEditMode] = React.useState(false);
+
+      React.useEffect(() => {
+        function onMsg(e) {
+          const d = e.data || {};
+          if (d.type === '__activate_edit_mode') setEditMode(true);
+          if (d.type === '__deactivate_edit_mode') setEditMode(false);
+        }
+        window.addEventListener('message', onMsg);
+        window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+        return () => window.removeEventListener('message', onMsg);
+      }, []);
+
+      function update(patch) {
+        const next = { ...tweaks, ...patch };
+        setTweaks(next);
+        window.parent.postMessage({ type: '__edit_mode_set_keys', edits: patch }, '*');
+      }
+
+      return (
+        <>
+          <SemantixApp forceTheme={tweaks.theme} forceLayout={tweaks.layout} />
+          {editMode && <TweaksPanel tweaks={tweaks} update={update} />}
+        </>
+      );
+    }
+
+    function TweaksPanel({ tweaks, update }) {
+      const t = THEMES[tweaks.theme];
+      const panelStyle = {
+        position: 'fixed', bottom: 16, right: 16, zIndex: 100, width: 240,
+        background: t.panel, border: `1px solid ${t.border}`, borderRadius: 12,
+        boxShadow: '0 8px 32px rgba(0,0,0,.12)', padding: 14, fontSize: 12,
+        fontFamily: 'inherit', color: t.text,
+      };
+      const rowStyle = { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 };
+      const labelStyle = { fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: t.textFaint };
+      const btnGroup = { display: 'flex', gap: 4, background: t.panelAlt, borderRadius: 6, padding: 2, border: `1px solid ${t.border}` };
+      const segBtn = (active) => ({
+        flex: 1, fontSize: 11, padding: '5px 8px', borderRadius: 4,
+        background: active ? t.panel : 'transparent',
+        color: active ? t.text : t.textDim,
+        border: 'none', cursor: 'pointer', fontWeight: 500,
+      });
+      return (
+        <div style={panelStyle}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>Tweaks</span>
+            <span style={{ fontSize: 10, color: t.textFaint, fontWeight: 400 }}>· live</span>
+          </div>
+          <div style={rowStyle}>
+            <div style={labelStyle}>Theme</div>
+            <div style={btnGroup}>
+              {['light', 'dark'].map(k => (
+                <button key={k} onClick={() => update({ theme: k })} style={segBtn(tweaks.theme === k)}>{k}</button>
+              ))}
+            </div>
+          </div>
+          <div style={rowStyle}>
+            <div style={labelStyle}>Graph layout</div>
+            <div style={btnGroup}>
+              {['vertical', 'horizontal', 'radial'].map(k => (
+                <button key={k} onClick={() => update({ layout: k })} style={segBtn(tweaks.layout === k)}>{k}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+  </script>
+</body>
+</html>

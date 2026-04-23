@@ -1,0 +1,1234 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Semantix - How It Works</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf9;
+      --panel-alt: #f1ece3;
+      --border: #ddd4c7;
+      --border-strong: #c8bcac;
+      --text: #201c16;
+      --text-dim: #64594d;
+      --text-faint: #8d8273;
+      --accent: #2d6a4f;
+      --accent-soft: #e6f0ea;
+      --accent-text: #1f4d39;
+      --green: #2d6a4f;
+      --green-soft: #e7f3ec;
+      --yellow: #b8791f;
+      --yellow-soft: #fbf2df;
+      --orange: #c76b1c;
+      --orange-soft: #f8eadc;
+      --red: #a8413a;
+      --red-soft: #f8e9e6;
+      --info: #3a5f7f;
+      --info-soft: #e7eef4;
+      --shadow: 0 10px 32px rgba(32, 28, 22, 0.08), 0 2px 6px rgba(32, 28, 22, 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at top left, rgba(45, 106, 79, 0.08), transparent 28%),
+        radial-gradient(circle at top right, rgba(184, 121, 31, 0.08), transparent 24%),
+        linear-gradient(180deg, #f8f4ec 0%, var(--bg) 46%, #efe9dd 100%);
+      color: var(--text);
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      padding: 36px 22px 64px;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    code, pre {
+      font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    }
+
+    .page {
+      max-width: 1280px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .hero {
+      background: linear-gradient(145deg, rgba(255, 253, 249, 0.96), rgba(245, 239, 230, 0.96));
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(45, 106, 79, 0.06), transparent 38%),
+        linear-gradient(180deg, transparent, rgba(184, 121, 31, 0.08));
+      pointer-events: none;
+    }
+
+    .hero-inner {
+      position: relative;
+      padding: 26px 28px 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .nav-links,
+    .hero-chips,
+    .stage-meta,
+    .lane-glossary,
+    .constraint-row,
+    .capability-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .pill,
+    .link-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      border: 1px solid transparent;
+    }
+
+    .pill {
+      background: var(--panel-alt);
+      color: var(--text-dim);
+    }
+
+    .pill.accent {
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    .pill.green {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .pill.yellow {
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .pill.orange {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .pill.red {
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
+    .link-pill {
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .link-pill.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .eyebrow {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(36px, 5vw, 58px);
+      line-height: 0.96;
+      letter-spacing: -1.8px;
+      max-width: 900px;
+    }
+
+    .lead {
+      max-width: 920px;
+      font-size: 18px;
+      line-height: 1.65;
+      color: var(--text-dim);
+    }
+
+    .section {
+      background: rgba(255, 253, 249, 0.88);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: end;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.05;
+      letter-spacing: -0.8px;
+    }
+
+    .section-head p {
+      margin: 0;
+      max-width: 680px;
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-dim);
+    }
+
+    .architecture-rail {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 14px;
+      position: relative;
+    }
+
+    .stage {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      position: relative;
+      min-height: 200px;
+    }
+
+    .stage:not(:last-child)::after {
+      content: "->";
+      position: absolute;
+      right: -14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-faint);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 16px;
+      z-index: 1;
+    }
+
+    .stage-number {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-bottom: 10px;
+    }
+
+    .stage h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .stage p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.58;
+      color: var(--text-dim);
+    }
+
+    .stage ul {
+      margin: 12px 0 0;
+      padding-left: 18px;
+      color: var(--text-dim);
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
+
+    .swimlanes {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .lane-label {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      position: sticky;
+      top: 18px;
+    }
+
+    .lane-label h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.05;
+    }
+
+    .lane-label p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--text-dim);
+    }
+
+    .lane-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 100%;
+    }
+
+    .card h4 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .card p,
+    .card li,
+    .card td {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+    }
+
+    .card p:last-child {
+      margin-bottom: 0;
+    }
+
+    .code-card pre {
+      margin: 0;
+      padding: 16px;
+      border-radius: 14px;
+      background: #161310;
+      color: #f0eadc;
+      font-size: 12px;
+      line-height: 1.7;
+      overflow: auto;
+    }
+
+    .glossary-grid,
+    .compile-grid,
+    .review-grid,
+    .execution-grid,
+    .mapping-grid,
+    .lifecycle-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel-alt);
+      padding: 12px;
+    }
+
+    .mini-card strong,
+    .mapping-row strong,
+    .lifecycle-step strong {
+      display: block;
+      color: var(--text);
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .mini-card p,
+    .mapping-row p,
+    .lifecycle-step p {
+      margin: 0;
+      font-size: 12.5px;
+      line-height: 1.55;
+      color: var(--text-dim);
+    }
+
+    .constraint-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1px;
+    }
+
+    .constraint-tag.hard {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .constraint-tag.soft {
+      background: var(--yellow-soft);
+      color: var(--yellow);
+    }
+
+    .constraint-tag.hybrid {
+      background: var(--orange-soft);
+      color: var(--orange);
+    }
+
+    .control-surface-mock {
+      border: 1px solid var(--border-strong);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .mock-top,
+    .mock-bottom {
+      padding: 12px 14px;
+      background: var(--panel-alt);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .mock-bottom {
+      border-top: 1px solid var(--border);
+      border-bottom: none;
+    }
+
+    .mock-body {
+      display: grid;
+      grid-template-columns: 1.08fr 0.95fr 1.08fr;
+      min-height: 230px;
+    }
+
+    .mock-pane {
+      border-right: 1px solid var(--border);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--panel);
+    }
+
+    .mock-pane:last-child {
+      border-right: none;
+      background: #f6f1e8;
+    }
+
+    .mock-pane h5 {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    .mock-node,
+    .mock-row,
+    .runtime-box,
+    .mapping-row,
+    .lifecycle-step {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel-alt);
+      padding: 10px 11px;
+    }
+
+    .mock-node.green {
+      border-color: rgba(45, 106, 79, 0.28);
+      background: var(--green-soft);
+    }
+
+    .mock-node.orange {
+      border-color: rgba(199, 107, 28, 0.28);
+      background: var(--orange-soft);
+    }
+
+    .mock-node.red {
+      border-color: rgba(168, 65, 58, 0.28);
+      background: var(--red-soft);
+    }
+
+    .mono {
+      font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    .runtime-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .runtime-box h5 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-faint);
+    }
+
+    .runtime-box strong {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .runtime-box p {
+      margin: 0;
+    }
+
+    .runtime-box ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+    }
+
+    .lifecycle-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    .lifecycle-step {
+      position: relative;
+      min-height: 150px;
+    }
+
+    .lifecycle-step:not(:last-child)::after {
+      content: "->";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      transform: translateY(-50%);
+      color: var(--text-faint);
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 15px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    td {
+      vertical-align: top;
+      padding: 10px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    td:first-child {
+      width: 28%;
+      padding-right: 14px;
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .footer-note {
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: var(--text-dim);
+    }
+
+    @media (max-width: 1120px) {
+      .architecture-rail,
+      .runtime-flow,
+      .lifecycle-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .stage:not(:last-child)::after,
+      .lifecycle-step:not(:last-child)::after {
+        content: none;
+      }
+    }
+
+    @media (max-width: 960px) {
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .lane-label {
+        position: static;
+      }
+
+      .lane-body,
+      .glossary-grid,
+      .compile-grid,
+      .review-grid,
+      .execution-grid,
+      .mapping-grid,
+      .runtime-flow,
+      .architecture-rail,
+      .lifecycle-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-body {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-pane {
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .mock-pane:last-child {
+        border-bottom: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="nav">
+          <div class="nav-links">
+            <a class="link-pill primary" href="/">Open Control Surface</a>
+            <a class="link-pill" href="/Design/Semantix%20Implementation%20Guide.html">UI implementation guide</a>
+          </div>
+          <div class="hero-chips">
+            <span class="pill accent">Language</span>
+            <span class="pill accent">Compiler</span>
+            <span class="pill accent">Control plane</span>
+            <span class="pill accent">Review surface</span>
+            <span class="pill accent">Runtime adapters</span>
+          </div>
+        </div>
+
+        <div class="eyebrow">Semantic programming model</div>
+        <h1>How Semantix translates intent into governed AI execution</h1>
+        <p class="lead">
+          Semantix is a semantic programming language that translates human intent into bounded,
+          verifiable execution for LLMs.
+        </p>
+        <p class="lead" style="font-size: 16px; max-width: 980px;">
+          Humans think in goals, constraints, and outcomes. LLMs operate on tokens, probabilities,
+          and pattern completion. Semantix bridges that gap by compiling intent into executable
+          semantic contracts, then governing what the model is allowed to propose before anything
+          becomes real.
+        </p>
+        <div class="hero-chips">
+          <span class="pill accent">Translation layer</span>
+          <span class="pill green">LLMs propose actions</span>
+          <span class="pill">Semantix decides what becomes real</span>
+          <span class="pill green">Model proposes</span>
+          <span class="pill">Deterministic runtime decides</span>
+          <span class="pill accent">Every semantic node = compiled <code>~&gt;</code></span>
+          <span class="pill yellow">Freshness-bound approval</span>
+          <span class="pill orange">Hard / soft_verified / hybrid constraints</span>
+          <span class="pill red">No transcript-derived authority</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">The gap</div>
+          <h2>Humans and LLMs speak different languages</h2>
+        </div>
+        <p>
+          The core problem is not that models are weak. It is that humans and LLMs operate in
+          different representations, and today we mostly bridge that gap with prompts, glue code,
+          and hope.
+        </p>
+      </div>
+
+      <div class="mapping-grid">
+        <div class="mapping-row">
+          <strong>Humans think in</strong>
+          <p>intent, goals, constraints, invariants, and outcomes.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>LLMs operate in</strong>
+          <p>tokens, patterns, probabilities, and completions.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>Without Semantix</strong>
+          <p>Human -> English prompt -> LLM -> output -> hope it does the right thing.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>With Semantix</strong>
+          <p>Human -> Intent -> Semantix -> Contract -> LLM -> verified execution.</p>
+        </div>
+      </div>
+
+      <p class="footer-note" style="margin-top: 16px;">
+        Semantix is to LLM execution what a compiler is to CPUs: it translates human intent into
+        bounded machine behavior that can be inspected, challenged, and approved before it becomes
+        real.
+      </p>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">System view</div>
+          <h2>The full stack in one picture</h2>
+        </div>
+        <p>
+          Semantix is not just a governance UI over agents. It is a semantic programming model and
+          translation layer for LLM execution. The review surface is one rendering over control-plane
+          truth; the control plane itself sits between Semantix authoring and pluggable execution
+          backends.
+        </p>
+      </div>
+
+      <div class="architecture-rail">
+        <article class="stage">
+          <div class="stage-number">1. Authoring</div>
+          <h3>Semantix language surface</h3>
+          <p>Authors declare semantic work explicitly with <code>context</code>, <code>constraint</code>, and <code>~&gt;</code>.</p>
+          <ul>
+            <li>Scope what the model can see</li>
+            <li>State what rules must hold</li>
+            <li>Mark the exact semantic boundary</li>
+          </ul>
+        </article>
+
+        <article class="stage">
+          <div class="stage-number">2. Compile + govern</div>
+          <h3>Compiler + Semantix Control Plane</h3>
+          <p>Semantic intent becomes versioned contracts, graph structure, validators, policy checks, and approval gates.</p>
+          <ul>
+            <li><code>IntentContract</code></li>
+            <li><code>ExecutionPlan</code> + <code>ExecutionNode</code></li>
+            <li><code>StateEffect</code> previews + checkpoints</li>
+          </ul>
+        </article>
+
+        <article class="stage">
+          <div class="stage-number">3. Review</div>
+          <h3>Review Surface clients</h3>
+          <p>The browser UI and terminal-native clients render the same artifact and approval semantics.</p>
+          <ul>
+            <li>Intent bar</li>
+            <li>Execution graph + node inspector</li>
+            <li>State diff + approval workflow</li>
+          </ul>
+        </article>
+
+        <article class="stage">
+          <div class="stage-number">4. Select + dispatch</div>
+          <h3>Runtime registry + adapters</h3>
+          <p>The control plane chooses a runtime binding per executable node, then dispatches only after fresh approval.</p>
+          <ul>
+            <li>Capability lookup</li>
+            <li>Adapter selection</li>
+            <li>Normalized events back to the artifact</li>
+          </ul>
+        </article>
+
+        <article class="stage">
+          <div class="stage-number">5. Execute</div>
+          <h3>Runtime backends</h3>
+          <p>Codex is phase 1. The architecture stays open to Phalanx, provider-backed executors, and multi-model runtimes later.</p>
+          <ul>
+            <li>Local CLI runtime</li>
+            <li>Domain runtime</li>
+            <li>Provider-backed executor</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Swimlanes</div>
+          <h2>Author -> compile -> review -> execute</h2>
+        </div>
+        <p>
+          The language/runtime thesis becomes real only when the four lanes connect: authoring,
+          compilation, review, and runtime execution all participate in one governed flow.
+        </p>
+      </div>
+
+      <div class="swimlanes">
+        <div class="lane">
+          <aside class="lane-label">
+            <div class="eyebrow">Lane 1</div>
+            <h3>Authoring</h3>
+            <p>The author writes intent and invariants in Semantix, not a giant prompt. Semantic regions are fenced and typed from the start.</p>
+          </aside>
+          <div class="lane-body">
+            <article class="card code-card">
+              <h4>Example Semantix region</h4>
+              <pre><code>with context { repo_files, auth_routes } {
+  constraint VerifyFlow {
+    token_must_be_single_use: true,
+    must_not_use_prod_smtp: true,
+    login_blocked_until_verified: true
+  }
+
+  patch ~&gt; "Add email verification to signup flow" :: VerifyFlow;
+}</code></pre>
+            </article>
+
+            <article class="card">
+              <h4>The language primitives carry real semantics</h4>
+              <div class="glossary-grid">
+                <div class="mini-card">
+                  <strong><code>context</code></strong>
+                  <p>Defines the exact working set visible to the semantic step. It is a scope boundary, not a comment.</p>
+                </div>
+                <div class="mini-card">
+                  <strong><code>constraint</code></strong>
+                  <p>Declares the rules a result must satisfy. These compile into validators, policies, or escalation duties.</p>
+                </div>
+                <div class="mini-card">
+                  <strong><code>~&gt;</code></strong>
+                  <p>Marks the semantic boundary explicitly: deterministic code stops here, candidate generation begins here.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Typed admission</strong>
+                  <p>Generated output does not become trusted state until it re-enters through deterministic parsing and validation.</p>
+                </div>
+              </div>
+              <p style="margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-dim);">
+                Put bluntly, <code>~&gt;</code> is where the model is allowed to think. Everything downstream
+                in Semantix exists to govern what happens after that invocation.
+              </p>
+              <div class="mapping-grid" style="margin-top: 12px;">
+                <div class="mini-card">
+                  <strong><code>context</code></strong>
+                  <p>What the model is allowed to see.</p>
+                </div>
+                <div class="mini-card">
+                  <strong><code>constraint</code></strong>
+                  <p>What must be true.</p>
+                </div>
+                <div class="mini-card">
+                  <strong><code>~&gt;</code></strong>
+                  <p>Where the model is allowed to propose.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Everything after</strong>
+                  <p>Is verified, policy-checked, freshness-bound, and reviewed before it becomes real.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="lane">
+          <aside class="lane-label">
+            <div class="eyebrow">Lane 2</div>
+            <h3>Compile</h3>
+            <p>Semantix compiles human intent into a versioned execution contract the system can review, enforce, and route to runtimes.</p>
+          </aside>
+          <div class="lane-body">
+            <article class="card">
+              <h4>Compile-time outputs</h4>
+              <div class="compile-grid">
+                <div class="mini-card">
+                  <strong><code>IntentContract</code></strong>
+                  <p>Frozen directive, strict boundaries, success state, and contract version.</p>
+                </div>
+                <div class="mini-card">
+                  <strong><code>ExecutionPlan</code></strong>
+                  <p>Versioned graph, dependencies, approval gates, checkpoints, and state-effect previews.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Validators + policy checks</strong>
+                  <p>Hard checks, semantic verification plans, and approval-required boundaries are attached before execution starts.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Runtime bindings</strong>
+                  <p>Executable nodes are annotated with the runtime family and adapter target that will carry them out later.</p>
+                </div>
+              </div>
+            </article>
+
+            <article class="card code-card">
+              <h4>What <code>~&gt;</code> compiles into</h4>
+              <pre><code>with context { routes, auth_logic } {
+  constraint VerifyFlow {
+    token_must_be_single_use: true,
+    must_not_use_prod_smtp: true
+  }
+
+  patch ~&gt; "Add email verification endpoint" :: VerifyFlow;
+}
+
+ExecutionNode {
+  nodeType: "semantic",
+  title: "Draft verify endpoint",
+  inputSummary: "routes, auth_logic",
+  constraints: VerifyFlow,
+  approvalRequired: true
+}</code></pre>
+              <p style="margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-dim);">
+                Every semantic node in the graph is the compiled form of one <code>~&gt;</code> invocation.
+                The UI does not show <code>~&gt;</code> directly. It shows the node, critique, diff, and
+                approval machinery produced around it.
+              </p>
+            </article>
+
+            <article class="card">
+              <h4>Constraint classification and runtime ownership</h4>
+              <div class="constraint-row" style="margin-bottom: 12px;">
+                <span class="constraint-tag hard">hard</span>
+                <span class="constraint-tag soft">soft_verified</span>
+                <span class="constraint-tag hybrid">hybrid</span>
+              </div>
+              <p>
+                The compiler classifies each constraint as <code>hard</code>, <code>soft_verified</code>, or
+                <code>hybrid</code>. When the boundary is ambiguous, the safe default is hybrid: run the best
+                deterministic check available, then add semantic verification and escalation rules.
+              </p>
+              <div class="mapping-grid" style="margin-top: 12px;">
+                <div class="mini-card">
+                  <strong>Compile-time behavior</strong>
+                  <p>Build the plan, bind capabilities, attach validators, compute approval gates, and generate artifact hashes.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Runtime behavior</strong>
+                  <p>Freshness-check mutating actions, reject stale approvals, pause at gates, dispatch approved work, and merge normalized events back in.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="lane">
+          <aside class="lane-label">
+            <div class="eyebrow">Lane 3</div>
+            <h3>Review</h3>
+            <p>The Review Surface is where trust forms. It lets humans inspect the compiled consequences of model speculation before reality changes.</p>
+          </aside>
+          <div class="lane-body">
+            <article class="card">
+              <h4>The control surface appears here</h4>
+              <div class="control-surface-mock">
+                <div class="mock-top">
+                  <span>IntentContract · plan v7 · graph v12 · hash: 9cbf12a7</span>
+                  <span>freshness: fresh</span>
+                </div>
+                <div class="mock-body">
+                  <div class="mock-pane">
+                    <h5>Execution graph</h5>
+                    <div class="mock-node green">
+                      <strong>Load auth routes</strong>
+                      <div class="mono">deterministic · grounded</div>
+                    </div>
+                    <div class="mock-node orange">
+                      <strong>Draft signup verification patch</strong>
+                      <div class="mono">compiled ~&gt; · semantic · hybrid constraints</div>
+                    </div>
+                    <div class="mock-node red">
+                      <strong>Approval gate before Codex CLI</strong>
+                      <div class="mono">fresh human approval required</div>
+                    </div>
+                  </div>
+                  <div class="mock-pane">
+                    <h5>Node inspector</h5>
+                    <div class="mock-row">
+                      <strong>Context</strong>
+                      <p>repo_files, auth_routes, capability scope, runtime binding, critique, confidence band</p>
+                    </div>
+                    <div class="mock-row">
+                      <strong>Constraints</strong>
+                      <p>single-use token, no prod SMTP, blocked login until verified</p>
+                    </div>
+                    <div class="mock-row">
+                      <strong>Interventions</strong>
+                      <p>edit context, tighten constraints, split node, regenerate, mark approval-required</p>
+                    </div>
+                  </div>
+                  <div class="mock-pane">
+                    <h5>State diff</h5>
+                    <div class="mock-row">
+                      <strong>files</strong>
+                      <p>signup route, verification token service, email transport config</p>
+                    </div>
+                    <div class="mock-row">
+                      <strong>risk</strong>
+                      <p>policy checks, reversibility, AST enforcement, blocked actions surfaced before execute</p>
+                    </div>
+                    <div class="mock-row">
+                      <strong>approval</strong>
+                      <p>approve, block, require changes, freshness-bound execute</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="mock-bottom">
+                  <span>Humans approve structure, not vibes.</span>
+                  <span>Execute only after fresh approval.</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <h4>What the UI is actually showing when you see a semantic node</h4>
+              <div class="review-grid">
+                <div class="mini-card">
+                  <strong>SEM node in graph</strong>
+                  <p>One compiled <code>~&gt;</code> invocation rendered as an <code>ExecutionNode</code>.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Context scope</strong>
+                  <p>The compiled form of <code>context { ... }</code>: what that semantic step is allowed to see.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Constraints</strong>
+                  <p>The compiled form of <code>constraint { ... }</code>, including hard, soft_verified, and hybrid checks.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Weak grounding</strong>
+                  <p>A signal that the <code>~&gt;</code> invocation is bridging assumptions rather than staying well-evidenced.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Diff / proposed changes</strong>
+                  <p>The candidate externally visible output produced by the <code>~&gt;</code> step and later nodes around it.</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Approval</strong>
+                  <p>The admission decision on whether the result of that <code>~&gt;</code> invocation may continue toward reality.</p>
+                </div>
+              </div>
+              <p style="margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--text-dim);">
+                The key distinction is that the control surface is showing the consequences of
+                <code> ~&gt; </code>, not the operator itself.
+              </p>
+            </article>
+
+            <article class="card">
+              <h4>What the reviewer is actually deciding</h4>
+              <div class="review-grid">
+                <div class="mini-card">
+                  <strong>Did the system understand the task?</strong>
+                  <p>Is the intent contract right, or did semantic drift begin before execution?</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Is the context bounded correctly?</strong>
+                  <p>Are the right sources visible, and are dangerous sources excluded?</p>
+                </div>
+                <div class="mini-card">
+                  <strong>Are constraints and policies sufficient?</strong>
+                  <p>Do the compiled checks match the real safety requirement, or is review still needed?</p>
+                </div>
+                <div class="mini-card">
+                  <strong>What will become real if this continues?</strong>
+                  <p>Files, APIs, databases, and external actions are previewed before they are allowed to execute.</p>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="lane">
+          <aside class="lane-label">
+            <div class="eyebrow">Lane 4</div>
+            <h3>Execute</h3>
+            <p>The control plane governs execution. The adapter bridges into a runtime. The runtime proposes outputs and actions inside the contract; Semantix decides what is allowed to become real.</p>
+          </aside>
+          <div class="lane-body">
+            <article class="card">
+              <h4>What runs underneath this UI?</h4>
+              <div class="runtime-flow">
+                <div class="runtime-box">
+                  <h5>Control plane</h5>
+                  <strong>Owns truth</strong>
+                  <p>Intent lifecycle, plan compilation, approval gating, freshness checks, audit recording, checkpoints, event streaming.</p>
+                </div>
+                <div class="runtime-box">
+                  <h5>Registry</h5>
+                  <strong>Selects adapters</strong>
+                  <p>Tracks runtime capabilities, validates adapter contracts, and resolves runtime bindings for executable nodes.</p>
+                </div>
+                <div class="runtime-box">
+                  <h5>Adapter</h5>
+                  <strong>Bridges Semantix to a runtime</strong>
+                  <p>Normalizes prompts in, structured events and effects out, plus pause/resume/cancel hooks.</p>
+                </div>
+                <div class="runtime-box">
+                  <h5>Runtime backend</h5>
+                  <strong>Does the work</strong>
+                  <p>Codex in phase 1. Later: Phalanx, provider-backed executors, or another runtime family.</p>
+                </div>
+              </div>
+              <div class="capability-row" style="margin-top: 12px;">
+                <span class="pill">Control plane decides</span>
+                <span class="pill green">Adapter translates</span>
+                <span class="pill yellow">Runtime executes</span>
+              </div>
+            </article>
+
+            <article class="card">
+              <h4>Concrete phase-1 code path</h4>
+              <table>
+                <tr>
+                  <td>Application wiring</td>
+                  <td><code>control-plane/src/index.js</code> creates the store, registry, Codex adapter, service, and HTTP server.</td>
+                </tr>
+                <tr>
+                  <td>Intent + compile</td>
+                  <td><code>ControlPlaneService.createOrUpdateIntent()</code> and <code>compilePlan()</code> draft the intent and emit the review artifact.</td>
+                </tr>
+                <tr>
+                  <td>Contract assembly</td>
+                  <td><code>contracts.js</code> builds the <code>ExecutionPlan</code>, nodes, approval gates, checkpoints, artifact hash, and freshness helpers.</td>
+                </tr>
+                <tr>
+                  <td>Adapter selection</td>
+                  <td><code>RuntimeRegistry.selectRuntimeForNode()</code> resolves the runtime binding for an executable node.</td>
+                </tr>
+                <tr>
+                  <td>Runtime execution</td>
+                  <td><code>CodexCliRuntimeAdapter.executeNode()</code> runs approved work and returns normalized output, state effects, risk signals, and events.</td>
+                </tr>
+                <tr>
+                  <td>Browser + stx clients</td>
+                  <td><code>http/server.js</code> serves the same artifact and SSE stream to both browser and terminal-native clients.</td>
+                </tr>
+              </table>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Node lifecycle</div>
+          <h2>How one semantic node becomes governed execution</h2>
+        </div>
+        <p>
+          This is the shortest answer to "how does a node get compiled and executed?" The adapter fits
+          after review and before the runtime backend, not in place of the control plane.
+        </p>
+      </div>
+
+      <div class="lifecycle-grid">
+        <div class="lifecycle-step">
+          <strong>1. Author</strong>
+          <p>A Semantix region declares a semantic task with explicit context, constraints, and a <code>~&gt;</code> invocation.</p>
+        </div>
+        <div class="lifecycle-step">
+          <strong>2. Classify</strong>
+          <p>The compiler classifies constraints as hard, soft_verified, or hybrid and binds capabilities.</p>
+        </div>
+        <div class="lifecycle-step">
+          <strong>3. Emit</strong>
+          <p>The control plane emits one semantic <code>ExecutionNode</code> for that <code>~&gt;</code> invocation, plus validators, approval gates, and effect previews.</p>
+        </div>
+        <div class="lifecycle-step">
+          <strong>4. Review</strong>
+          <p>The Review Surface renders graph, inspector, and diff so a human can review the compiled consequences of that <code>~&gt;</code> call.</p>
+        </div>
+        <div class="lifecycle-step">
+          <strong>5. Dispatch</strong>
+          <p>The runtime registry selects the node's adapter and the control plane dispatches only after approval.</p>
+        </div>
+        <div class="lifecycle-step">
+          <strong>6. Merge back</strong>
+          <p>The adapter returns normalized events, state effects, and risk signals, which the control plane merges into the artifact and audit trail.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">Why this page exists</div>
+          <h2>What this companion artifact clarifies</h2>
+        </div>
+        <p>
+          The control surface mock proves the trust model. This page explains the implementation model
+          and language/runtime thesis that sit underneath it.
+        </p>
+      </div>
+
+      <div class="mapping-grid">
+        <div class="mapping-row">
+          <strong>What actually runs underneath?</strong>
+          <p>The Semantix Control Plane governs artifacts, approval, freshness, audit, and adapter dispatch. Runtime backends perform approved work through an adapter boundary.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>Where do adapters fit?</strong>
+          <p>Adapters live below the control plane and above the runtime backend. They translate Semantix nodes into runtime-specific execution and normalize results back up.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>Where is the language thesis?</strong>
+          <p>It starts at authoring: <code>context</code>, <code>constraint</code>, <code>~&gt;</code>, typed admission, and explicit constraint classes all exist before the UI ever renders.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>Where is <code>~&gt;</code> in the product?</strong>
+          <p>Not in the diff panel or graph chrome itself. It lives at the compilation boundary, and every semantic node is the compiled form of one <code>~&gt;</code> invocation.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>Why is this more than a runtime shell?</strong>
+          <p>Because Semantix supplies the language surface, compiler, control-plane contracts, review model, and approval semantics that remain stable even when the runtime changes.</p>
+        </div>
+        <div class="mapping-row">
+          <strong>What is the core shift?</strong>
+          <p>We moved from prompting models to programming their boundaries. LLMs do not simply generate answers here; they propose actions inside a contract.</p>
+        </div>
+      </div>
+
+      <p class="footer-note" style="margin-top: 16px;">
+        Phase 1 remains intentionally narrow: one adapter, one active backend per run, Codex as the
+        initial execution plug. The architecture stays broader than that first implementation slice.
+      </p>
+    </section>
+  </div>
+</body>
+</html>

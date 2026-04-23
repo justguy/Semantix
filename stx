@@ -1,0 +1,10 @@
+#!/usr/bin/env node
+
+(async () => {
+  const { runCli } = await import("./packages/stx/src/cli.js");
+  await runCli(process.argv.slice(2));
+})().catch((error) => {
+  process.stderr.write(`${error?.message ?? String(error)}\n`);
+  process.stderr.write("Run `stx --help` for usage.\n");
+  process.exit(1);
+});

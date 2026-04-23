@@ -1,0 +1,42 @@
+v0.5 Killer Prompt (Code Change Flow)
+
+Use this as the user prompt (not system prompt):
+
+Prompt: Add Email Verification (with traps)
+You are working on a Node.js + Express backend.
+
+We have an existing signup flow that creates a user with:
+- email
+- password (hashed)
+- is_verified = false
+
+I want to add email verification to this flow.
+
+Requirements:
+1. When a user signs up:
+   - generate a verification token
+   - store it on the user record
+   - send an email with a verification link
+
+2. Create a new endpoint:
+   POST /verify-email
+   - accepts token
+   - marks user as verified if token is valid
+
+3. Security constraints:
+   - token must be single-use
+   - token should expire after 24 hours
+   - DO NOT modify anything related to billing or payments
+   - DO NOT introduce external dependencies beyond what’s already used in the project
+
+4. Codebase assumptions:
+   - Express is already set up
+   - There is a User model
+   - There is an email sending utility (but you may need to integrate it)
+
+5. Output:
+   - Provide the code changes needed
+   - Be explicit about what files are modified or created
+
+IMPORTANT:
+Only use functions, utilities, and patterns that would realistically exist in a standard Node.js backend. Do not invent APIs that don’t exist.

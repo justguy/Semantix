@@ -1,0 +1,13 @@
+{
+  "name": "semantix-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "control-plane"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "build:ui": "npm run build:ui --workspace @semantix/stx",
+    "preview:ui": "npm run preview:ui --workspace @semantix/stx"
+  }
+}

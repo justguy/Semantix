@@ -1,0 +1,12 @@
+{
+  "name": "@semantix/runtime-codex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./codex-cli-runtime-adapter": "./src/codex-cli-runtime-adapter.js",
+    "./connectors/codex-cli-connector": "./src/connectors/codex-cli-connector.js",
+    "./connectors/codex-app-server-connector": "./src/connectors/codex-app-server-connector.js"
+  }
+}

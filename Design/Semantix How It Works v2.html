@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Semantix — How It Works</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #faf8f4;
+    --paper: #ffffff;
+    --ink: #1d1b17;
+    --ink-2: #3a3730;
+    --ink-3: #58544c;
+    --ink-4: #8a8578;
+    --rule: #e8e4dc;
+    --rule-2: #d8d2c6;
+    --accent: #2d6a4f;
+    --accent-soft: #e6f0ea;
+    --warn: #b8791f;
+    --warn-soft: #fbf2df;
+    --block: #a8413a;
+    --block-soft: #f8e9e6;
+    --code-bg: #1d1b17;
+    --code-ink: #e8e4dc;
+    --code-dim: #8a8578;
+    --code-str: #e8c27a;
+    --code-key: #b8d6a8;
+    --code-mark: #e89a9a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 56px 48px 140px; }
+
+  /* --- Masthead --- */
+  .masthead { border-bottom: 1px solid var(--rule); padding-bottom: 36px; margin-bottom: 64px; }
+  .eyebrow {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
+  }
+  h1 {
+    font-family: Georgia, 'Times New Roman', Times, serif; font-weight: 500;
+    font-size: clamp(34px, 4.5vw, 52px); line-height: 1.08; letter-spacing: -0.02em;
+    margin: 14px 0 20px; max-width: 18ch; text-wrap: balance;
+  }
+  .lede { font-size: 19px; line-height: 1.55; color: var(--ink-3); max-width: 58ch; text-wrap: pretty; margin: 0; }
+
+  /* --- Hero diagram: the whole page in miniature --- */
+  .hero-diagram {
+    margin-top: 44px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .hero-diagram .cell {
+    padding: 20px 22px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    position: relative;
+  }
+  .hero-diagram .cell + .cell { border-left: 1px solid var(--rule); }
+  .hero-diagram .cell + .cell::before {
+    content: '';
+    position: absolute; left: -8px; top: 50%;
+    width: 14px; height: 14px;
+    background: var(--bg);
+    border-top: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    transform: translateY(-50%) rotate(45deg);
+    z-index: 1;
+  }
+  .hero-diagram .k {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-4); margin-bottom: 8px;
+  }
+  .hero-diagram .v {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 13px; font-weight: 500;
+    color: var(--ink); margin-bottom: 6px;
+  }
+  .hero-diagram .d { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; }
+  .hero-diagram .cell:nth-child(2) .v { color: var(--accent); }
+
+  /* --- Section heading --- */
+  h2 {
+    font-family: Georgia, 'Times New Roman', Times, serif; font-weight: 500;
+    font-size: 30px; line-height: 1.2; letter-spacing: -0.012em;
+    margin: 96px 0 6px;
+  }
+  h2 .num {
+    display: block;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .dek { font-size: 17px; color: var(--ink-3); max-width: 60ch; margin: 10px 0 32px; text-wrap: pretty; }
+
+  p { margin: 0 0 16px; text-wrap: pretty; }
+  p code, li code, td code {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 0.86em;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap;
+  }
+
+  /* --- Follow one node: the interactive --- */
+  .follow {
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .follow-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border-bottom: 1px solid var(--rule);
+    background: #f4f0e9;
+  }
+  .follow-tab {
+    padding: 18px 20px 16px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    border-right: 1px solid var(--rule);
+    transition: background .15s;
+    position: relative;
+  }
+  .follow-tab:last-child { border-right: none; }
+  .follow-tab:hover { background: #ede8df; }
+  .follow-tab[aria-selected="true"] {
+    background: var(--paper);
+    box-shadow: inset 0 3px 0 var(--accent);
+  }
+  .follow-tab .step-num {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--ink-4); display: block; margin-bottom: 4px;
+  }
+  .follow-tab[aria-selected="true"] .step-num { color: var(--accent); }
+  .follow-tab .step-title { font-size: 14px; font-weight: 600; color: var(--ink); display: block; }
+  .follow-tab .step-sub { font-size: 12px; color: var(--ink-3); display: block; margin-top: 2px; font-weight: 400; }
+
+  .follow-stage {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 480px;
+  }
+  .follow-stage.single { grid-template-columns: 1fr; }
+  .follow-stage[hidden] { display: none; }
+  .follow-pane { padding: 28px 30px; }
+  .follow-pane + .follow-pane { border-left: 1px solid var(--rule); background: #fdfbf7; }
+  .pane-label {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4);
+    margin-bottom: 14px;
+  }
+  .pane-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+  .pane-body p { margin: 0 0 12px; }
+  .pane-body p:last-child { margin-bottom: 0; }
+  .pane-body strong { color: var(--ink); font-weight: 600; }
+
+  /* Code block */
+  .code {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.7;
+    background: var(--code-bg); color: var(--code-ink);
+    border-radius: 8px; padding: 18px 20px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code .ln { display: inline-block; width: 22px; color: var(--code-dim); user-select: none; }
+  .code .hl { background: rgba(45, 106, 79, 0.22); display: block; margin: 0 -20px; padding: 0 20px; }
+  .code .kw { color: var(--code-mark); }
+  .code .str { color: var(--code-str); }
+  .code .key { color: var(--code-key); }
+  .code .com { color: var(--code-dim); font-style: italic; }
+  .code .op  { color: #fff; font-weight: 700; }
+
+  /* Review mock */
+  .review-mock {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12.5px;
+    background: #fbf8f2;
+  }
+  .rm-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rule);
+    background: #f4f0e9;
+    font-size: 11px;
+    color: var(--ink-3);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .rm-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 280px; }
+  .rm-col { padding: 14px; }
+  .rm-col + .rm-col { border-left: 1px solid var(--rule); background: #fefcf8; }
+  .rm-col h5 {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-4); margin: 0 0 10px;
+  }
+  .rm-node {
+    padding: 9px 12px; border-radius: 6px; border: 1px solid var(--rule);
+    background: var(--paper); margin-bottom: 8px; font-size: 12.5px;
+  }
+  .rm-node.spotlight { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 3px rgba(45,106,79,.08); }
+  .rm-node.warn { border-color: rgba(184,121,31,.4); background: var(--warn-soft); }
+  .rm-node.block { border-color: rgba(168,65,58,.4); background: var(--block-soft); }
+  .rm-node .t { font-weight: 600; color: var(--ink); }
+  .rm-node .m { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+  .rm-kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; font-size: 12px; }
+  .rm-kv dt { color: var(--ink-4); font-weight: 500; }
+  .rm-kv dd { color: var(--ink-2); margin: 0; font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11.5px; }
+
+  /* Dispatch log */
+  .log {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.8;
+    background: var(--code-bg); color: var(--code-ink);
+    border-radius: 8px; padding: 18px 20px; overflow-x: auto;
+  }
+  .log .ts { color: var(--code-dim); }
+  .log .ok { color: var(--code-key); }
+  .log .warn { color: var(--code-str); }
+  .log .lbl { color: #fff; }
+
+  /* --- The four layers row --- */
+  .layers {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .layer { padding: 22px 20px; border-right: 1px solid var(--rule); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .layer:last-child { border-right: none; }
+  .layer-num {
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 8px;
+  }
+  .layer-name { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
+  .layer-body { font-size: 13px; color: var(--ink-3); line-height: 1.55; margin-bottom: 14px; }
+  .layer-artifact {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11.5px;
+    padding: 6px 10px; background: var(--accent-soft); color: var(--accent);
+    border-radius: 5px; font-weight: 500; display: inline-block;
+  }
+
+  /* --- Invariance table --- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .split-col { padding: 28px 32px; }
+  .split-col + .split-col { border-left: 1px solid var(--rule); background: #fbf8f2; }
+  .split-col h3 {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4);
+    margin: 0 0 4px;
+  }
+  .split-col h3 .tag {
+    display: inline-block; margin-left: 8px; padding: 2px 8px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 10px; border-radius: 3px; letter-spacing: 0.08em; font-weight: 700;
+    vertical-align: 2px;
+  }
+  .split-col:last-child h3 .tag { background: var(--warn-soft); color: var(--warn); }
+  .split-col .headline { font-family: Georgia, 'Times New Roman', Times, serif; font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin: 10px 0 16px; }
+  .split-col ul { margin: 0; padding-left: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: var(--ink-2); }
+  .split-col li { margin-bottom: 8px; line-height: 1.5; }
+  .split-col .footnote {
+    margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12.5px; color: var(--ink-4); line-height: 1.5;
+  }
+
+  /* --- Kicker quote --- */
+  .kicker {
+    margin-top: 72px; padding: 36px 40px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-size: 22px; line-height: 1.4; letter-spacing: -0.005em;
+    color: var(--ink); font-style: italic; font-weight: 400;
+    border-radius: 0 8px 8px 0;
+  }
+  .kicker strong { font-style: normal; font-weight: 600; color: var(--accent); }
+  .kicker .attr {
+    display: block; margin-top: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12px; font-style: normal; color: var(--ink-4);
+    letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600;
+  }
+
+  footer {
+    margin-top: 72px; padding-top: 28px; border-top: 1px solid var(--rule);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; color: var(--ink-4);
+    display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+  }
+
+  @media (max-width: 960px) {
+    .wrap { padding: 40px 24px 100px; }
+    .hero-diagram, .follow-tabs, .follow-stage, .layers, .split, .rm-body { grid-template-columns: 1fr !important; }
+    .hero-diagram .cell + .cell, .follow-tab, .follow-pane + .follow-pane, .layer, .split-col + .split-col, .rm-col + .rm-col { border-left: none; border-top: 1px solid var(--rule); }
+    .hero-diagram .cell + .cell::before { display: none; }
+    .follow-tab[aria-selected="true"] { box-shadow: inset 3px 0 0 var(--accent); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= Masthead ================= -->
+  <header class="masthead">
+    <div class="eyebrow">Semantix · How it works</div>
+    <h1>A language, a compiler, and a control plane for governed LLM execution.</h1>
+    <p class="lede">
+      Semantix compiles human intent into bounded execution contracts. The model proposes inside the contract; deterministic machinery decides what becomes real. Everything else on this page follows from that one shape.
+    </p>
+
+    <div class="hero-diagram" aria-label="How Semantix transforms intent into an approved effect">
+      <div class="cell">
+        <div class="k">You write</div>
+        <div class="v">intent</div>
+        <div class="d">Goal, boundaries, success state. In Semantix source — not in a prompt.</div>
+      </div>
+      <div class="cell">
+        <div class="k">Compiler emits</div>
+        <div class="v">~&gt;</div>
+        <div class="d">The semantic boundary. Exactly where the model is allowed to propose.</div>
+      </div>
+      <div class="cell">
+        <div class="k">Runtime produces</div>
+        <div class="v">ExecutionNode</div>
+        <div class="d">One reviewable unit: context, constraints, critique, predicted effect.</div>
+      </div>
+      <div class="cell">
+        <div class="k">Human approves</div>
+        <div class="v">StateEffect</div>
+        <div class="d">A versioned, freshness-bound change. Only then does reality move.</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= 01 · Follow one node ================= -->
+  <h2><span class="num">01 · The full lifecycle in one page</span>Follow one node</h2>
+  <p class="dek">
+    Pick the node: <em>Draft an email-verification endpoint.</em> Walk its five lives — from a line of Semantix source to an audited state change.
+  </p>
+
+  <div class="follow" id="follow">
+    <div class="follow-tabs" role="tablist">
+      <button class="follow-tab" role="tab" aria-selected="true" data-step="1">
+        <span class="step-num">01 · Author</span>
+        <span class="step-title">Source</span>
+        <span class="step-sub">Semantix code</span>
+      </button>
+      <button class="follow-tab" role="tab" aria-selected="false" data-step="2">
+        <span class="step-num">02 · Compile</span>
+        <span class="step-title">ExecutionNode</span>
+        <span class="step-sub">Emitted contract</span>
+      </button>
+      <button class="follow-tab" role="tab" aria-selected="false" data-step="3">
+        <span class="step-num">03 · Review</span>
+        <span class="step-title">Control surface</span>
+        <span class="step-sub">Human decides</span>
+      </button>
+      <button class="follow-tab" role="tab" aria-selected="false" data-step="4">
+        <span class="step-num">04 · Dispatch</span>
+        <span class="step-title">Adapter → runtime</span>
+        <span class="step-sub">Only after approval</span>
+      </button>
+      <button class="follow-tab" role="tab" aria-selected="false" data-step="5">
+        <span class="step-num">05 · Merge back</span>
+        <span class="step-title">StateEffect</span>
+        <span class="step-sub">Audited &amp; recorded</span>
+      </button>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="follow-stage" data-step="1">
+      <div class="follow-pane">
+        <div class="pane-label">What the author writes</div>
+<div class="code"><span class="ln">1</span><span class="com">// services/auth/verify.stx</span>
+<span class="ln">2</span><span class="kw">with context</span> { routes, auth_logic } {
+<span class="ln">3</span>
+<span class="ln">4</span>  <span class="kw">constraint</span> <span class="key">VerifyFlow</span> {
+<span class="ln">5</span>    token_must_be_single_use: <span class="str">true</span>,
+<span class="ln">6</span>    must_not_use_prod_smtp: <span class="str">true</span>,
+<span class="ln">7</span>    login_blocked_until_verified: <span class="str">true</span>
+<span class="ln">8</span>  }
+<span class="ln">9</span>
+<span class="hl"><span class="ln">10</span>  patch <span class="op">~&gt;</span> <span class="str">"Draft email-verification endpoint"</span> :: <span class="key">VerifyFlow</span>;</span>
+<span class="ln">11</span>}</div>
+      </div>
+      <div class="follow-pane">
+        <div class="pane-label">What the three primitives do</div>
+        <div class="pane-body">
+          <p><strong><code>context</code></strong> scopes the model's working set. Only <code>routes</code> and <code>auth_logic</code> will be visible to this step. Not the whole repo, not billing code.</p>
+          <p><strong><code>constraint</code></strong> declares rules the result must satisfy. The compiler will sort these into <em>hard</em> (deterministically checkable), <em>soft</em> (semantically verified), and <em>hybrid</em>.</p>
+          <p><strong><code>~&gt;</code></strong> is the only place in the program where a model is allowed to propose. Deterministic code stops at this line. Candidate generation begins at this line.</p>
+          <p>The rest of Semantix exists to govern what happens after that operator fires.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="follow-stage" data-step="2" hidden="">
+      <div class="follow-pane">
+        <div class="pane-label">What the compiler emits</div>
+<div class="code"><span class="key">ExecutionNode</span> {
+  id: <span class="str">"n4"</span>,
+  nodeType: <span class="str">"semantic"</span>,           <span class="com">// from ~&gt;</span>
+  title: <span class="str">"Draft verify endpoint"</span>,
+  inputSummary: [<span class="str">"routes"</span>, <span class="str">"auth_logic"</span>],  <span class="com">// from context</span>
+  constraints: {
+    hard: [<span class="str">"token_must_be_single_use"</span>],
+    soft: [<span class="str">"match_existing_middleware_style"</span>],
+    hybrid: [<span class="str">"must_not_use_prod_smtp"</span>]         <span class="com">// substring + semantic</span>
+  },
+  approvalRequired: <span class="str">true</span>,
+  gatingOwner: <span class="str">"semantix"</span>,
+  contributingSystems: [<span class="str">"phalanx"</span>, <span class="str">"ct_mcp"</span>]
+}</div>
+      </div>
+      <div class="follow-pane">
+        <div class="pane-label">The translation, line by line</div>
+        <div class="pane-body">
+          <p><strong>Three source lines become eleven fields.</strong> This is the whole compiler thesis: vague instructions turn into enforceable machinery.</p>
+          <p><code>~&gt;</code> → <code>nodeType: "semantic"</code>. The graph marks this node probabilistic; the runtime knows to wrap it in validation.</p>
+          <p><code>context { ... }</code> → <code>inputSummary</code>. The runtime can now enforce that the model sees exactly these two sources — nothing else leaks in.</p>
+          <p><code>constraint VerifyFlow</code> → a classified <code>constraints</code> object. <em>must_not_use_prod_smtp</em> is flagged <em>hybrid</em>: a substring check will run first, then a semantic verifier for phrases like "send via production transport."</p>
+          <p>Ambiguous rules don't get a free pass. They escalate to <strong>approvalRequired: true</strong>.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="follow-stage" data-step="3" hidden="">
+      <div class="follow-pane">
+        <div class="pane-label">What the reviewer sees</div>
+        <div class="review-mock">
+          <div class="rm-head">
+            <span>plan v7 · graph v12 · hash 9cbf12a7</span>
+            <span style="color: var(--accent); font-weight: 600;">● fresh</span>
+          </div>
+          <div class="rm-body">
+            <div class="rm-col">
+              <h5>Execution graph</h5>
+              <div class="rm-node"><div class="t">n2 · Load repo context</div><div class="m">deterministic · grounded</div></div>
+              <div class="rm-node spotlight"><div class="t">n4 · Draft verify endpoint</div><div class="m">~&gt; · semantic · bridged</div></div>
+              <div class="rm-node warn"><div class="t">n5 · Gate login</div><div class="m">semantic · transformed</div></div>
+              <div class="rm-node block"><div class="t">n7 · Send email (SMTP)</div><div class="m">tool · approval required</div></div>
+            </div>
+            <div class="rm-col">
+              <h5>Inspector · n4</h5>
+              <dl class="rm-kv">
+                <dt>Purpose</dt><dd style="font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Generate GET /auth/verify handler</dd>
+                <dt>Context</dt><dd>routes.ts · auth_logic.ts</dd>
+                <dt>Hard</dt><dd>token_must_be_single_use</dd>
+                <dt>Hybrid</dt><dd>must_not_use_prod_smtp</dd>
+                <dt>Critique</dt><dd style="color:var(--warn);">calls signToken() · not in repo</dd>
+                <dt>Grounding</dt><dd style="color:var(--warn);">bridged (0.58)</dd>
+                <dt>Effect</dt><dd>routes.ts · +38 lines</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="follow-pane">
+        <div class="pane-label">The reviewer is approving structure, not text</div>
+        <div class="pane-body">
+          <p>The node is <strong>spotlight</strong> in the graph because the reviewer clicked it. The inspector opens only the sections with something to say — no placeholder fields.</p>
+          <p>CT-MCP has flagged a <em>bridged assumption</em>: the draft calls <code>signToken()</code>, but no such utility exists in the loaded context. The reviewer now has three surgical options, each a plan mutation, not a restart:</p>
+          <p style="padding-left: 16px; border-left: 2px solid var(--rule);">
+            <strong>Add</strong> <code>lib/crypto/tokens.ts</code> to context<br>
+            <strong>Tighten</strong> the constraint to forbid inventing utilities<br>
+            <strong>Escalate</strong> — mark the node approval-required regardless
+          </p>
+          <p>Every intervention invalidates exactly n4 and its descendants. The rest of the graph stays valid. The approval clock resets on what changed.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="follow-stage" data-step="4" hidden="">
+      <div class="follow-pane">
+        <div class="pane-label">Control plane → adapter → runtime</div>
+<div class="log"><span class="ts">14:22:07.118</span> <span class="lbl">[plan]</span>         approval granted · n4 · planVersion=7 · artifactHash=9cbf12a7
+<span class="ts">14:22:07.121</span> <span class="lbl">[registry]</span>     selectRuntimeForNode(n4) → codex-cli
+<span class="ts">14:22:07.124</span> <span class="lbl">[adapter]</span>      CodexCliRuntimeAdapter.executeNode(n4)
+<span class="ts">14:22:07.125</span> <span class="lbl">[adapter]</span>      → prompt assembled from { context, constraints, policy }
+<span class="ts">14:22:07.126</span> <span class="lbl">[adapter]</span>      → capabilities bound: repo.read, repo.write[services/auth/**]
+<span class="ts">14:22:07.891</span> <span class="lbl">[runtime]</span>      <span class="warn">candidate emitted · 38 lines · grounding=0.71</span>
+<span class="ts">14:22:07.892</span> <span class="lbl">[validator]</span>    hard: token_must_be_single_use → <span class="ok">pass</span>
+<span class="ts">14:22:07.893</span> <span class="lbl">[validator]</span>    hybrid: must_not_use_prod_smtp → <span class="ok">pass (no match)</span>
+<span class="ts">14:22:07.894</span> <span class="lbl">[hoplon]</span>       AST scope check: services/auth/** → <span class="ok">pass</span>
+<span class="ts">14:22:07.895</span> <span class="lbl">[adapter]</span>      ← normalized events, 1 StateEffect
+<span class="ts">14:22:07.896</span> <span class="lbl">[plan]</span>         node n4 → status=passed</div>
+      </div>
+      <div class="follow-pane">
+        <div class="pane-label">The adapter is the boundary</div>
+        <div class="pane-body">
+          <p>The control plane never talks to the runtime directly. It asks the <strong>registry</strong> which adapter owns this node, then hands off through a single interface.</p>
+          <p>The adapter translates the <code>ExecutionNode</code> into whatever the runtime expects — a prompt, a tool call, a CLI invocation — and normalizes events back into the control plane's vocabulary (<code>StateEffect</code>, <code>RiskSignal</code>, etc).</p>
+          <p>Every action re-enters through typed gates. <strong>Hard</strong> checks run first; they can block. <strong>Hybrid</strong> checks run both substring and semantic passes. <strong>Hoplon</strong> verifies mutations stay in-scope at the AST level.</p>
+          <p>Phase 1 uses a single Codex CLI adapter. The architecture is open to more: Phalanx for engineering, provider-backed executors for hosted models, domain runtimes for support or compliance.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 5 -->
+    <div class="follow-stage" data-step="5" hidden="">
+      <div class="follow-pane">
+        <div class="pane-label">The effect, merged back into the artifact</div>
+<div class="code"><span class="key">StateEffect</span> {
+  id: <span class="str">"se_4a1c"</span>,
+  kind: <span class="str">"file"</span>,
+  operation: <span class="str">"modify"</span>,
+  target: <span class="str">"routes/auth.ts"</span>,
+  summary: <span class="str">"+38 / −0 lines · /auth/verify route"</span>,
+  originatingNode: <span class="str">"n4"</span>,
+  enforcement: { owner: <span class="str">"hoplon"</span>, status: <span class="str">"pass"</span> },
+  reversibility: { status: <span class="str">"reversible"</span>, mechanism: <span class="str">"git"</span> },
+  <span class="com">// durable review record · §17</span>
+  auditArtifact: {
+    artifactId: <span class="str">"run_8f1c"</span>,
+    planVersion: <span class="str">7</span>, graphVersion: <span class="str">12</span>,
+    reviewer: <span class="str">"alex@semantix.dev"</span>,
+    action: <span class="str">"approve"</span>,
+    timestamp: <span class="str">"2026-04-23T14:22:07Z"</span>
+  }
+}</div>
+      </div>
+      <div class="follow-pane">
+        <div class="pane-label">Why the loop closes cleanly</div>
+        <div class="pane-body">
+          <p>The <code>StateEffect</code> is the first thing in this lifecycle with <em>real-world consequences</em>. Everything before it was a proposal.</p>
+          <p>Three things land together, atomically:</p>
+          <p style="padding-left: 16px; border-left: 2px solid var(--rule);">
+            <strong>The effect itself</strong> — a patch to <code>routes/auth.ts</code><br>
+            <strong>Enforcement evidence</strong> — AST scope pass, policy pass, reversibility class<br>
+            <strong>Audit record</strong> — who approved what version of which plan, at what time
+          </p>
+          <p>Nothing in this record is derived from a chat transcript. The reviewer's approval is bound to the exact <code>artifactHash</code> they saw. If the plan changed between review and execute, the backend rejects the action and asks for re-review.</p>
+          <p>That's the loop: intent → <code>~&gt;</code> → reviewed proposal → adapter-dispatched candidate → validated effect → durable record. Drift cannot harden into authoritative state.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= 02 · The four layers ================= -->
+  <h2><span class="num">02 · The stack</span>Five layers, one contract.</h2>
+  <p class="dek">
+    Everything on the previous tab happened inside this row. Each column has one job, one artifact, and a sharp border with the next.
+  </p>
+
+  <div class="layers">
+    <div class="layer">
+      <div class="layer-num">01</div>
+      <div class="layer-name">Language</div>
+      <div class="layer-body">Three primitives — <code>context</code>, <code>constraint</code>, <code>~&gt;</code> — that fence semantic work from deterministic work at the source level.</div>
+      <div class="layer-artifact">.stx source</div>
+    </div>
+    <div class="layer">
+      <div class="layer-num">02</div>
+      <div class="layer-name">Compiler</div>
+      <div class="layer-body">Classifies constraints (hard · soft · hybrid), binds capabilities, emits validators and approval gates. Produces a versioned, hash-stable artifact.</div>
+      <div class="layer-artifact">IntentContract · ExecutionPlan</div>
+    </div>
+    <div class="layer">
+      <div class="layer-num">03</div>
+      <div class="layer-name">Control plane</div>
+      <div class="layer-body">Owns truth: artifact versions, freshness checks, approval workflow state, the invalidation set, the audit trail, event streaming.</div>
+      <div class="layer-artifact">ApprovalGate · ResumeCheckpoint</div>
+    </div>
+    <div class="layer">
+      <div class="layer-num">04</div>
+      <div class="layer-name">Review surface</div>
+      <div class="layer-body">The human-facing projection of the artifact. Graph, inspector, diff, approvals. Browser and terminal clients render the same contract.</div>
+      <div class="layer-artifact">ReviewControlContract</div>
+    </div>
+    <div class="layer">
+      <div class="layer-num">05</div>
+      <div class="layer-name">Runtime</div>
+      <div class="layer-body">Pluggable. Codex CLI in phase 1. Adapters normalize Semantix nodes into runtime invocations and stream events back.</div>
+      <div class="layer-artifact">RuntimeAdapterContract</div>
+    </div>
+  </div>
+
+  <!-- ================= 03 · What stays invariant ================= -->
+  <h2><span class="num">03 · What stays invariant</span>When the runtime changes, the contract doesn't.</h2>
+  <p class="dek">
+    Semantix's value is the left column. The right column can be swapped, upgraded, or multiplied — the approval surface, audit record, and intent contract keep their shape.
+  </p>
+
+  <div class="split">
+    <div class="split-col">
+      <h3>Semantix owns <span class="tag">stable</span></h3>
+      <div class="headline">The governance contract.</div>
+      <ul>
+        <li>The language surface and semantic boundary (<code>~&gt;</code>)</li>
+        <li>Intent contracts and constraint classification</li>
+        <li>Execution plan shape, node types, edge semantics</li>
+        <li>Freshness, invalidation, and approval workflow</li>
+        <li>Review surface information architecture</li>
+        <li>Durable audit artifacts (§17)</li>
+      </ul>
+      <div class="footnote">If you replace the runtime tomorrow, none of these change. The reviewer opens the same surface, approves the same artifact, signs the same audit record.</div>
+    </div>
+    <div class="split-col">
+      <h3>Runtime owns <span class="tag">pluggable</span></h3>
+      <div class="headline">The execution substrate.</div>
+      <ul>
+        <li>Model selection, prompt assembly, token streaming</li>
+        <li>Tool binding and invocation</li>
+        <li>Retry loops, sampling settings, recovery</li>
+        <li>File mutation mechanics and diff generation</li>
+        <li>Capability discovery and feature negotiation</li>
+        <li>Provider-specific quirks and telemetry</li>
+      </ul>
+      <div class="footnote">Phase 1: Codex CLI. Next: Phalanx, hosted-provider executors, domain runtimes. Each must pass the <code>RuntimeAdapterContract</code> — and that's all Semantix asks of it.</div>
+    </div>
+  </div>
+
+  <div class="kicker">
+    The point isn't to make models deterministic. It's to make the program around the model deterministic enough to engineer, debug, test, review, and <strong>trust</strong>.
+    <span class="attr">Semantix · design thesis</span>
+  </div>
+
+  <footer>
+    <span>Semantix · How it works · v2 · single-page standalone</span>
+    <span>Companion: Implementation Guide · Control Surface prototype</span>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    const tabs = document.querySelectorAll('.follow-tab');
+    const stages = document.querySelectorAll('.follow-stage');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const step = tab.dataset.step;
+        tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.step === step ? 'true' : 'false'));
+        stages.forEach(s => {
+          if (s.dataset.step === step) s.removeAttribute('hidden');
+          else s.setAttribute('hidden', '');
+        });
+      });
+    });
+    // arrow-key navigation
+    document.getElementById('follow').addEventListener('keydown', e => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const current = [...tabs].findIndex(t => t.getAttribute('aria-selected') === 'true');
+      const next = e.key === 'ArrowRight'
+        ? Math.min(current + 1, tabs.length - 1)
+        : Math.max(current - 1, 0);
+      tabs[next].click();
+      tabs[next].focus();
+    });
+  })();
+</script>
+
+</body></html>

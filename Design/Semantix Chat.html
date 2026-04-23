@@ -1,0 +1,314 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Semantix — Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    html, body, #root { margin: 0; padding: 0; height: 100%; width: 100%; }
+    body { font-family: 'Inter', system-ui, sans-serif; background: #faf8f4; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    button { font-family: inherit; }
+    textarea { font-family: inherit; }
+    *::-webkit-scrollbar { width: 8px; height: 8px; }
+    *::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 999px; }
+    @keyframes semantix-fade-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="../shared/semantix-fixtures.js"></script>
+  <script type="text/babel" src="scenarios.jsx"></script>
+  <script type="text/babel" src="ui.jsx"></script>
+  <script type="text/babel" src="graph.jsx"></script>
+  <script type="text/babel" src="inspector.jsx"></script>
+  <script type="text/babel" src="diff.jsx"></script>
+  <script type="text/babel" src="phases.jsx"></script>
+  <script type="text/babel" src="app.jsx"></script>
+  <script type="text/babel" src="decision.jsx"></script>
+  <script type="text/babel" src="advanced.jsx"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useEffect, useRef } = React;
+
+    // Chat shell: prompt → review overlay → collapse back as summary turn.
+    // Scenarios double as example "follow-up prompts".
+    const SCENARIO_SEQUENCE = ['swe', 'support', 'compliance'];
+
+    function ChatApp() {
+      const [turns, setTurns] = useState([
+        { kind: 'assistant', text: "I'm Semantix. Describe a change or task and I'll plan it, surface side effects and risks, and let you approve before anything runs." },
+      ]);
+      const [draft, setDraft] = useState(window.SEMANTIX_SCENARIOS.swe.prompt);
+      const [reviewing, setReviewing] = useState(null); // { scenarioKey, mode: 'simple'|'advanced', approvals, selectedNodeId, turnId }
+      const [scenarioIdx, setScenarioIdx] = useState(0);
+      const scrollRef = useRef(null);
+
+      useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, [turns, reviewing]);
+
+      function onSend() {
+        if (!draft.trim()) return;
+        const scenarioKey = SCENARIO_SEQUENCE[scenarioIdx % SCENARIO_SEQUENCE.length];
+        const turnId = 't' + Date.now();
+        setTurns(t => [...t,
+          { kind: 'user', text: draft },
+          { kind: 'review-pending', turnId, scenarioKey },
+        ]);
+        setDraft('');
+        setReviewing({ scenarioKey, mode: 'simple', approvals: {}, selectedNodeId: null, turnId });
+      }
+
+      function closeReview(summary) {
+        const { turnId, scenarioKey } = reviewing;
+        setTurns(t => t.map(x => x.turnId === turnId
+          ? { kind: 'review-summary', turnId, scenarioKey, ...summary }
+          : x));
+        setReviewing(null);
+        // queue assistant followup
+        setTimeout(() => {
+          const next = SCENARIO_SEQUENCE[(scenarioIdx + 1) % SCENARIO_SEQUENCE.length];
+          const nextPrompt = window.SEMANTIX_SCENARIOS[next].prompt;
+          setTurns(t => [...t, {
+            kind: 'assistant',
+            text: summary.executed
+              ? "Done. I'd suggest re-running the integration suite against the new migration before merging. What's next?"
+              : summary.blocked
+              ? "Holding. The blocked action won't run. Want me to regenerate with tighter context, or change policy?"
+              : "Paused. Ping me when you want to revisit.",
+            suggestion: nextPrompt,
+          }]);
+          setScenarioIdx(i => i + 1);
+        }, 600);
+      }
+
+      function computeSummary() {
+        const s = window.SEMANTIX_SCENARIOS[reviewing.scenarioKey];
+        const approvable = s.diff.filter(d => d.policy !== 'block');
+        const approved = approvable.filter(d => reviewing.approvals[d.id] === 'approve').length;
+        const blocked = s.diff.filter(d => d.policy === 'block').length;
+        return { approved, total: approvable.length, blocked, executed: approved === approvable.length };
+      }
+
+      const C = {
+        bg: '#faf8f4', panel: '#ffffff', border: '#e8e4dc', text: '#1d1b17',
+        textDim: '#58544c', textFaint: '#8a8578', accent: '#2d6a4f', accentSoft: '#e6f0ea',
+        warn: '#b8791f', warnSoft: '#fbf2df', block: '#a8413a', blockSoft: '#f8e9e6',
+        user: '#eceae4',
+      };
+
+      return (
+        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, color: C.text }}>
+          {/* Chat header */}
+          <div style={{ flexShrink: 0, height: 52, borderBottom: `1px solid ${C.border}`, background: C.panel,
+            display: 'flex', alignItems: 'center', padding: '0 20px', gap: 10 }}>
+            <div style={{ width: 26, height: 26, borderRadius: 7, background: C.accent, display: 'grid', placeItems: 'center', color: '#fff' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12l4 4L19 6"/></svg>
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: -0.1 }}>Semantix</div>
+              <div style={{ fontSize: 11, color: C.textFaint }}>Conversational control surface</div>
+            </div>
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 11, color: C.textFaint, fontFamily: 'ui-monospace, Menlo, monospace' }}>session · {turns.filter(t => t.kind === 'review-summary').length} run{turns.filter(t => t.kind === 'review-summary').length === 1 ? '' : 's'}</div>
+          </div>
+
+          {/* Chat stream */}
+          <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', padding: '28px 0 20px' }}>
+            <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {turns.map((t, i) => {
+                if (t.kind === 'assistant') return <AssistantTurn key={i} C={C} t={t} onUseSuggestion={(x) => setDraft(x)} />;
+                if (t.kind === 'user') return <UserTurn key={i} C={C} t={t} />;
+                if (t.kind === 'review-pending') return <PendingTurn key={i} C={C} t={t} onResume={() => {
+                  const existing = turns.find(x => x.turnId === t.turnId);
+                  setReviewing({ scenarioKey: t.scenarioKey, mode: reviewing?.mode || 'simple', approvals: {}, selectedNodeId: null, turnId: t.turnId });
+                }} />;
+                if (t.kind === 'review-summary') return <SummaryTurn key={i} C={C} t={t} />;
+              })}
+            </div>
+          </div>
+
+          {/* Composer */}
+          <div style={{ flexShrink: 0, borderTop: `1px solid ${C.border}`, background: C.panel, padding: '14px 0' }}>
+            <div style={{ maxWidth: 780, margin: '0 auto', padding: '0 24px', display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', background: C.panel,
+                display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea value={draft} onChange={e => setDraft(e.target.value)}
+                  placeholder="Describe a change, task, or question…"
+                  onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); onSend(); } }}
+                  style={{ border: 'none', outline: 'none', resize: 'none', width: '100%', fontSize: 14, minHeight: 52, lineHeight: 1.5,
+                    color: C.text, background: 'transparent' }} />
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: C.textFaint }}>
+                  <span>Engineering</span>
+                  <span>·</span>
+                  <span>policies: prod.yaml</span>
+                  <div style={{ flex: 1 }} />
+                  <span>⌘↵ to send</span>
+                </div>
+              </div>
+              <button onClick={onSend} disabled={!draft.trim()} style={{
+                padding: '12px 16px', borderRadius: 10, border: 'none', fontWeight: 600,
+                background: draft.trim() ? C.accent : C.border, color: draft.trim() ? '#fff' : C.textFaint,
+                cursor: draft.trim() ? 'pointer' : 'not-allowed', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                Plan it
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 6h7M6 2l4 4-4 4"/></svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Review modal */}
+          {reviewing && <ReviewModal C={C} reviewing={reviewing} setReviewing={setReviewing}
+            onDone={() => closeReview(computeSummary())}
+            onCancel={() => closeReview({ ...computeSummary(), cancelled: true })} />}
+        </div>
+      );
+    }
+
+    function UserTurn({ C, t }) {
+      return (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', animation: 'semantix-fade-in .2s ease' }}>
+          <div style={{ maxWidth: '82%', background: C.user, padding: '10px 14px', borderRadius: 14, borderBottomRightRadius: 4, fontSize: 14, lineHeight: 1.5, color: C.text }}>
+            {t.text}
+          </div>
+        </div>
+      );
+    }
+
+    function AssistantTurn({ C, t, onUseSuggestion }) {
+      return (
+        <div style={{ display: 'flex', gap: 10, animation: 'semantix-fade-in .2s ease' }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: C.accent, color: '#fff', display: 'grid', placeItems: 'center', flexShrink: 0, marginTop: 2 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12l4 4L19 6"/></svg>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, lineHeight: 1.55, color: C.text, textWrap: 'pretty' }}>{t.text}</div>
+            {t.suggestion && (
+              <button onClick={() => onUseSuggestion(t.suggestion)} style={{
+                marginTop: 10, fontSize: 12, padding: '7px 11px', borderRadius: 7, border: `1px dashed ${C.border}`,
+                background: 'transparent', color: C.textDim, cursor: 'pointer', textAlign: 'left', lineHeight: 1.4,
+                maxWidth: 560,
+              }}>
+                <span style={{ color: C.accent, fontWeight: 600, marginRight: 6 }}>Try:</span>
+                {t.suggestion}
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function PendingTurn({ C, t, onResume }) {
+      const s = window.SEMANTIX_SCENARIOS[t.scenarioKey];
+      return (
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: C.warnSoft, color: C.warn, display: 'grid', placeItems: 'center', flexShrink: 0, marginTop: 2 }}>⋯</div>
+          <div style={{ flex: 1, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Planning…</div>
+            <div style={{ fontSize: 12, color: C.textDim, marginTop: 3 }}>Compiled {s.nodes.length} nodes · {s.diff.length} proposed changes. Waiting for your review.</div>
+            <button onClick={onResume} style={{ marginTop: 8, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.panel, color: C.text, cursor: 'pointer' }}>Resume review</button>
+          </div>
+        </div>
+      );
+    }
+
+    function SummaryTurn({ C, t }) {
+      const s = window.SEMANTIX_SCENARIOS[t.scenarioKey];
+      const statusColor = t.cancelled ? C.textFaint : t.executed ? C.accent : C.warn;
+      const statusBg = t.cancelled ? C.panel : t.executed ? C.accentSoft : C.warnSoft;
+      const statusLabel = t.cancelled ? 'Paused' : t.executed ? 'Executed' : `${t.approved}/${t.total} approved`;
+      return (
+        <div style={{ display: 'flex', gap: 10, animation: 'semantix-fade-in .2s ease' }}>
+          <div style={{ width: 24, height: 24, borderRadius: 6, background: statusBg, color: statusColor, display: 'grid', placeItems: 'center', flexShrink: 0, marginTop: 2 }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M3 6l2.5 2.5L9 3.5"/></svg>
+          </div>
+          <div style={{ flex: 1, background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{s.label} · run_{t.scenarioKey === 'swe' ? '8f1c' : t.scenarioKey === 'support' ? '4a92' : 'c7d3'}</div>
+              <span style={{ fontSize: 11, color: statusColor, background: statusBg, padding: '2px 8px', borderRadius: 999, fontWeight: 600 }}>{statusLabel}</span>
+              {t.blocked > 0 && <span style={{ fontSize: 11, color: C.block, background: C.blockSoft, padding: '2px 8px', borderRadius: 999, fontWeight: 600 }}>{t.blocked} blocked</span>}
+            </div>
+            <div style={{ fontSize: 12, color: C.textDim, lineHeight: 1.5 }}>{s.intent.directive}</div>
+            <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
+              {s.diff.slice(0, 6).map(d => (
+                <div key={d.id} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: C.textDim,
+                  fontFamily: d.kind === 'file' ? 'ui-monospace, Menlo, monospace' : 'inherit' }}>
+                  <span style={{ width: 5, height: 5, borderRadius: 999,
+                    background: d.policy === 'block' ? C.block : C.ok }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.target.split('/').slice(-1)[0]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function ReviewModal({ C, reviewing, setReviewing, onDone, onCancel }) {
+      const { scenarioKey, mode, approvals, selectedNodeId } = reviewing;
+      const setApprovals = (upd) => setReviewing(r => ({ ...r, approvals: typeof upd === 'function' ? upd(r.approvals) : upd }));
+      const setSelectedNodeId = (id) => setReviewing(r => ({ ...r, selectedNodeId: id }));
+      const setMode = (m) => setReviewing(r => ({ ...r, mode: m }));
+
+      return (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(29,27,23,.5)', backdropFilter: 'blur(6px)',
+          display: 'flex', flexDirection: 'column', padding: 24, animation: 'semantix-fade-in .18s ease' }}>
+          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, color: '#fff', marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Reviewing run</div>
+            <div style={{ fontSize: 11, opacity: .7 }}>Compare, decide, then collapse back into the conversation.</div>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.12)', borderRadius: 7, padding: 2 }}>
+              {['simple', 'advanced'].map(m => (
+                <button key={m} onClick={() => setMode(m)} style={{
+                  fontSize: 11.5, padding: '5px 12px', borderRadius: 5, border: 'none', cursor: 'pointer', fontWeight: 500, textTransform: 'capitalize',
+                  background: mode === m ? '#fff' : 'transparent', color: mode === m ? C.text : 'rgba(255,255,255,.75)',
+                }}>{m} view</button>
+              ))}
+            </div>
+            <button onClick={onCancel} style={{ fontSize: 11.5, padding: '5px 10px', borderRadius: 5, border: '1px solid rgba(255,255,255,.25)', background: 'transparent', color: '#fff', cursor: 'pointer' }}>Pause</button>
+          </div>
+          <div style={{ flex: 1, background: C.bg, borderRadius: 10, overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.3)',
+            display: 'flex', flexDirection: 'column' }}>
+            {mode === 'simple' ? (
+              <SimpleHost scenarioKey={scenarioKey} approvals={approvals} setApprovals={setApprovals} onExecute={onDone} onBack={onCancel} />
+            ) : (
+              <AdvancedReview scenarioKey={scenarioKey} approvals={approvals} setApprovals={setApprovals}
+                selectedNodeId={selectedNodeId} setSelectedNodeId={setSelectedNodeId}
+                onClose={onCancel} onExecute={onDone} />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // DecisionMode wrapper — sync its local approvals to the parent, expose run action.
+    function SimpleHost({ scenarioKey, approvals, setApprovals, onExecute, onBack }) {
+      // DecisionMode keeps own state; wrap it with injected handlers by re-render. Simpler path:
+      // just render DecisionMode but override its surrounding with our own header/footer.
+      // Since DecisionMode has a self-contained bottom bar, we'll render it and overlay our Execute button via a small header.
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <DecisionMode scenarioKey={scenarioKey} width="100%" height="100%" />
+          <div style={{ position: 'absolute', left: 34, top: 60, fontSize: 11, color: 'rgba(255,255,255,.8)' }}></div>
+          <button onClick={onExecute} style={{
+            position: 'absolute', bottom: 42, right: 56, padding: '10px 18px', borderRadius: 7,
+            background: '#2d6a4f', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 13,
+            boxShadow: '0 6px 20px rgba(0,0,0,.25)', zIndex: 5,
+          }}>
+            Finish &amp; collapse
+          </button>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<ChatApp />);
+  </script>
+</body>
+</html>
