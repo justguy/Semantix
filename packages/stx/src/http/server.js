@@ -73,6 +73,10 @@ function routeMatch(pathname, method) {
     return { name: "runs.list" };
   }
 
+  if (method === "POST" && pathname === "/codex/runs") {
+    return { name: "codex.runs.start" };
+  }
+
   if (method === "POST" && pathname === "/runs") {
     return { name: "runs.bootstrap" };
   }
@@ -91,6 +95,14 @@ function routeMatch(pathname, method) {
 
   if (method === "GET" && collection === "artifact") {
     return { name: "artifact.get", runId };
+  }
+
+  if (method === "GET" && collection === "flow") {
+    return { name: "codex.flow.get", runId };
+  }
+
+  if (method === "POST" && collection === "flow" && item === "approve") {
+    return { name: "codex.flow.approve", runId };
   }
 
   if (method === "GET" && collection === "previews" && !item) {
@@ -289,7 +301,7 @@ function handleError(response, error) {
   });
 }
 
-export function createControlPlaneServer({ service, uiDir, defaultRunCwd }) {
+export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd }) {
   if (!service) {
     throw new Error("createControlPlaneServer requires a ControlPlaneService instance.");
   }
@@ -368,6 +380,21 @@ export function createControlPlaneServer({ service, uiDir, defaultRunCwd }) {
           ? {}
           : await readJsonBody(request);
 
+      if (match.name === "codex.runs.start") {
+        if (!codexLayer) {
+          throw new Error("Codex Semantix layer is not configured.");
+        }
+
+        return json(
+          response,
+          200,
+          await codexLayer.start({
+            ...body,
+            cwd: body.cwd ?? defaultRunCwd,
+          }),
+        );
+      }
+
       if (match.name === "runs.bootstrap") {
         return json(
           response,
@@ -404,6 +431,35 @@ export function createControlPlaneServer({ service, uiDir, defaultRunCwd }) {
 
       if (match.name === "artifact.get") {
         return json(response, 200, await service.getCurrentArtifact(match.runId));
+      }
+
+      if (match.name === "codex.flow.get") {
+        if (!codexLayer) {
+          throw new Error("Codex Semantix layer is not configured.");
+        }
+
+        return json(
+          response,
+          200,
+          await codexLayer.getFlow({
+            runId: match.runId,
+          }),
+        );
+      }
+
+      if (match.name === "codex.flow.approve") {
+        if (!codexLayer) {
+          throw new Error("Codex Semantix layer is not configured.");
+        }
+
+        return json(
+          response,
+          200,
+          await codexLayer.approveAndRun({
+            runId: match.runId,
+            ...body,
+          }),
+        );
       }
 
       if (match.name === "preview.get") {

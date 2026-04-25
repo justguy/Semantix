@@ -9,6 +9,7 @@ import {
   CodexCliRuntimeAdapter,
 } from "../../runtime-codex/src/index.js";
 import { createControlPlaneServer } from "./http/server.js";
+import { createCodexSemantixLayer } from "./codex-semantix-layer.js";
 import { FileRunStore } from "./storage/file-run-store.js";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -195,9 +196,14 @@ export function createStxApplication({
     runtimeRegistry,
     hostFunctionRegistry: createDefaultHostFunctionRegistry(),
   });
+  const codexLayer = createCodexSemantixLayer({
+    service,
+    defaultCwd: effectiveWorkspaceRoot,
+  });
 
   const server = createControlPlaneServer({
     service,
+    codexLayer,
     uiDir,
     defaultRunCwd: effectiveWorkspaceRoot,
   });
@@ -211,6 +217,7 @@ export function createStxApplication({
     connector,
     adapter,
     service,
+    codexLayer,
     server,
   };
 }

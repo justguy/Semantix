@@ -16,6 +16,7 @@
   "exports": {
     ".": "./src/index.js",
     "./application": "./src/application.js",
+    "./codex-semantix-layer": "./src/codex-semantix-layer.js",
     "./http/server": "./src/http/server.js",
     "./cli": "./src/cli.js",
     "./storage/file-run-store": "./src/storage/file-run-store.js"

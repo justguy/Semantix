@@ -22,7 +22,25 @@ export async function runCli(args = process.argv.slice(2)) {
     return;
   }
 
-  const service = createCliApplication().service;
+  const application = createCliApplication();
+  const { service, codexLayer } = application;
+
+  if (command === "run") {
+    renderFlow(await startCodexFlow(codexLayer, args.slice(1)));
+    return;
+  }
+
+  if (command === "flow") {
+    const runId = await resolveRunId(service, args[1]);
+    renderFlow(await codexLayer.getFlow({ runId }));
+    return;
+  }
+
+  if (command === "approve") {
+    const runId = await resolveRunId(service, args[1]);
+    renderFlow(await codexLayer.approveAndRun({ runId, actor: "cli" }));
+    return;
+  }
 
   if (command === "list") {
     await printRunList(service);
@@ -77,6 +95,13 @@ function createCliApplication() {
   return createStxApplication({
     dataDir: getDefaultDataDir(),
     uiDir: getDefaultUiDir(),
+  });
+}
+
+async function startCodexFlow(codexLayer, values) {
+  return codexLayer.start({
+    actor: "cli",
+    ...parseRunArgs(values),
   });
 }
 
@@ -136,6 +161,92 @@ async function printRunList(service) {
         );
       }
     });
+  }
+
+  print(lines.join("\n"));
+}
+
+function renderFlow(flow) {
+  const lines = [];
+
+  lines.push(title(`stx flow ${flow.runId}`));
+  lines.push(metaLine("phase", flow.phase));
+  lines.push(metaLine("planVersion", flow.artifact.planVersion));
+  lines.push(metaLine("artifactHash", flow.artifact.artifactHash));
+  lines.push(metaLine("directive", flow.input.primaryDirective));
+  lines.push(
+    metaLine(
+      "classification",
+      `${flow.classification.effort} effort · ${flow.classification.riskLevel} risk · ${Math.round(
+        flow.classification.confidenceScore * 100,
+      )}% confidence`,
+    ),
+  );
+
+  lines.push("");
+  lines.push(section("Plan"));
+  for (const item of flow.plan.items) {
+    lines.push(
+      `  ${nodeBadge(item.reviewStatus)} ${accent(item.id)} ${item.title} ${dim(
+        `${item.nodeType} · ${item.status}`,
+      )}`,
+    );
+  }
+
+  lines.push("");
+  lines.push(section("Issues"));
+  if (flow.issues.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const issue of flow.issues) {
+      lines.push(`  ${errorText("!")} ${issue.summary} ${dim(issue.code)}`);
+      const recommended = issue.fixOptions.find((option) => option.recommended);
+      if (recommended) {
+        lines.push(`     ${dim("suggested")} ${recommended.label}`);
+      }
+    }
+  }
+
+  lines.push("");
+  lines.push(section("Approval"));
+  if (!flow.approval.required) {
+    lines.push("  none");
+  } else {
+    lines.push(
+      `  ${dim("gate")} ${flow.approval.gateId} · ${flow.approval.status} · ${
+        flow.approval.ready ? "ready" : "not ready"
+      }`,
+    );
+    if (flow.approval.checkpointId) {
+      lines.push(`  ${dim("checkpoint")} ${flow.approval.checkpointId}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(section("State Effects"));
+  if (flow.result.stateEffects.length === 0) {
+    lines.push("  none");
+  } else {
+    for (const effect of flow.result.stateEffects) {
+      lines.push(
+        `  ${policyBadge(effect.policyState)} ${accent(effect.id)} ${effect.targets.join(", ")} ${dim(
+          effect.summary,
+        )}`,
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push(section("Commands"));
+  lines.push(`  stx graph ${flow.runId}`);
+  if (flow.advanced.selectedNodeId) {
+    lines.push(`  stx inspect ${flow.runId} ${flow.advanced.selectedNodeId}`);
+  }
+  if (flow.result.stateEffects[0]) {
+    lines.push(`  stx diff ${flow.runId} ${flow.result.stateEffects[0].id}`);
+  }
+  if (flow.approval.ready) {
+    lines.push(`  stx approve ${flow.runId}`);
   }
 
   print(lines.join("\n"));
@@ -435,6 +546,60 @@ async function renderDiff(service, runId, artifact, requestedChangeId) {
   print(lines.join("\n"));
 }
 
+function parseRunArgs(values) {
+  const parsed = {
+    strictBoundaries: [],
+    autoExecuteSemanticAdmission: true,
+  };
+  const directive = [];
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+
+    if (value === "--run-id" && values[index + 1]) {
+      parsed.runId = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if ((value === "--boundary" || value === "--strict-boundary") && values[index + 1]) {
+      parsed.strictBoundaries.push(values[index + 1]);
+      index += 1;
+      continue;
+    }
+
+    if (value === "--success" && values[index + 1]) {
+      parsed.successState = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value === "--cwd" && values[index + 1]) {
+      parsed.cwd = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value === "--no-admit") {
+      parsed.autoExecuteSemanticAdmission = false;
+      continue;
+    }
+
+    if (value.startsWith("--")) {
+      throw new Error(`Unknown run argument '${value}'.`);
+    }
+
+    directive.push(value);
+  }
+
+  parsed.primaryDirective = directive.join(" ").trim();
+  if (!parsed.primaryDirective) {
+    throw new Error("stx run requires a task description.");
+  }
+
+  return parsed;
+}
+
 function parseInspectArgs(values) {
   const first = values[0];
   const second = values[1];
@@ -557,7 +722,9 @@ async function getNodeInspectorPayload(service, runId, nodeId) {
 
 function getDefaultInspectNodeId(artifact) {
   return (
+    artifact.plan.nodes.find((node) => node.nodeType === "deterministic_execution")?.id ??
     artifact.plan.nodes.find((node) => node.nodeType === "tool")?.id ??
+    artifact.plan.nodes.find((node) => node.nodeType === "semantic_generation")?.id ??
     artifact.plan.nodes[0]?.id ??
     null
   );
@@ -572,6 +739,9 @@ function printUsage() {
     [
       title("stx"),
       "Usage:",
+      "  stx run \"task\" [--boundary text] [--success text] [--run-id id]",
+      "  stx flow [runId|latest]",
+      "  stx approve [runId|latest]",
       "  stx list",
       "  stx graph [runId|latest]",
       "  stx inspect [runId|latest] [nodeId]",
