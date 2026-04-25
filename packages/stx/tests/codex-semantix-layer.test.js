@@ -162,6 +162,77 @@ test("Codex Semantix layer approves and resumes a safe proposal with one call", 
   assert.equal(completedFlow.steps.find((step) => step.id === 12)?.status, "complete");
 });
 
+test("Codex Semantix layer applies a fix and re-runs semantic admission", async (t) => {
+  let runnerCalls = 0;
+  const { application, workspaceRoot } = await createHarness(
+    t,
+    async () => {
+      runnerCalls += 1;
+      const symbol = runnerCalls === 1 ? "signToken" : "verifyToken";
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+          summary: `Add email verification route with ${symbol}().`,
+          diff_preview: `+ const claims = ${symbol}(token);\n`,
+          references: [
+            {
+              kind: "function",
+              name: symbol,
+              required: true,
+            },
+          ],
+          parameters: [],
+          supporting_context:
+            symbol === "verifyToken"
+              ? [
+                  {
+                    kind: "file",
+                    value: "routes/auth.ts",
+                  },
+                  {
+                    kind: "symbol",
+                    value: "verifyToken",
+                  },
+                ]
+              : [
+                  {
+                    kind: "file",
+                    value: "routes/auth.ts",
+                  },
+                ],
+        }),
+        stderr: "",
+      };
+    },
+  );
+
+  const blockedFlow = await application.codexLayer.start({
+    runId: "run-layer-fix",
+    actor: "test",
+    ...createTaskInput(),
+  });
+
+  assert.equal(blockedFlow.phase, "needs_intervention");
+  assert.equal(blockedFlow.issues[0].code, "missing_symbol");
+  assert.equal(blockedFlow.issues[0].affectedSymbols[0], "signToken");
+
+  const fixedFlow = await application.codexLayer.applyFix({
+    runId: "run-layer-fix",
+    actor: "reviewer",
+    issueCode: "missing_symbol",
+    symbol: "signToken",
+    action: "generate_missing_symbol",
+  });
+
+  assert.equal(runnerCalls, 2);
+  assert.equal(fixedFlow.phase, "awaiting_approval");
+  assert.equal(fixedFlow.approval.ready, true);
+  assert.equal(fixedFlow.issues.length, 0);
+  assert.match(fixedFlow.result.stateEffects[0].summary, /verifyToken/);
+  assert.equal(fixedFlow.steps.find((step) => step.id === 8)?.status, "complete");
+});
+
 test("Codex Semantix HTTP facade starts a projected flow", async (t) => {
   const { application } = await createHarness(
     t,

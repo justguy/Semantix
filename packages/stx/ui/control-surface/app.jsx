@@ -167,6 +167,7 @@ function SemantixApp({
   const [decisionHints, setDecisionHints] = useAS({});
   const [inspectorCache, setInspectorCache] = useAS({});
   const [previewCache, setPreviewCache] = useAS({});
+  const [flowProjection, setFlowProjection] = useAS(null);
   const [inspectorLoading, setInspectorLoading] = useAS(false);
   const [inspectorError, setInspectorError] = useAS(null);
   const [actionError, setActionError] = useAS(null);
@@ -307,6 +308,17 @@ function SemantixApp({
     }
   }
 
+  async function refreshFlowProjection(runId) {
+    if (!runId) return null;
+    try {
+      const flow = await requestJson(buildRunApiUrl(runId, "/flow"));
+      setFlowProjection(flow);
+      return flow;
+    } catch {
+      return null;
+    }
+  }
+
   async function refreshRunSummaries(preferredRunId) {
     const summaries = await requestJson(`${getApiBase()}/runs`);
     setRunSummaries(summaries);
@@ -325,6 +337,7 @@ function SemantixApp({
       syncDisplay,
       notice,
     });
+    await refreshFlowProjection(runId);
     return decorateArtifact(artifact, previewCache);
   }
 
@@ -489,7 +502,14 @@ function SemantixApp({
 
   async function compile() {
     const intentPayload = deriveIntentFromPrompt(prompt, getScenarioRecordByKey(scenarioKey));
-    const runId = ensureRunId(currentRunId || "");
+    const currentRunIsCompiled =
+      (latestArtifact?.runId === currentRunId && latestArtifact?.artifactHash)
+      || runSummaries.some(
+        (entry) => entry.runId === currentRunId && entry.artifact?.artifactHash,
+      );
+    const runId = currentRunIsCompiled
+      ? ensureRunId("", { reuseLocation: false })
+      : ensureRunId(currentRunId || "");
 
     setCurrentRunId(runId);
     setPhase(PHASES.compiling);
@@ -498,7 +518,7 @@ function SemantixApp({
     setBusyAction("compile");
 
     try {
-      const artifact = await requestJson(`${getApiBase()}/runs`, {
+      const flow = await requestJson(`${getApiBase()}/codex/runs`, {
         method: "POST",
         body: JSON.stringify({
           runId,
@@ -506,16 +526,29 @@ function SemantixApp({
           ...intentPayload,
         }),
       });
+      setFlowProjection(flow);
 
-      await refreshRunSummaries(runId);
+      const artifact = await requestJson(buildRunApiUrl(flow.runId || runId, "/artifact"));
+
+      await refreshRunSummaries(flow.runId || runId);
       setApprovals({});
       setDecisionHints({});
       applyFreshArtifact(artifact, {
         syncDisplay: true,
-        notice: "Compiled a fresh review artifact from the control plane.",
+        notice: "Codex generated a Semantix-reviewed proposal and paused at the control gate.",
       });
     } catch (error) {
-      setPhase(PHASES.prompt);
+      if (error?.status === 400 && runId) {
+        try {
+          await loadArtifact(runId, {
+            syncDisplay: true,
+          });
+        } catch {
+          setPhase(PHASES.prompt);
+        }
+      } else {
+        setPhase(PHASES.prompt);
+      }
       setActionError(error.message || "Failed to compile a review artifact.");
     } finally {
       setBusyAction(null);
@@ -586,6 +619,8 @@ function SemantixApp({
         syncDisplay: true,
         notice: decision === "approve" ? "Approval recorded by the control plane." : "Rejection recorded by the control plane.",
       });
+      await refreshFlowProjection(currentRunId);
+      await refreshRunSummaries(currentRunId);
     } catch (error) {
       if (error?.code === "STALE_STATE") {
         setActionError(formatFreshnessError("This approval", error));
@@ -609,7 +644,72 @@ function SemantixApp({
   }
 
   function onRequireChanges(changeId) {
-    return submitDecision(changeId, "changes");
+    return applyFixForChange(changeId);
+  }
+
+  async function applyFixForChange(changeId) {
+    if (!hydratedDisplayedArtifact) return;
+    if (!isFreshView) {
+      setActionError(formatFreshnessError("This fix", {
+        details: {
+          currentPlanVersion: hydratedLatestArtifact?.planVersion,
+          currentGraphVersion: hydratedLatestArtifact?.graphVersion,
+        },
+      }));
+      return;
+    }
+
+    const change = getDisplayableProposedChanges(hydratedDisplayedArtifact).find((candidate) => candidate.id === changeId);
+    if (!change) return;
+
+    const nodeId = getChangeNodeId(hydratedDisplayedArtifact, change);
+    const node = getNodeById(hydratedDisplayedArtifact, nodeId);
+    const primaryIssue = asArray(change.issues)[0] || {};
+    const symbol = asArray(primaryIssue.affectedSymbols)[0] || asArray(change.affectedSymbols)[0] || "";
+
+    setBusyAction("fix");
+    setActionError(null);
+    setActionNotice(null);
+
+    try {
+      const flow = await requestJson(buildRunApiUrl(currentRunId, "/flow/fixes"), {
+        method: "POST",
+        body: JSON.stringify({
+          actor: "reviewer",
+          action: "regenerate_with_constraints",
+          changeId,
+          nodeId: node?.id,
+          nodeRevision: node?.revision,
+          planVersion: hydratedDisplayedArtifact.planVersion,
+          graphVersion: hydratedDisplayedArtifact.graphVersion,
+          artifactHash: hydratedDisplayedArtifact.artifactHash,
+          issueCode: primaryIssue.type || primaryIssue.code || change.issueCode || "review_issue",
+          symbol,
+          message: primaryIssue.message || primaryIssue.summary || change.issueSummary || change.summary,
+        }),
+      });
+      setFlowProjection(flow);
+
+      const artifact = await requestJson(buildRunApiUrl(flow.runId || currentRunId, "/artifact"));
+      setApprovals({});
+      setDecisionHints({});
+      applyFreshArtifact(artifact, {
+        syncDisplay: true,
+        notice: "Applied the selected fix and re-ran Codex through Semantix validation.",
+      });
+      await refreshRunSummaries(flow.runId || currentRunId);
+    } catch (error) {
+      if (error?.code === "STALE_STATE") {
+        setActionError(formatFreshnessError("This fix", error));
+        scheduleArtifactRefresh(currentRunId, {
+          syncDisplay: false,
+        });
+        return;
+      }
+      setActionError(error.message || "Failed to apply the selected fix.");
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   async function onIntervene(nodeId, kind) {
@@ -654,6 +754,7 @@ function SemantixApp({
       setActionError(
         `Your current view is now stale. The backend produced artifact ${shortHash(latestArtifactValue.artifactHash)} at plan v${latestArtifactValue.planVersion}. Re-open the latest artifact before approving.`,
       );
+      await refreshFlowProjection(currentRunId);
       await refreshRunSummaries(currentRunId);
     } catch (error) {
       if (error?.code === "STALE_STATE") {
@@ -699,7 +800,10 @@ function SemantixApp({
       });
 
       let checkpoint = getLatestCheckpoint(artifact);
-      if (artifact.plan.status === "paused" && checkpoint && checkpoint.reason !== "awaiting_approval") {
+      const canResumeCheckpoint =
+        checkpoint
+        && !["awaiting_approval", "awaiting_issue_resolution", "awaiting_semantic_admission"].includes(checkpoint.reason);
+      if (artifact.plan.status === "paused" && canResumeCheckpoint) {
         artifact = decorateArtifact(await requestJson(buildRunApiUrl(currentRunId, "/resume"), {
           method: "POST",
           body: JSON.stringify({
@@ -718,6 +822,7 @@ function SemantixApp({
       const nextPhase = phaseFromArtifact(artifact);
       setRunProgress(nextPhase === PHASES.done ? getDisplayableProposedChanges(artifact).length : 0);
       setPhase(nextPhase);
+      await refreshFlowProjection(currentRunId);
       await refreshRunSummaries(currentRunId);
     } catch (error) {
       setPhase(PHASES.review);
@@ -735,7 +840,7 @@ function SemantixApp({
   }
 
   function startNewRun() {
-    const nextRunId = ensureRunId("");
+    const nextRunId = ensureRunId("", { reuseLocation: false });
     setCurrentRunId(nextRunId);
     setLatestArtifact(null);
     setDisplayedArtifact(null);
@@ -745,6 +850,7 @@ function SemantixApp({
     setPreviewCache({});
     setSelectedNodeRef(null);
     setFocusChangeId(null);
+    setFlowProjection(null);
     setActionError(null);
     setActionNotice(null);
     setInspectorError(null);
@@ -782,6 +888,10 @@ function SemantixApp({
         themeName={themeName}
         setThemeName={setThemeName}
       />
+
+      {flowProjection && phase !== PHASES.prompt && (
+        <FlowStatusStrip t={t} flow={flowProjection} />
+      )}
 
       {phase === PHASES.prompt && (
         <PromptView
@@ -843,6 +953,77 @@ function SemantixApp({
           onNewRun={startNewRun}
         />
       )}
+    </div>
+  );
+}
+
+function FlowStatusStrip({ t, flow }) {
+  const classification = flow?.classification || {};
+  const visibleSteps = (flow?.steps || []).filter((step) =>
+    [2, 3, 4, 7, 8, 10, 11, 12].includes(step.id),
+  );
+  const issueCount = flow?.issues?.length || 0;
+  const approval = flow?.approval || {};
+  const result = flow?.result || {};
+  const tone =
+    flow?.phase === "completed"
+      ? "green"
+      : flow?.phase === "needs_intervention"
+        ? "red"
+        : flow?.phase === "awaiting_approval"
+          ? "orange"
+          : "info";
+
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        borderBottom: `1px solid ${t.border}`,
+        background: t.panelAlt,
+        padding: "8px 16px",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        overflowX: "auto",
+      }}
+    >
+      <Pill t={t} risk={tone} strong>{flow.phase}</Pill>
+      <Pill t={t} risk={classification.riskLevel === "high" ? "red" : classification.riskLevel === "medium" ? "orange" : "green"}>
+        {classification.effort || "unknown"} effort
+      </Pill>
+      <Pill t={t}>{Math.round((classification.confidenceScore || 0) * 100)}% confidence</Pill>
+      <Pill t={t} risk={issueCount > 0 ? "red" : "green"}>{issueCount} issue{issueCount === 1 ? "" : "s"}</Pill>
+      {approval.required ? (
+        <Pill t={t} risk={approval.ready || approval.approved ? "green" : approval.blocked ? "red" : "orange"}>
+          approval {approval.status}
+        </Pill>
+      ) : null}
+      {result.filesUpdated?.length > 0 ? <Pill t={t} risk="info">{result.filesUpdated.length} file{result.filesUpdated.length === 1 ? "" : "s"}</Pill> : null}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: "max-content" }}>
+        {visibleSteps.map((step) => {
+          const done = step.status === "complete" || step.status === "available";
+          const blocked = ["blocked", "required"].includes(step.status);
+          const ready = step.status === "ready" || step.status === "running";
+          const color = blocked ? t.red : ready ? t.orange : done ? t.green : t.textFaint;
+          return (
+            <span
+              key={step.id}
+              title={`${step.label}: ${step.status}`}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                fontSize: 11,
+                color,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: color }} />
+              {step.id}. {step.label}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }

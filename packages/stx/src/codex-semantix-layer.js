@@ -601,6 +601,87 @@ function resolveArtifactIdentity(flowOrArtifact) {
   };
 }
 
+function normalizeFixMetadata(metadata = {}) {
+  return {
+    issueCode: compactText(metadata.issueCode ?? metadata.issue_code ?? metadata.code),
+    issueId: compactText(metadata.issueId ?? metadata.issue_id),
+    symbol: compactText(metadata.symbol ?? metadata.affectedSymbol ?? metadata.affected_symbol),
+    action: compactText(metadata.action ?? metadata.fixAction ?? metadata.fix_action),
+    fixOptionId: compactText(metadata.fixOptionId ?? metadata.fix_option_id ?? metadata.fixId ?? metadata.fix_id),
+    note: compactText(metadata.note ?? metadata.reason ?? metadata.summary),
+  };
+}
+
+function selectIssueForFix(issues, metadata) {
+  const blockingIssues = issues.filter((issue) => issue.blocking);
+  const candidates = blockingIssues.length > 0 ? blockingIssues : issues;
+
+  return (
+    candidates.find((issue) => {
+      if (metadata.issueId && issue.raw?.id !== metadata.issueId && issue.id !== metadata.issueId) {
+        return false;
+      }
+
+      if (metadata.issueCode && issue.code !== metadata.issueCode) {
+        return false;
+      }
+
+      if (metadata.symbol && !issue.affectedSymbols.includes(metadata.symbol)) {
+        return false;
+      }
+
+      return true;
+    }) ??
+    candidates.find((issue) => (metadata.issueCode ? issue.code === metadata.issueCode : true)) ??
+    candidates[0] ??
+    null
+  );
+}
+
+function selectFixOption(issue, metadata) {
+  const options = issue?.fixOptions ?? [];
+
+  return (
+    options.find((option) => metadata.fixOptionId && option.id === metadata.fixOptionId) ??
+    options.find((option) => metadata.action && option.action === metadata.action) ??
+    options.find((option) => option.recommended) ??
+    options[0] ??
+    null
+  );
+}
+
+function formatSelectedFix({ issue, fixOption, metadata }) {
+  const symbol = metadata.symbol || issue?.affectedSymbols?.[0] || "";
+  const action = metadata.action || fixOption?.action || "regenerate_with_constraints";
+  const label = fixOption?.label || action.replaceAll("_", " ");
+  const subject = issue
+    ? `${issue.code}${symbol ? ` for '${symbol}'` : ""}`
+    : symbol
+      ? `issue for '${symbol}'`
+      : "the selected issue";
+
+  return {
+    action,
+    label,
+    symbol,
+    summary: `Apply '${label}' to resolve ${subject}.`,
+  };
+}
+
+function buildFixConstraint({ issue, selectedFix, metadata }) {
+  const symbol = selectedFix.symbol;
+  const issueSummary = issue?.summary ?? metadata.note ?? "Semantix review requested regeneration.";
+  const symbolInstruction = symbol
+    ? ` Resolve symbol '${symbol}' by generating it in the proposal or replacing it with an existing grounded repo symbol.`
+    : "";
+
+  return [
+    `Semantix fix selected: ${selectedFix.action}. ${issueSummary}${symbolInstruction}`,
+    "Regenerate the semantic output so every referenced file, symbol, and parameter is grounded in repo context or explicitly created by the proposed change.",
+    "Do not repeat the blocked proposal unless the selected fix is fully reflected in the admitted semantic output.",
+  ].join(" ");
+}
+
 export class CodexSemantixLayer {
   constructor({
     service,
@@ -665,6 +746,96 @@ export class CodexSemantixLayer {
     return buildCodexSemantixFlowProjection({
       service: this.service,
       artifact,
+    });
+  }
+
+  async applyFix({
+    runId,
+    actor = this.defaultActor,
+    issueCode,
+    issueId,
+    symbol,
+    action,
+    fixOptionId,
+    note,
+  } = {}) {
+    if (!compactText(runId)) {
+      throw new Error("CodexSemantixLayer.applyFix requires runId.");
+    }
+
+    const currentArtifact = await this.service.getCurrentArtifact(runId);
+    const semanticNode = getRuntimeNode(currentArtifact);
+    if (!semanticNode) {
+      throw new Error(`Run "${runId}" does not contain a semantic generation node.`);
+    }
+
+    const currentFlow = await buildCodexSemantixFlowProjection({
+      service: this.service,
+      artifact: currentArtifact,
+    });
+    const metadata = normalizeFixMetadata({
+      issueCode,
+      issueId,
+      symbol,
+      action,
+      fixOptionId,
+      note,
+    });
+    const issue = selectIssueForFix(currentFlow.issues, metadata);
+    const fixOption = selectFixOption(issue, metadata);
+    const selectedFix = formatSelectedFix({
+      issue,
+      fixOption,
+      metadata,
+    });
+    const hardConstraints = [...(semanticNode.constraints?.hard ?? [])];
+    const softConstraints = [...(semanticNode.constraints?.soft ?? [])];
+    const fixConstraint = buildFixConstraint({
+      issue,
+      selectedFix,
+      metadata,
+    });
+    const identity = resolveArtifactIdentity(currentArtifact);
+
+    await this.service.submitIntervention({
+      runId,
+      actor,
+      nodeId: semanticNode.id,
+      nodeRevision: semanticNode.revision,
+      planVersion: identity.planVersion,
+      graphVersion: identity.graphVersion,
+      artifactHash: identity.artifactHash,
+      changes: {
+        inputSummary: `Re-evaluate semantic output after fix: ${selectedFix.summary}`,
+        outputSummary: "Awaiting fixed semantic admission.",
+        contextPatch: {
+          selectedFix: {
+            issueCode: (issue?.code ?? metadata.issueCode) || null,
+            issueSummary: (issue?.summary ?? metadata.note) || null,
+            action: selectedFix.action,
+            label: selectedFix.label,
+            symbol: selectedFix.symbol || null,
+          },
+        },
+        constraintPatch: {
+          hard: unique([...hardConstraints, fixConstraint]),
+          soft: unique([
+            ...softConstraints,
+            "Prefer the smallest grounded proposal that resolves the selected Semantix issue.",
+          ]),
+          reviewerNote: selectedFix.summary,
+        },
+      },
+    });
+
+    const refreshedArtifact = await this.service.executeApprovedNodes({
+      runId,
+      actor,
+    });
+
+    return buildCodexSemantixFlowProjection({
+      service: this.service,
+      artifact: refreshedArtifact,
     });
   }
 

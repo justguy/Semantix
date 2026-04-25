@@ -105,6 +105,10 @@ function routeMatch(pathname, method) {
     return { name: "codex.flow.approve", runId };
   }
 
+  if (method === "POST" && collection === "flow" && item === "fixes") {
+    return { name: "codex.flow.fix", runId };
+  }
+
   if (method === "GET" && collection === "previews" && !item) {
     return { name: "preview.get", runId };
   }
@@ -456,6 +460,21 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
           response,
           200,
           await codexLayer.approveAndRun({
+            runId: match.runId,
+            ...body,
+          }),
+        );
+      }
+
+      if (match.name === "codex.flow.fix") {
+        if (!codexLayer) {
+          throw new Error("Codex Semantix layer is not configured.");
+        }
+
+        return json(
+          response,
+          200,
+          await codexLayer.applyFix({
             runId: match.runId,
             ...body,
           }),

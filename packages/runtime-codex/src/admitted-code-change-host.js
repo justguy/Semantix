@@ -155,6 +155,45 @@ function normalizeDiffLines(diffPreview) {
   return lines;
 }
 
+function isUnifiedDiffMetadataLine(line) {
+  return (
+    !line ||
+    line.startsWith("diff ") ||
+    line.startsWith("index ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ")
+  );
+}
+
+function toBareHunkSimpleDiff(diffPreview) {
+  const diffLines = normalizeDiffLines(diffPreview);
+  const simpleLines = [];
+  let sawBareHunk = false;
+
+  for (const line of diffLines) {
+    if (isUnifiedDiffMetadataLine(line)) {
+      continue;
+    }
+
+    if (line === "@@") {
+      sawBareHunk = true;
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      return null;
+    }
+
+    if (!sawBareHunk) {
+      return null;
+    }
+
+    simpleLines.push(line);
+  }
+
+  return sawBareHunk ? simpleLines.join("\n") : null;
+}
+
 function applyUnifiedDiffPreview(currentContent, diffPreview, details) {
   const diffLines = normalizeDiffLines(diffPreview);
   const current = toLineRecord(currentContent);
@@ -168,13 +207,7 @@ function applyUnifiedDiffPreview(currentContent, diffPreview, details) {
 
   while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@ ")) {
     const line = diffLines[lineIndex];
-    if (
-      !line ||
-      line.startsWith("diff ") ||
-      line.startsWith("index ") ||
-      line.startsWith("--- ") ||
-      line.startsWith("+++ ")
-    ) {
+    if (isUnifiedDiffMetadataLine(line)) {
       lineIndex += 1;
       continue;
     }
@@ -338,6 +371,11 @@ function applySimpleDiffPreview(currentContent, diffPreview, details) {
 
 function applyDiffPreview(currentContent, diffPreview, details) {
   const normalizedDiff = normalizeNewlines(diffPreview);
+  const bareHunkSimpleDiff = toBareHunkSimpleDiff(normalizedDiff);
+  if (bareHunkSimpleDiff !== null) {
+    return applySimpleDiffPreview(currentContent, bareHunkSimpleDiff, details);
+  }
+
   const isUnifiedDiff =
     normalizedDiff.includes("\n@@ ") ||
     normalizedDiff.startsWith("@@ ") ||

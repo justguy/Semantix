@@ -36,6 +36,13 @@ export async function runCli(args = process.argv.slice(2)) {
     return;
   }
 
+  if (command === "fix") {
+    const { runRef, ...fixMetadata } = parseFixArgs(args.slice(1));
+    const runId = await resolveRunId(service, runRef);
+    renderFlow(await codexLayer.applyFix({ runId, actor: "cli", ...fixMetadata }));
+    return;
+  }
+
   if (command === "approve") {
     const runId = await resolveRunId(service, args[1]);
     renderFlow(await codexLayer.approveAndRun({ runId, actor: "cli" }));
@@ -648,6 +655,50 @@ function parseDiffArgs(values) {
   };
 }
 
+function parseFixArgs(values) {
+  const parsed = {};
+
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+
+    if (value === "--issue-code" && values[index + 1]) {
+      parsed.issueCode = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value === "--symbol" && values[index + 1]) {
+      parsed.symbol = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value === "--action" && values[index + 1]) {
+      parsed.action = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value === "--fix-option" && values[index + 1]) {
+      parsed.fixOptionId = values[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (value.startsWith("--")) {
+      throw new Error(`Unknown fix argument '${value}'.`);
+    }
+
+    if (parsed.runRef) {
+      throw new Error(`Unexpected fix argument '${value}'.`);
+    }
+
+    parsed.runRef = value;
+  }
+
+  return parsed;
+}
+
 function looksLikeNodeId(value) {
   return typeof value === "string" && value.startsWith("node.");
 }
@@ -741,6 +792,7 @@ function printUsage() {
       "Usage:",
       "  stx run \"task\" [--boundary text] [--success text] [--run-id id]",
       "  stx flow [runId|latest]",
+      "  stx fix [runId|latest] [--issue-code code] [--symbol name] [--action action] [--fix-option id]",
       "  stx approve [runId|latest]",
       "  stx list",
       "  stx graph [runId|latest]",

@@ -312,3 +312,95 @@ test("applies a unified admitted code-change diff to disk", async (t) => {
   assert.match(nextContent, /const normalized = String\(token \|\| ""\);/);
   assert.match(nextContent, /return Boolean\(normalized\);/);
 });
+
+test("applies a metadata-wrapped bare hunk diff from Codex", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const targetPath = join(workspaceRoot, "routes", "auth.ts");
+
+  const result = await applyAdmittedCodeChange({
+    admittedOutput: {
+      workspace_path: targetPath,
+      summary: "Add a harmless verification comment.",
+      diff_preview: [
+        "--- a/routes/auth.ts",
+        "+++ b/routes/auth.ts",
+        "@@",
+        "+// Verification smoke check: keep auth verification routed through existing verifyToken only.",
+      ].join("\n"),
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: createSemanticFrameContext(workspaceRoot),
+    runId: "run-bare-hunk-apply",
+    nodeId: "node.execute.host",
+  });
+
+  const nextContent = await readFile(targetPath, "utf8");
+  assert.equal(result.stateEffect.execution.mode, "simple_diff");
+  assert.match(nextContent, /Verification smoke check/);
+});
+
+test("applies a CodeChangeSet metadata-wrapped bare hunk diff from Codex", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const targetPath = join(workspaceRoot, "routes", "auth.ts");
+
+  const result = await applyAdmittedCodeChange({
+    admittedOutput: {
+      summary: "Add a harmless verification comment.",
+      changes: [
+        {
+          operation: "modify_file",
+          workspace_path: "routes/auth.ts",
+          diff_preview: [
+            "--- a/routes/auth.ts",
+            "+++ b/routes/auth.ts",
+            "@@",
+            "+// Verification smoke check: keep auth verification routed through existing verifyToken only.",
+          ].join("\n"),
+        },
+      ],
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: createSemanticFrameContext(workspaceRoot),
+    runId: "run-changeset-bare-hunk-apply",
+    nodeId: "node.execute.host",
+  });
+
+  const nextContent = await readFile(targetPath, "utf8");
+  assert.equal(result.stateEffect.kind, "file_set");
+  assert.equal(result.stateEffect.effects[0].mode, "simple_diff");
+  assert.match(nextContent, /Verification smoke check/);
+});
