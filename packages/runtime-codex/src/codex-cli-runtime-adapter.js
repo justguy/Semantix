@@ -307,11 +307,16 @@ export class CodexCliRuntimeAdapter {
   normalizeRunnerPayload({ runId, node, result, compilerContext }) {
     const executionStatus = result.exitCode === 0 ? "succeeded" : "failed";
     const stdoutSummary = result.stdout.trim();
+    const stderrSummary = result.stderr.trim();
+    const failureSummary =
+      stdoutSummary ||
+      stderrSummary.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ||
+      "Codex CLI execution failed.";
 
     if (result.exitCode !== 0) {
       return {
         executionStatus,
-        outputSummary: stdoutSummary || "Codex CLI execution failed.",
+        outputSummary: failureSummary,
         stateEffects: [],
         riskSignals: [],
         checkpoint: null,
@@ -325,7 +330,7 @@ export class CodexCliRuntimeAdapter {
             nodeId: node.id,
             payload: {
               executionStatus,
-              outputSummary: stdoutSummary || "Codex CLI execution failed.",
+              outputSummary: failureSummary,
             },
           }),
         ],

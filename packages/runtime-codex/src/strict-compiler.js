@@ -20,6 +20,15 @@ const SCANNABLE_CODE_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
 ]);
+const SYMBOL_VALIDATED_EXTENSIONS = new Set([
+  ".cjs",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".sql",
+  ".ts",
+  ".tsx",
+]);
 const IGNORED_SCAN_DIRS = new Set([
   ".git",
   ".next",
@@ -654,6 +663,47 @@ function isCodeChangeProposal(output) {
   );
 }
 
+function getRawWorkspaceRoot(semanticFrameContext) {
+  return (
+    semanticFrameContext?.context?.workspace_root ??
+    semanticFrameContext?.workspace_root ??
+    semanticFrameContext?.context?.allowed_workspace_root ??
+    semanticFrameContext?.allowed_workspace_root ??
+    ""
+  );
+}
+
+function diffPreviewDeclaresNoRepositoryChanges(diffPreview) {
+  if (typeof diffPreview !== "string") {
+    return false;
+  }
+  return /no\s+(repository|repo)?\s*file\s+modifications|no\s+(repository|repo)\s+changes|no\s+file\s+modifications/i.test(diffPreview);
+}
+
+function workspacePathMatchesRoot(workspaceRoot, semanticFrameContext, workspacePath) {
+  if (typeof workspacePath !== "string" || !workspacePath.trim()) {
+    return true;
+  }
+
+  const trimmed = workspacePath.trim();
+  const rawWorkspaceRoot = getRawWorkspaceRoot(semanticFrameContext);
+  if (trimmed === "." || trimmed === rawWorkspaceRoot || trimmed === workspaceRoot) {
+    return true;
+  }
+
+  const resolved = resolveProposalPath(workspaceRoot, trimmed);
+  return resolved === workspaceRoot;
+}
+
+function isReviewOnlySemanticOutput(admittedOutput, semanticFrameContext, workspaceRoot) {
+  return (
+    isObject(admittedOutput) &&
+    !hasOwnProperty(admittedOutput, "changes") &&
+    diffPreviewDeclaresNoRepositoryChanges(admittedOutput.diff_preview) &&
+    workspacePathMatchesRoot(workspaceRoot, semanticFrameContext, admittedOutput.workspace_path)
+  );
+}
+
 function walkWorkspaceFiles(rootDir, results = []) {
   let entries = [];
   try {
@@ -743,6 +793,86 @@ function supportingContextMatches(supportingContext, symbolName) {
       .filter((value) => typeof value === "string")
       .some((value) => value.toLowerCase().includes(normalized));
   });
+}
+
+function referenceSupportingContextMatches(reference, symbolName) {
+  const normalized = String(symbolName || "").trim().toLowerCase();
+  if (!normalized || !Array.isArray(reference?.supporting_context)) {
+    return false;
+  }
+
+  return reference.supporting_context
+    .filter((entry) => typeof entry === "string")
+    .some((entry) => entry.toLowerCase().includes(normalized));
+}
+
+function hasReferenceSupport({ supportingContext, reference, name }) {
+  return (
+    supportingContextMatches(supportingContext, name) ||
+    supportingContextMatches(supportingContext, reference?.path) ||
+    referenceSupportingContextMatches(reference, name) ||
+    referenceSupportingContextMatches(reference, reference?.path)
+  );
+}
+
+function isSymbolValidatedWorkspacePath(targetPath) {
+  return typeof targetPath === "string" && SYMBOL_VALIDATED_EXTENSIONS.has(extname(targetPath).toLowerCase());
+}
+
+function buildProposalExecutableText(admittedOutput, changes) {
+  const chunks = [];
+  const legacyIsCodeLike =
+    !hasOwnProperty(admittedOutput, "workspace_path") ||
+    isSymbolValidatedWorkspacePath(admittedOutput?.workspace_path);
+  if (legacyIsCodeLike && typeof admittedOutput?.diff_preview === "string") {
+    chunks.push(admittedOutput.diff_preview);
+  }
+  if (legacyIsCodeLike && typeof admittedOutput?.content === "string") {
+    chunks.push(admittedOutput.content);
+  }
+  for (const change of changes) {
+    if (!isSymbolValidatedWorkspacePath(change?.workspace_path)) {
+      continue;
+    }
+    if (typeof change?.diff_preview === "string") {
+      chunks.push(change.diff_preview);
+    }
+    if (typeof change?.content === "string") {
+      chunks.push(change.content);
+    }
+  }
+  return chunks.join("\n");
+}
+
+function proposalExecutableTextUsesName(executableText, name) {
+  if (typeof name !== "string" || !name.trim() || !executableText) {
+    return false;
+  }
+  return new RegExp(`\\b${escapeRegExp(name.trim())}\\b`).test(executableText);
+}
+
+function isSemantixMetadataReference(reference) {
+  const name = typeof reference?.name === "string" ? reference.name.trim() : "";
+  const metadataNames = new Set([
+    "artifact_hash",
+    "artifact_path",
+    "checkpoint_id",
+    "graph_version",
+    "node_revision",
+    "plan_version",
+    "requested_joke_topic",
+    "review_before_execution",
+    "run_id",
+    "state_effect",
+    "workspace_root",
+  ]);
+
+  return (
+    metadataNames.has(name) ||
+    name.startsWith("effect.") ||
+    name.startsWith("checkpoint.") ||
+    name.startsWith("artifact.")
+  );
 }
 
 function findSymbolEvidence(workspaceRoot, symbolName) {
@@ -976,6 +1106,24 @@ export function buildDeterministicCodeChangeReview({
       blockingReason: null,
       targetPath: admittedOutput?.workspace_path ?? null,
       diffPreview: null,
+    };
+  }
+
+  if (isReviewOnlySemanticOutput(admittedOutput, semanticFrameContext, workspaceRoot)) {
+    return {
+      workspaceRoot,
+      issues,
+      evidence: [{
+        kind: "semantic_output",
+        detail: admittedOutput.summary ?? "Review-only semantic output.",
+      }],
+      interventions: [],
+      blocking: false,
+      blockingReason: null,
+      targetPath: null,
+      targetPaths: [],
+      diffPreview: admittedOutput.diff_preview ?? null,
+      semanticOnly: true,
     };
   }
 
@@ -1245,10 +1393,20 @@ export function buildDeterministicCodeChangeReview({
   }
 
   const reviewAffectedFiles = dedupeReviewItems(affectedFiles, (entry) => entry);
+  const createdTargetPaths = new Set(
+    changes
+      .filter((change) => change.operation === "create_file")
+      .map((change) => resolveProposalPath(workspaceRoot, change.workspace_path))
+      .filter((targetPath) => targetPath && isPathInsideWorkspace(workspaceRoot, targetPath)),
+  );
+  const executableText = buildProposalExecutableText(admittedOutput, changes);
 
   const parameters = Array.isArray(admittedOutput.parameters) ? admittedOutput.parameters : [];
   for (const parameter of parameters) {
-    if (parameter?.source === "invented") {
+    if (
+      parameter?.source === "invented" &&
+      proposalExecutableTextUsesName(executableText, parameter.name)
+    ) {
       issues.push(
         createReviewIssue({
           issueCode: "invented_parameter",
@@ -1276,7 +1434,11 @@ export function buildDeterministicCodeChangeReview({
       continue;
     }
 
-    if (kind === "parameter" && reference?.source === "invented") {
+    if (
+      kind === "parameter" &&
+      reference?.source === "invented" &&
+      proposalExecutableTextUsesName(executableText, name)
+    ) {
       issues.push(
         createReviewIssue({
           issueCode: "invented_parameter",
@@ -1296,10 +1458,34 @@ export function buildDeterministicCodeChangeReview({
       continue;
     }
 
+    if (kind === "parameter") {
+      continue;
+    }
+
+    if (isSemantixMetadataReference(reference)) {
+      continue;
+    }
+
     if (kind === "file" || kind === "module") {
       const referencePath = resolveProposalPath(workspaceRoot, reference.path || name);
-      const hasSupport = supportingContextMatches(supportingContext, name);
-      if (referencePath && (!isPathInsideWorkspace(workspaceRoot, referencePath) || !fileExists(referencePath))) {
+      const hasSupport = hasReferenceSupport({
+        supportingContext,
+        reference,
+        name,
+      });
+      if (referencePath && createdTargetPaths.has(referencePath)) {
+        evidence.push({
+          kind: "planned_file",
+          detail: `Reference '${name}' is created by this proposal.`,
+          path: toWorkspaceRelativePath(workspaceRoot, referencePath),
+          symbol: name,
+        });
+        continue;
+      }
+      if (
+        referencePath &&
+        (!isPathInsideWorkspace(workspaceRoot, referencePath) || !fileExists(referencePath))
+      ) {
         issues.push(
           createReviewIssue({
             issueCode: "missing_supporting_context",
@@ -1339,6 +1525,10 @@ export function buildDeterministicCodeChangeReview({
           }),
         );
       }
+      continue;
+    }
+
+    if (!proposalExecutableTextUsesName(executableText, name)) {
       continue;
     }
 

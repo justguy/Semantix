@@ -86,6 +86,43 @@ test("applies a simple admitted code-change diff to disk", async (t) => {
   assert.match(nextContent, /const claims = verifyToken\(token\);/);
 });
 
+test("records review-only semantic output without writing files", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+
+  const result = await applyAdmittedCodeChange({
+    admittedOutput: {
+      summary: "A dry sand joke review artifact is ready for approval.",
+      workspace_path: workspaceRoot,
+      diff_preview:
+        "No repository file modifications are proposed. Execution is deferred pending fresh approval. Proposed target output: \"Why did the sand refuse to laugh? Because it was too dry.\"",
+      references: [
+        {
+          kind: "file",
+          name: "workspace_root",
+          path: workspaceRoot,
+          source: "grounded",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "note",
+          value: "User-stated scope is only to tell a sand and not funny joke.",
+        },
+      ],
+    },
+    semanticFrameContext: createSemanticFrameContext(workspaceRoot),
+    runId: "run-semantic-only",
+    nodeId: "node.execute.host",
+  });
+
+  assert.match(result.outputSummary, /Recorded approved semantic output/);
+  assert.equal(result.stateEffect.kind, "semantic_output");
+  assert.equal(result.stateEffect.operation, "record");
+  assert.equal(result.stateEffect.execution.semanticOnly, true);
+});
+
 test("applies a CodeChangeSet transaction with modify, create, delete, and rename operations", async (t) => {
   const workspaceRoot = await createWorkspace(t);
   const authPath = join(workspaceRoot, "routes", "auth.ts");

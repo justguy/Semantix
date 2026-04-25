@@ -840,6 +840,45 @@ export async function applyAdmittedCodeChange({
     });
   }
 
+  if (review.semanticOnly) {
+    const execution = {
+      status: "recorded",
+      workspaceRoot: review.workspaceRoot,
+      semanticOnly: true,
+      runId,
+      nodeId,
+    };
+
+    return {
+      outputSummary: `Recorded approved semantic output. ${admittedOutput?.summary ?? "No summary provided."}`,
+      stateEffect: {
+        kind: "semantic_output",
+        operation: "record",
+        target: "semantix.semantic_output",
+        targets: ["semantix.semantic_output"],
+        summary: admittedOutput?.summary ?? "Recorded approved semantic output.",
+        diff: admittedOutput?.diff_preview ?? "",
+        diffPreview: admittedOutput?.diff_preview ?? "",
+        policyState: "pass",
+        riskFlags: [],
+        reversibility: {
+          status: "reversible",
+          mechanism: "audit_record",
+        },
+        enforcement: {
+          owner: "host",
+          status: "pass",
+          details: "Semantic output was recorded without modifying workspace files.",
+        },
+        execution,
+      },
+      inspectorPatch: {
+        execution,
+      },
+      auditDetails: execution,
+    };
+  }
+
   if (!review.targetPath) {
     throw new ValidationError("Admitted code change did not include a target workspace_path.", {
       runId,

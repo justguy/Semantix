@@ -96,23 +96,29 @@ function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode } = {
     admittedOutput: input,
     semanticFrameContext,
   });
-  const changes = normalizePreviewChanges(input);
-  const targets = changes
-    .flatMap((change) => [change.target, change.newTarget])
-    .filter((target) => typeof target === "string" && target.trim());
+  const changes = review.semanticOnly ? [] : normalizePreviewChanges(input);
+  const targets = review.semanticOnly
+    ? ["semantix.semantic_output"]
+    : changes
+        .flatMap((change) => [change.target, change.newTarget])
+        .filter((target) => typeof target === "string" && target.trim());
   const target =
+    review.semanticOnly
+      ? "semantix.semantic_output"
+      : (
     targets.length === 1
       ? targets[0]
       : targets.length > 1
         ? `${targets.length} files`
-        : input?.target_file ?? DEFAULT_TARGET_SYMBOL;
+        : input?.target_file ?? DEFAULT_TARGET_SYMBOL
+      );
   const diffPreview = buildAggregateDiffPreview(input, changes);
   const policyState = review.blocking ? "block" : review.issues.length > 0 ? "review_required" : "pass";
 
   return {
     id: `effect.${runId ?? "run"}.code_change_preview`,
-    kind: targets.length > 1 ? "file_set" : "file",
-    operation: Array.isArray(input?.changes) ? "changeset" : "modify",
+    kind: review.semanticOnly ? "semantic_output" : targets.length > 1 ? "file_set" : "file",
+    operation: review.semanticOnly ? "record" : Array.isArray(input?.changes) ? "changeset" : "modify",
     target,
     targets,
     summary: input?.summary ?? "Semantix proposed a code change.",
@@ -176,12 +182,10 @@ export function createStxApplication({
     rootDir: dataDir,
   });
   const runtimeRegistry = new RuntimeRegistry();
+  const configuredCodexHome = connectorOptions?.codexHome ?? process.env.SEMANTIX_CODEX_HOME;
   const connector = new CodexCliConnector({
-    codexHome:
-      connectorOptions?.codexHome ??
-      process.env.SEMANTIX_CODEX_HOME ??
-      join(dataDir, "codex-home"),
     cwd: effectiveWorkspaceRoot,
+    ...(configuredCodexHome ? { codexHome: configuredCodexHome } : {}),
     ...connectorOptions,
   });
   const adapter = new CodexCliRuntimeAdapter({

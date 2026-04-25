@@ -9,7 +9,7 @@ import { createStxApplication } from "../src/application.js";
 
 const DEFAULT_TARGET_SYMBOL = "semantix.host.apply_admitted_semantic";
 
-async function createHarness(t, runner) {
+async function createHarness(t, runner, connectorOptions = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), "semantix-stx-app-"));
   const dataDir = join(rootDir, "data");
   const workspaceRoot = join(rootDir, "workspace");
@@ -28,6 +28,7 @@ async function createHarness(t, runner) {
     connectorOptions: {
       runner,
       cwd: workspaceRoot,
+      ...connectorOptions,
     },
   });
 
@@ -73,6 +74,63 @@ async function compileDefaultRun(service, runId, workspaceRoot) {
     cwd: workspaceRoot,
   });
 }
+
+test("default STX application leaves Codex home unset unless configured", async (t) => {
+  const originalSemantixCodexHome = process.env.SEMANTIX_CODEX_HOME;
+  delete process.env.SEMANTIX_CODEX_HOME;
+  t.after(() => {
+    if (originalSemantixCodexHome === undefined) {
+      delete process.env.SEMANTIX_CODEX_HOME;
+    } else {
+      process.env.SEMANTIX_CODEX_HOME = originalSemantixCodexHome;
+    }
+  });
+
+  let observedEnv;
+  const { application, workspaceRoot } = await createHarness(
+    t,
+    async ({ env }) => {
+      observedEnv = env;
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+          summary: "Add email verification route with verifyToken().",
+          diff_preview: "+ const claims = verifyToken(token);\n",
+          references: [
+            {
+              kind: "function",
+              name: "verifyToken",
+              required: true,
+            },
+          ],
+          parameters: [],
+          supporting_context: [
+            {
+              kind: "file",
+              value: "routes/auth.ts",
+            },
+            {
+              kind: "symbol",
+              value: "verifyToken",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    },
+    { env: {} },
+  );
+
+  await compileDefaultRun(application.service, "run-stx-default-codex-home", workspaceRoot);
+  await application.service.executeApprovedNodes({
+    runId: "run-stx-default-codex-home",
+    actor: "operator",
+  });
+
+  assert.ok(observedEnv);
+  assert.equal(Object.hasOwn(observedEnv, "CODEX_HOME"), false);
+});
 
 test("default STX application catches a plausible bad code change before approval", async (t) => {
   const { application, workspaceRoot } = await createHarness(

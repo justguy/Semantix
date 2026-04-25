@@ -1,12 +1,6 @@
 const { useState: usePhaseState, useEffect: usePhaseEffect } = React;
 
-function PromptView({ t, scenario, prompt, setPrompt, onCompile, isBusy }) {
-  const samples = Object.values(window.SEMANTIX_SCENARIOS || {}).map((item) => ({
-    key: item.key,
-    label: item.label,
-    prompt: item.prompt,
-  }));
-
+function PromptView({ t, prompt, setPrompt, onCompile, isBusy }) {
   return (
     <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 32, overflow: "auto" }}>
       <div style={{ width: "100%", maxWidth: 760 }}>
@@ -24,7 +18,7 @@ function PromptView({ t, scenario, prompt, setPrompt, onCompile, isBusy }) {
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Example: Add email verification to signup and require dry-run email delivery in staging."
+            placeholder="Describe the outcome to compile for review."
             style={{
               width: "100%",
               minHeight: 132,
@@ -56,33 +50,6 @@ function PromptView({ t, scenario, prompt, setPrompt, onCompile, isBusy }) {
             <Btn t={t} variant="primary" icon={<Icon.Spark />} onClick={onCompile} disabled={isBusy}>
               Compile review artifact
             </Btn>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontSize: 11, color: t.textFaint, letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 }}>
-            Example workloads
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-            {samples.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => setPrompt(item.prompt)}
-                style={{
-                  textAlign: "left",
-                  padding: 14,
-                  background: t.panel,
-                  border: `1px solid ${prompt === item.prompt ? t.accent : t.border}`,
-                  borderRadius: 12,
-                  cursor: "pointer",
-                  color: t.text,
-                  fontFamily: "inherit",
-                }}
-              >
-                <div style={{ fontSize: 12, color: t.accent, fontWeight: 700, marginBottom: 6 }}>{item.label}</div>
-                <div style={{ fontSize: 12.5, color: t.textDim, lineHeight: 1.55 }}>{item.prompt}</div>
-              </button>
-            ))}
           </div>
         </div>
       </div>
@@ -1094,9 +1061,11 @@ function RunningView({ t, artifact, progress, approvals }) {
   );
 }
 
-function DoneView({ t, scenario, artifact, approvals, onNewRun }) {
+function DoneView({ t, artifact, approvals, onNewRun }) {
   const approvedChanges = getDisplayableProposedChanges(artifact).filter((change) => approvalEntryIsFresh(approvals[change.id], artifact));
   const heldChanges = getDisplayableProposedChanges(artifact).filter((change) => !approvalEntryIsFresh(approvals[change.id], artifact) || (change.policyState || change.policy) === "block");
+  const intent = getIntent(artifact);
+  const runLabel = intent?.primaryDirective || artifact?.runId || "this run";
 
   return (
     <div style={{ flex: 1, display: "grid", placeItems: "center", padding: 32, overflow: "auto" }}>
@@ -1104,7 +1073,7 @@ function DoneView({ t, scenario, artifact, approvals, onNewRun }) {
         <Card t={t} style={{ marginBottom: 18 }}>
           <SectionTitle t={t} eyebrow="Audit recorded" title="Run complete" meta={artifact?.artifactId} />
           <div style={{ fontSize: 13, color: t.textDim, lineHeight: 1.55 }}>
-            The control plane recorded the approved artifact snapshot, freshness metadata, and the changes that became real for <strong>{scenario.label}</strong>.
+            The control plane recorded the approved artifact snapshot, freshness metadata, and the changes that became real for <strong>{runLabel}</strong>.
           </div>
         </Card>
 

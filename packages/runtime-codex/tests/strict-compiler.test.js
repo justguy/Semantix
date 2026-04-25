@@ -190,6 +190,114 @@ test("accepts a strict CodeChangeSet proposal with top-level grounding", async (
   assert.match(review.diffPreview, /\+ verifyToken\(\);/);
 });
 
+test("accepts generated artifact targets and Semantix metadata references", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      summary: "Create a review-only joke artifact.",
+      changes: [
+        {
+          operation: "create_file",
+          workspace_path: ".semantix/review/run-1.json",
+          summary: "Create the requested sand joke artifact.",
+          content: "{\n  \"joke\": \"Why did the sand stay on the beach? Because it was sand.\"\n}\n",
+        },
+      ],
+      references: [
+        {
+          kind: "file",
+          name: "run-1.json",
+          path: ".semantix/review/run-1.json",
+          source: "transformed",
+          required: true,
+          supporting_context: [
+            "This file path is explicitly created by the proposed create_file change.",
+          ],
+        },
+        {
+          kind: "module",
+          name: "workspace_root",
+          path: workspaceRoot,
+          source: "grounded",
+          required: true,
+        },
+        {
+          kind: "symbol",
+          name: "effect.run-1.planned",
+          source: "grounded",
+          required: true,
+        },
+      ],
+      parameters: [
+        {
+          name: "joke",
+          source: "invented",
+        },
+      ],
+      supporting_context: [
+        {
+          kind: "note",
+          value: "User prompt requests a sand and not funny joke.",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, false);
+  assert.equal(review.issues.length, 0);
+  assert.deepEqual(review.targetPaths, [join(workspaceRoot, ".semantix/review/run-1.json")]);
+});
+
+test("accepts review-only semantic output with no repository file modifications", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      summary: "A dry sand joke review artifact is ready for approval.",
+      workspace_path: workspaceRoot,
+      diff_preview:
+        "No repository file modifications are proposed. Execution is deferred pending fresh approval. Proposed target output: \"Why did the sand refuse to laugh? Because it was too dry.\"",
+      references: [
+        {
+          kind: "file",
+          name: "workspace_root",
+          path: workspaceRoot,
+          source: "grounded",
+          required: true,
+        },
+      ],
+      parameters: [
+        {
+          name: "prompt",
+          source: "grounded",
+          evidence: "tell me a sand and not funny joke",
+        },
+      ],
+      supporting_context: [
+        {
+          kind: "note",
+          value: "User-stated scope is only to tell a sand and not funny joke.",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, false);
+  assert.equal(review.semanticOnly, true);
+  assert.equal(review.targetPath, null);
+  assert.deepEqual(review.targetPaths, []);
+  assert.equal(review.issues.length, 0);
+});
+
 test("flags invalid strict CodeChangeSet proposals deterministically", async (t) => {
   const workspaceRoot = await createWorkspace(t);
   const review = buildDeterministicCodeChangeReview({
@@ -204,7 +312,7 @@ test("flags invalid strict CodeChangeSet proposals deterministically", async (t)
         {
           operation: "modify_file",
           workspace_path: "routes/auth.ts",
-          diff_preview: "+ stale();",
+          diff_preview: "+ signToken();\n+ const ttl = verificationWindowDays;\n+ stale();",
           precondition_sha256: "0".repeat(64),
         },
         {
@@ -225,8 +333,8 @@ test("flags invalid strict CodeChangeSet proposals deterministically", async (t)
         },
         {
           kind: "file",
-          name: "routes/auth.ts",
-          path: "routes/auth.ts",
+          name: "routes/missing.ts",
+          path: "routes/missing.ts",
           required: true,
         },
       ],

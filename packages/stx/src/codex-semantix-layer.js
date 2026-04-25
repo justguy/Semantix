@@ -186,6 +186,32 @@ function normalizeIssue(issue, nodeId) {
   };
 }
 
+function nodeIsBlockedOrFailed(node) {
+  return (
+    node?.executionStatus === "failed" ||
+    node?.reviewStatus === "blocked"
+  );
+}
+
+function issueFromNodeRiskFlag(node, riskFlag) {
+  const summary =
+    node?.outputSummary ??
+    (typeof riskFlag === "string" ? riskFlag.replaceAll("_", " ") : "Runtime issue detected.");
+
+  return normalizeIssue({
+    code: riskFlag || "runtime_node_blocked",
+    type: riskFlag || "runtime_node_blocked",
+    severity: node?.executionStatus === "failed" ? "high" : "medium",
+    blocking: nodeIsBlockedOrFailed(node),
+    summary,
+    evidence: [
+      node?.outputSummary,
+      node?.executionStatus ? `executionStatus=${node.executionStatus}` : null,
+      node?.reviewStatus ? `reviewStatus=${node.reviewStatus}` : null,
+    ].filter(Boolean),
+  }, node?.id);
+}
+
 function fixOptionsForIssue(issue) {
   const symbol = issue.affectedSymbols?.[0];
 
@@ -229,6 +255,23 @@ function fixOptionsForIssue(issue) {
     ];
   }
 
+  if (issue.code === "runtime_connector_failure") {
+    return [
+      {
+        id: "retry.semantic_admission",
+        label: "Retry semantic admission",
+        action: "retry_semantic_admission",
+        recommended: true,
+      },
+      {
+        id: "manual.runtime",
+        label: "Inspect runtime connector",
+        action: "manual_intervention",
+        recommended: false,
+      },
+    ];
+  }
+
   if (issue.code === "invalid_target_path") {
     return [
       {
@@ -246,20 +289,7 @@ function fixOptionsForIssue(issue) {
     ];
   }
 
-  return [
-    {
-      id: `review.${issue.code}`,
-      label: "Review and regenerate proposal",
-      action: "regenerate_with_constraints",
-      recommended: true,
-    },
-    {
-      id: `manual.${issue.code}`,
-      label: "Escalate for manual decision",
-      action: "manual_intervention",
-      recommended: false,
-    },
-  ];
+  return [];
 }
 
 function collectInspectorIssues(inspectors) {
@@ -267,6 +297,7 @@ function collectInspectorIssues(inspectors) {
 
   for (const inspector of Object.values(inspectors)) {
     const nodeId = inspector?.node?.id;
+    const node = inspector?.node;
     const rawIssues = [
       ...(Array.isArray(inspector?.issues) ? inspector.issues : []),
       ...(Array.isArray(inspector?.critique?.issues) ? inspector.critique.issues : []),
@@ -275,17 +306,78 @@ function collectInspectorIssues(inspectors) {
     for (const issue of rawIssues) {
       issues.push(normalizeIssue(issue, nodeId));
     }
+
+    if (nodeIsBlockedOrFailed(node)) {
+      const riskFlags = Array.isArray(node?.riskFlags) ? node.riskFlags : [];
+      const runtimeRiskFlags = riskFlags.filter((riskFlag) =>
+        ["runtime_connector_failure", "deterministic_execution_blocked"].includes(riskFlag),
+      );
+      let flags = runtimeRiskFlags;
+      if (rawIssues.length === 0) {
+        flags = riskFlags.length > 0 ? riskFlags : ["runtime_node_blocked"];
+      }
+      for (const riskFlag of flags) {
+        issues.push(issueFromNodeRiskFlag(node, riskFlag));
+      }
+    }
   }
 
   const seen = new Set();
   return issues.filter((issue) => {
-    const key = `${issue.nodeId}:${issue.code}:${issue.summary}`;
+    const key = `${issue.code}:${issue.summary}:${issue.affectedSymbols.join("|")}`;
     if (seen.has(key)) {
       return false;
     }
     seen.add(key);
     return true;
   });
+}
+
+function compactFlowNode(node) {
+  if (!node || typeof node !== "object") {
+    return node;
+  }
+
+  const {
+    hardValidationSchema,
+    pathPolicies,
+    admittedOutput,
+    ...compactNode
+  } = node;
+
+  if (admittedOutput) {
+    compactNode.admittedOutputSummary = {
+      summary: admittedOutput.summary ?? null,
+      changeCount: Array.isArray(admittedOutput.changes) ? admittedOutput.changes.length : 0,
+      hasDiffPreview: typeof admittedOutput.diff_preview === "string" && admittedOutput.diff_preview.length > 0,
+    };
+  }
+
+  return compactNode;
+}
+
+function compactFlowInspectors(inspectors) {
+  return Object.fromEntries(
+    Object.entries(inspectors).map(([nodeId, inspector]) => [
+      nodeId,
+      {
+        ...inspector,
+        node: compactFlowNode(inspector?.node),
+      },
+    ]),
+  );
+}
+
+function selectAdvancedNodeId(artifact) {
+  const nodes = artifact?.plan?.nodes ?? [];
+  return (
+    nodes.find((node) => node.executionStatus === "failed")?.id ??
+    nodes.find((node) => node.reviewStatus === "blocked")?.id ??
+    getDeterministicNode(artifact)?.id ??
+    getRuntimeNode(artifact)?.id ??
+    nodes[0]?.id ??
+    null
+  );
 }
 
 async function loadInspectors(service, artifact) {
@@ -342,6 +434,11 @@ function buildGraph(artifact) {
 }
 
 function buildExecutionProgress(artifact) {
+  const semanticNode = getRuntimeNode(artifact);
+  const deterministicNode = getDeterministicNode(artifact);
+  const semanticDone = semanticNode?.executionStatus === "succeeded";
+  const deterministicRunning = deterministicNode?.executionStatus === "running";
+
   const labels = [
     {
       id: "plan",
@@ -351,23 +448,22 @@ function buildExecutionProgress(artifact) {
     {
       id: "code",
       label: "Code",
-      done: (artifact?.plan?.nodes ?? []).some(
-        (node) => isSemanticGenerationNode(node) && node.executionStatus === "succeeded",
-      ),
+      done: semanticDone,
     },
     {
       id: "validate",
       label: "Validate",
-      done: materialStateEffects(artifact).length > 0,
+      done: semanticDone,
     },
     {
       id: "execute",
       label: "Execute",
       done: artifact?.plan?.status === "completed",
+      current: deterministicRunning,
     },
   ];
 
-  const current = labels.find((entry) => !entry.done);
+  const current = labels.find((entry) => entry.current) ?? labels.find((entry) => !entry.done);
   return labels.map((entry) => ({
     ...entry,
     current: current?.id === entry.id,
@@ -375,6 +471,8 @@ function buildExecutionProgress(artifact) {
 }
 
 function resolvePhase({ artifact, issues, approval }) {
+  const deterministicNode = getDeterministicNode(artifact);
+
   if (artifact?.plan?.status === "completed") {
     return "completed";
   }
@@ -391,20 +489,23 @@ function resolvePhase({ artifact, issues, approval }) {
     return "awaiting_approval";
   }
 
-  if (artifact?.plan?.status === "running") {
+  if (deterministicNode?.executionStatus === "running") {
     return "executing";
   }
 
   return "reviewing";
 }
 
-function buildDemoSteps({ artifact, issues, approval }) {
+function buildFlowSteps({ artifact, issues, approval }) {
   const runtimeNode = getRuntimeNode(artifact);
+  const deterministicNode = getDeterministicNode(artifact);
   const hasPlan = (artifact?.plan?.nodes ?? []).length > 0;
-  const hasPreview = materialStateEffects(artifact).length > 0;
   const hasIssues = issues.length > 0;
   const hasBlockingIssues = issues.some((issue) => issue.blocking);
   const completed = artifact?.plan?.status === "completed";
+  const semanticDone = runtimeNode?.executionStatus === "succeeded";
+  const semanticFinished = semanticDone || runtimeNode?.executionStatus === "failed" || hasIssues || completed;
+  const deterministicRunning = deterministicNode?.executionStatus === "running";
 
   return [
     { id: 1, label: "Input", status: "complete" },
@@ -413,21 +514,21 @@ function buildDemoSteps({ artifact, issues, approval }) {
     {
       id: 4,
       label: "Issue Detection",
-      status: hasIssues ? (hasBlockingIssues ? "blocked" : "warning") : hasPreview ? "complete" : "pending",
+      status: hasIssues ? (hasBlockingIssues ? "blocked" : "warning") : semanticFinished ? "complete" : "pending",
     },
     { id: 5, label: "Effort Indicator", status: "complete" },
-    { id: 6, label: "Why? Explanation", status: "available" },
+    { id: 6, label: "Why? Explanation", status: hasIssues || hasPlan ? "available" : "pending" },
     {
       id: 7,
       label: "Fix Issues",
-      status: hasBlockingIssues ? "required" : hasIssues ? "optional" : "complete",
+      status: hasBlockingIssues ? "required" : hasIssues ? "optional" : semanticFinished ? "complete" : "pending",
     },
     {
       id: 8,
       label: "Re-evaluation",
-      status: hasBlockingIssues ? "blocked" : hasPreview ? "complete" : "pending",
+      status: hasBlockingIssues ? "blocked" : semanticFinished ? "complete" : "pending",
     },
-    { id: 9, label: "Advanced View", status: hasPlan ? "available" : "pending" },
+    { id: 9, label: "Advanced View", status: semanticFinished ? "available" : "pending" },
     {
       id: 10,
       label: "Approval",
@@ -439,7 +540,7 @@ function buildDemoSteps({ artifact, issues, approval }) {
       status:
         completed
           ? "complete"
-          : artifact?.plan?.status === "running" || runtimeNode?.executionStatus === "running"
+          : deterministicRunning
             ? "running"
             : "pending",
     },
@@ -498,6 +599,91 @@ function buildResult(artifact) {
   };
 }
 
+function buildAnalysis({ artifact, classification, issues, approval, result }) {
+  const nodes = artifact?.plan?.nodes ?? [];
+  const failedNode = nodes.find((node) => node.executionStatus === "failed") ?? null;
+  const blockedIssues = issues.filter((issue) => issue.blocking);
+  const effects = materialStateEffects(artifact);
+  const checkpoints = artifact?.plan?.checkpoints ?? [];
+  const evidence = unique([
+    failedNode?.outputSummary,
+    ...issues.flatMap((issue) => issue.evidence ?? []),
+    ...nodes
+      .filter((node) => node.outputSummary)
+      .map((node) => `${node.title}: ${node.outputSummary}`),
+  ]);
+
+  let summary = "Backend analysis has not emitted a specific finding yet.";
+  if (failedNode) {
+    summary = `Runtime failed before admission on ${failedNode.id}: ${failedNode.outputSummary ?? "no runtime summary recorded"}`;
+  } else if (blockedIssues.length > 0) {
+    summary = `${blockedIssues.length} blocking issue${blockedIssues.length === 1 ? "" : "s"} prevent execution.`;
+  } else if (approval.ready) {
+    summary = "Semantic admission produced material state effects and the artifact is ready for fresh approval.";
+  } else if (result.completed) {
+    summary = `Execution completed with ${result.stateEffects.length} material state effect${result.stateEffects.length === 1 ? "" : "s"}.`;
+  } else if (effects.length > 0) {
+    summary = `${effects.length} material state effect${effects.length === 1 ? "" : "s"} await review.`;
+  }
+
+  return {
+    summary,
+    evidence,
+    metrics: {
+      nodeCount: nodes.length,
+      issueCount: issues.length,
+      blockingIssueCount: blockedIssues.length,
+      materialStateEffectCount: effects.length,
+      checkpointCount: checkpoints.length,
+      confidenceScore: classification?.confidenceScore ?? null,
+      confidenceBand: classification?.confidenceBand ?? null,
+    },
+  };
+}
+
+function buildRecommendations({ issues, approval, result }) {
+  const issueRecommendations = issues.flatMap((issue) =>
+    fixOptionsForIssue(issue)
+      .filter((option) => option.recommended)
+      .map((option) => ({
+        id: option.id,
+        label: option.label,
+        action: option.action,
+        source: issue.code,
+        nodeId: issue.nodeId,
+        reason: issue.summary,
+      })),
+  );
+
+  if (issueRecommendations.length > 0) {
+    return issueRecommendations;
+  }
+
+  if (approval.ready) {
+    return [{
+      id: "approval.record_fresh",
+      label: "Record fresh approval",
+      action: "approve",
+      source: "approval_gate",
+      nodeId: approval.nodeId,
+      reason: approval.reason,
+    }];
+  }
+
+  if (result.completed) {
+    return [{
+      id: "result.audit",
+      label: "Review audit trail",
+      action: "inspect_audit",
+      source: "result",
+      nodeId: null,
+      reason: `${result.filesUpdated.length} file${result.filesUpdated.length === 1 ? "" : "s"} updated.`,
+    }];
+  }
+
+  return [];
+}
+
 export async function buildCodexSemantixFlowProjection({
   service,
   artifact,
@@ -527,6 +713,22 @@ export async function buildCodexSemantixFlowProjection({
       strictBoundaries: artifact.intent?.strictBoundaries,
       successState: artifact.intent?.successState,
     });
+  const issuesWithFixOptions = issues.map((issue) => ({
+    ...issue,
+    fixOptions: fixOptionsForIssue(issue),
+  }));
+  const analysis = buildAnalysis({
+    artifact,
+    classification: effectiveClassification,
+    issues,
+    approval,
+    result,
+  });
+  const recommendations = buildRecommendations({
+    issues,
+    approval,
+    result,
+  });
 
   return {
     runId: artifact.runId,
@@ -549,26 +751,21 @@ export async function buildCodexSemantixFlowProjection({
       status: artifact.plan?.status,
       items: buildPlanItems(artifact),
     },
-    issues: issues.map((issue) => ({
-      ...issue,
-      fixOptions: fixOptionsForIssue(issue),
-    })),
+    issues: issuesWithFixOptions,
+    analysis,
+    recommendations,
     approval,
     advanced: {
       graph: buildGraph(artifact),
-      selectedNodeId:
-        getDeterministicNode(artifact)?.id ??
-        getRuntimeNode(artifact)?.id ??
-        artifact.plan?.nodes?.[0]?.id ??
-        null,
-      inspectors,
+      selectedNodeId: selectAdvancedNodeId(artifact),
+      inspectors: compactFlowInspectors(inspectors),
     },
     execution: {
-      status: artifact.plan?.status ?? "unknown",
+      status: getDeterministicNode(artifact)?.executionStatus ?? "not_started",
       progress: buildExecutionProgress(artifact),
     },
     result,
-    steps: buildDemoSteps({
+    steps: buildFlowSteps({
       artifact,
       issues,
       approval,

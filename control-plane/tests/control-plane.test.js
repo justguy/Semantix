@@ -756,3 +756,55 @@ test("invalid semantic JSON fails with no repair loop", async (t) => {
 
   assert.equal(invocationCount, 1);
 });
+
+test("nonzero semantic runtime exit persists failed artifact state", async (t) => {
+  const { service, workspaceRoot } = await createHarness(t, {
+    runner: async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "ERROR: unexpected status 401 Unauthorized: Missing bearer or basic authentication in header\n",
+    }),
+  });
+  await compileRun(service, "run-runtime-failure", workspaceRoot);
+
+  await assert.rejects(
+    service.executeApprovedNodes({
+      runId: "run-runtime-failure",
+      actor: "operator",
+    }),
+    (error) =>
+      error?.code === "VALIDATION_ERROR" &&
+      error?.details?.outputSummary?.includes("401 Unauthorized"),
+  );
+
+  const failedArtifact = await service.getCurrentArtifact("run-runtime-failure");
+  const semanticNode = failedArtifact.plan.nodes.find((node) => node.id === "node.semantic.generate");
+  assert.equal(failedArtifact.plan.status, "failed");
+  assert.equal(semanticNode.executionStatus, "failed");
+  assert.equal(semanticNode.reviewStatus, "blocked");
+  assert.match(semanticNode.outputSummary, /401 Unauthorized/);
+});
+
+test("bootstrap returns failed artifact instead of 400-worthy throw after runtime failure", async (t) => {
+  const { service, workspaceRoot } = await createHarness(t, {
+    runner: async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "ERROR: unexpected status 401 Unauthorized\n",
+    }),
+  });
+
+  const artifact = await service.bootstrapRun({
+    runId: "run-bootstrap-runtime-failure",
+    actor: "browser",
+    primaryDirective: "Compile a proposal with a failing runtime.",
+    strictBoundaries: ["Stay inside the workspace."],
+    successState: "A failed artifact is returned for review.",
+    cwd: workspaceRoot,
+  });
+
+  const semanticNode = artifact.plan.nodes.find((node) => node.id === "node.semantic.generate");
+  assert.equal(artifact.plan.status, "failed");
+  assert.equal(semanticNode.executionStatus, "failed");
+  assert.match(semanticNode.outputSummary, /401 Unauthorized/);
+});

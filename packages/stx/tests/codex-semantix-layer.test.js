@@ -103,8 +103,42 @@ test("Codex Semantix layer projects a blocked proposal into the demo-flow issue 
   assert.equal(flow.issues[0].code, "missing_symbol");
   assert.equal(flow.issues[0].affectedSymbols[0], "signToken");
   assert.equal(flow.issues[0].fixOptions[0].action, "generate_missing_symbol");
+  assert.match(flow.analysis.summary, /blocking issue/);
+  assert.equal(flow.recommendations[0].action, "generate_missing_symbol");
   assert.equal(flow.steps.find((step) => step.id === 4)?.status, "blocked");
   assert.equal(flow.steps.find((step) => step.id === 7)?.status, "required");
+});
+
+test("Codex Semantix layer projects runtime failures into blocking demo-flow issues", async (t) => {
+  const { application } = await createHarness(
+    t,
+    async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: "2026-04-25T16:22:16Z ERROR codex_core::session: failed to record rollout items: thread 019dc572-a339-7230-ae44-1460877a8410 not found\n",
+    }),
+  );
+
+  const flow = await application.codexLayer.start({
+    runId: "run-layer-runtime-failure",
+    actor: "test",
+    ...createTaskInput(),
+  });
+
+  assert.equal(flow.phase, "failed");
+  assert.equal(flow.approval.ready, false);
+  assert.equal(flow.approval.blocked, true);
+  assert.equal(flow.issues[0].code, "runtime_connector_failure");
+  assert.equal(flow.issues[0].blocking, true);
+  assert.equal(flow.issues[0].fixOptions[0].action, "retry_semantic_admission");
+  assert.match(flow.analysis.summary, /Runtime failed before admission/);
+  assert.equal(flow.recommendations[0].action, "retry_semantic_admission");
+  assert.match(flow.issues[0].summary, /thread 019dc572-a339-7230-ae44-1460877a8410 not found/);
+  assert.equal(flow.steps.find((step) => step.id === 4)?.status, "blocked");
+  assert.equal(flow.steps.find((step) => step.id === 7)?.status, "required");
+  assert.equal(flow.steps.find((step) => step.id === 8)?.status, "blocked");
+  assert.equal(flow.advanced.selectedNodeId, "node.semantic.generate");
+  assert.equal(flow.advanced.inspectors["node.semantic.generate"].node.hardValidationSchema, undefined);
 });
 
 test("Codex Semantix layer approves and resumes a safe proposal with one call", async (t) => {

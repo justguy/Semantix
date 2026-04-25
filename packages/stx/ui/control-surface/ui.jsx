@@ -337,8 +337,9 @@ function writeRunIdToLocation(runId) {
   window.history.replaceState({}, "", url.toString());
 }
 
-function ensureRunId(runId) {
-  const resolved = runId || readRunIdFromLocation() || createBrowserRunId();
+function ensureRunId(runId, { reuseLocation = true } = {}) {
+  const locationRunId = reuseLocation ? readRunIdFromLocation() : "";
+  const resolved = runId || locationRunId || createBrowserRunId();
   if (readRunIdFromLocation() !== resolved) {
     writeRunIdToLocation(resolved);
   }
@@ -1207,7 +1208,8 @@ function buildStaleArtifactView(currentArtifact, latestArtifact, focusNodeId, pr
 
 function phaseFromArtifact(artifact) {
   const status = artifact?.plan?.status;
-  if (status === "running") return "running";
+  const runningNode = getNodes(artifact).find((node) => node.executionStatus === "running");
+  if (status === "running" && runningNode?.nodeType !== "semantic_generation") return "running";
   if (status === "completed") return "done";
   if (artifact) return "review";
   return "prompt";
@@ -1227,7 +1229,12 @@ function summarizeExecutionState(source) {
   const runningNodes = nodes.filter((node) => node.executionStatus === "running");
   const succeededNodes = nodes.filter((node) => node.executionStatus === "succeeded");
   const pausedNodes = nodes.filter((node) => node.executionStatus === "paused");
+  const failedNodes = nodes.filter((node) => node.executionStatus === "failed");
   const admittedNodes = nodes.filter((node) => node.admittedOutput != null);
+  const semanticAdmissionNode = runningNodes.find((node) => node.nodeType === "semantic_generation");
+  const semanticAdmissionElapsedMs = semanticAdmissionNode && artifact?.generatedAt
+    ? Date.now() - artifact.generatedAt
+    : 0;
   const items = uniqueBy(
     [
       latestCheckpoint
@@ -1238,6 +1245,9 @@ function summarizeExecutionState(source) {
       ),
       ...pausedNodes.map((node) =>
         `${node.title} · paused${node.outputSummary ? ` · ${node.outputSummary}` : ""}`,
+      ),
+      ...failedNodes.map((node) =>
+        `${node.title} · failed${node.outputSummary ? ` · ${node.outputSummary}` : ""}`,
       ),
       ...admittedNodes.map((node) =>
         `${node.title} · admitted output ready`,
@@ -1259,6 +1269,32 @@ function summarizeExecutionState(source) {
       items,
       latestCheckpoint,
       displayableCount: displayableChanges.length,
+      advisoryCount: advisoryChanges.length,
+    };
+  }
+
+  if (failedNodes.length > 0 || artifact?.plan?.status === "failed") {
+    return {
+      title: "Semantic proposal failed",
+      body: failedNodes[0]?.outputSummary || "The runtime failed before Semantix could admit a strict code-change proposal.",
+      items,
+      latestCheckpoint,
+      displayableCount: 0,
+      advisoryCount: advisoryChanges.length,
+    };
+  }
+
+  if (semanticAdmissionNode) {
+    const elapsedSeconds = Math.max(0, Math.floor(semanticAdmissionElapsedMs / 1000));
+    const elapsedDetail = elapsedSeconds >= 30
+      ? ` It has been running for about ${elapsedSeconds}s.`
+      : "";
+    return {
+      title: "Compiling semantic proposal",
+      body: `Semantix is still waiting for semantic admission to produce a strict code-change proposal. Blocking issues cannot appear until that proposal is admitted and validated.${elapsedDetail}`,
+      items,
+      latestCheckpoint,
+      displayableCount: 0,
       advisoryCount: advisoryChanges.length,
     };
   }

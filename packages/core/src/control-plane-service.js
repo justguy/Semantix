@@ -538,6 +538,46 @@ export class ControlPlaneService {
     if (!run) {
       throw new NotFoundError(`Run '${runId}' does not exist.`, { runId });
     }
+    return this.reconcileRunStateFromEvents(run);
+  }
+
+  async reconcileRunStateFromEvents(run) {
+    if (run?.artifact?.plan?.status !== "running") {
+      return run;
+    }
+    if (typeof this.store.listRunEvents !== "function") {
+      return run;
+    }
+
+    const events = await this.store.listRunEvents(run.runId);
+    const failedEvent = events
+      .slice()
+      .reverse()
+      .find((event) =>
+        event?.type === "run.failed" ||
+        event?.payload?.executionStatus === "failed",
+      );
+    if (!failedEvent?.nodeId) {
+      return run;
+    }
+
+    const failedNode = getNodeById(run.artifact, failedEvent.nodeId);
+    if (!failedNode || failedNode.executionStatus === "failed") {
+      return run;
+    }
+
+    updatePlanNode(run.artifact.plan, failedEvent.nodeId, (node) => ({
+      ...node,
+      executionStatus: "failed",
+      reviewStatus: "blocked",
+      outputSummary:
+        failedEvent.payload?.outputSummary ??
+        failedEvent.payload?.message ??
+        node.outputSummary,
+      riskFlags: mergeRiskFlags(node.riskFlags, ["runtime_connector_failure"]),
+    }));
+    run.artifact.plan.status = "failed";
+    await this.saveRunState(run);
     return run;
   }
 
@@ -1003,10 +1043,18 @@ export class ControlPlaneService {
       return artifact;
     }
 
-    return this.executeApprovedNodes({
-      runId,
-      actor,
-    });
+    try {
+      return await this.executeApprovedNodes({
+        runId,
+        actor,
+      });
+    } catch (error) {
+      const latestRun = await this.getRunState(runId);
+      if (latestRun.artifact?.plan?.status === "failed") {
+        return latestRun.artifact;
+      }
+      throw error;
+    }
   }
 
   async listRuns() {
@@ -1021,7 +1069,8 @@ export class ControlPlaneService {
       });
 
     return Promise.all(
-      orderedRuns.map(async (run) => {
+      orderedRuns.map(async (rawRun) => {
+        const run = await this.reconcileRunStateFromEvents(rawRun);
         const sessions = (await this.store.listSessions(run.runId)).filter(Boolean);
         return buildRunSummary(run, sessions);
       }),
@@ -2143,6 +2192,57 @@ export class ControlPlaneService {
       );
 
       throw error;
+    }
+
+    if (result.executionStatus === "failed") {
+      const failedAt = this.now();
+      updatePlanNode(artifact.plan, executableNode.id, (node) => ({
+        ...node,
+        executionStatus: "failed",
+        reviewStatus: "blocked",
+        outputSummary: result.outputSummary ?? "Runtime execution failed before semantic admission.",
+        riskFlags: mergeRiskFlags(node.riskFlags, ["runtime_connector_failure"]),
+      }));
+      artifact.plan.status = "failed";
+      run.inspectors = buildDeterministicInspectorPayloadMap(artifact);
+      await this.saveRunState(run);
+
+      await this.appendAudit(
+        runId,
+        createAuditRecord({
+          runId,
+          action: "run.failed",
+          actor,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          nodeId: executableNode.id,
+          details: {
+            message: result.outputSummary ?? "Runtime execution failed before semantic admission.",
+          },
+          timestamp: failedAt,
+        }),
+      );
+
+      await this.emit(
+        runId,
+        makeEvent({
+          runId,
+          type: "run.failed",
+          timestamp: failedAt,
+          nodeId: executableNode.id,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          payload: {
+            message: result.outputSummary ?? "Runtime execution failed before semantic admission.",
+          },
+        }),
+      );
+
+      throw new ValidationError("Runtime execution failed before semantic admission.", {
+        runId,
+        nodeId: executableNode.id,
+        outputSummary: result.outputSummary,
+      });
     }
 
     const admittedOutput = admitSemanticOutput({
