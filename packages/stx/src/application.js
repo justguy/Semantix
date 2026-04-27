@@ -10,6 +10,7 @@ import {
 } from "../../runtime-codex/src/index.js";
 import { createControlPlaneServer } from "./http/server.js";
 import { createCodexSemantixLayer } from "./codex-semantix-layer.js";
+import { runCriticalReview } from "./ct-review.js";
 import { FileRunStore } from "./storage/file-run-store.js";
 
 const packageDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,18 +33,40 @@ export function getDefaultWorkspaceRoot() {
   return resolve(process.env.SEMANTIX_WORKSPACE_ROOT ?? DEFAULT_WORKSPACE_ROOT);
 }
 
-function resolveSemanticFrameContext(artifact, inputNode) {
-  return (
+function resolveSemanticFrameContext(artifact, inputNode, intent) {
+  const frame =
     artifact?.semantic_frames?.find(
       (frame) =>
         frame?.node_id === inputNode?.id ||
         frame?.nodeId === inputNode?.id,
-    ) ?? {
+    ) ??
+    artifact?.semanticFrames?.find(
+      (frame) =>
+        frame?.node_id === inputNode?.id ||
+        frame?.nodeId === inputNode?.id,
+    ) ??
+    {
       context: {
         workspace_root: getDefaultWorkspaceRoot(),
       },
-    }
-  );
+    };
+  const primaryDirective = intent?.primaryDirective ?? intent?.primary_directive;
+
+  if (typeof primaryDirective !== "string" || !primaryDirective.trim()) {
+    return frame;
+  }
+
+  return {
+    ...frame,
+    prompt: typeof frame.prompt === "string" && frame.prompt.trim() ? frame.prompt : primaryDirective,
+    context: {
+      ...(frame.context ?? {}),
+      primaryDirective:
+        typeof frame.context?.primaryDirective === "string" && frame.context.primaryDirective.trim()
+          ? frame.context.primaryDirective
+          : primaryDirective,
+    },
+  };
 }
 
 function isObject(value) {
@@ -90,12 +113,38 @@ function buildAggregateDiffPreview(input, changes) {
     .join("\n");
 }
 
-function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode } = {}) {
-  const semanticFrameContext = resolveSemanticFrameContext(artifact, inputNode);
+function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode, intent } = {}) {
+  const semanticFrameContext = resolveSemanticFrameContext(artifact, inputNode, intent);
   const review = buildDeterministicCodeChangeReview({
     admittedOutput: input,
     semanticFrameContext,
   });
+  const ctReport = runCriticalReview({
+    xplanNode: inputNode,
+    admittedOutput: input,
+    extractedClaims: input?.ct_review_input,
+  });
+  const mergedIssues = [
+    ...review.issues,
+    ...ctReport.issues,
+  ];
+  const mergedEvidence = [
+    ...review.evidence,
+    ...ctReport.evidence,
+  ];
+  const mergedInterventions = [
+    ...review.interventions,
+    ...ctReport.recommendations.map((recommendation) => ({
+      kind: recommendation.action,
+      detail: recommendation.label,
+      source: recommendation.source,
+    })),
+  ];
+  const blocking = review.blocking || ctReport.isBlocked;
+  const blockingReason =
+    review.blockingReason ??
+    ctReport.issues.find((issue) => issue.blocking)?.summary ??
+    null;
   const changes = review.semanticOnly ? [] : normalizePreviewChanges(input);
   const targets = review.semanticOnly
     ? ["semantix.semantic_output"]
@@ -106,14 +155,14 @@ function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode } = {
     review.semanticOnly
       ? "semantix.semantic_output"
       : (
-    targets.length === 1
-      ? targets[0]
-      : targets.length > 1
-        ? `${targets.length} files`
-        : input?.target_file ?? DEFAULT_TARGET_SYMBOL
-      );
+        targets.length === 1
+          ? targets[0]
+          : targets.length > 1
+            ? `${targets.length} files`
+            : input?.target_file ?? DEFAULT_TARGET_SYMBOL
+        );
   const diffPreview = buildAggregateDiffPreview(input, changes);
-  const policyState = review.blocking ? "block" : review.issues.length > 0 ? "review_required" : "pass";
+  const policyState = blocking ? "block" : mergedIssues.length > 0 ? "review_required" : "pass";
 
   return {
     id: `effect.${runId ?? "run"}.code_change_preview`,
@@ -126,10 +175,10 @@ function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode } = {
     diff: diffPreview,
     diffPreview,
     policyState,
-    riskFlags: review.issues.map((issue) => issue.code || issue.type).filter(Boolean),
-    issues: review.issues,
-    evidence: review.evidence,
-    interventions: review.interventions,
+    riskFlags: mergedIssues.map((issue) => issue.code || issue.type).filter(Boolean),
+    issues: mergedIssues,
+    evidence: mergedEvidence,
+    interventions: mergedInterventions,
     effects: changes.map((change) => ({
       operation: change.operation,
       target: change.target,
@@ -145,7 +194,7 @@ function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode } = {
       owner: "policy",
       status: policyState,
       details:
-        review.blockingReason ??
+        blockingReason ??
         "Preview synthesized from the admitted Semantix code-change proposal.",
     },
   };
@@ -161,7 +210,7 @@ function createDefaultHostFunctionRegistry() {
       async invoke(input, context) {
         return applyAdmittedCodeChange({
           admittedOutput: input,
-          semanticFrameContext: resolveSemanticFrameContext(context?.artifact, context?.inputNode),
+          semanticFrameContext: resolveSemanticFrameContext(context?.artifact, context?.inputNode, context?.intent),
           runId: context?.runId,
           nodeId: context?.node?.id,
         });

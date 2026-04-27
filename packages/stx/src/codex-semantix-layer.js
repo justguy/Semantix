@@ -289,6 +289,23 @@ function fixOptionsForIssue(issue) {
     ];
   }
 
+  if (String(issue.code ?? "").startsWith("ct_")) {
+    return [
+      {
+        id: `ct.review.${issue.code}`,
+        label: "Regenerate with corrected CT review input",
+        action: "regenerate_with_ct_review",
+        recommended: true,
+      },
+      {
+        id: "manual.ct_review",
+        label: "Escalate CT finding for manual review",
+        action: "manual_intervention",
+        recommended: false,
+      },
+    ];
+  }
+
   return [];
 }
 
@@ -907,7 +924,10 @@ export class CodexSemantixLayer {
     cwd = this.defaultCwd,
     autoExecuteSemanticAdmission = true,
   } = {}) {
-    if (!compactText(primaryDirective)) {
+    const directiveText = String(primaryDirective ?? "").trim();
+    const successStateText = String(successState ?? "").trim();
+
+    if (!directiveText) {
       throw new Error("CodexSemantixLayer.start requires primaryDirective.");
     }
 
@@ -920,9 +940,9 @@ export class CodexSemantixLayer {
     const artifact = await this.service.bootstrapRun({
       runId,
       actor,
-      primaryDirective: compactText(primaryDirective),
+      primaryDirective: directiveText,
       strictBoundaries: Array.isArray(strictBoundaries) ? strictBoundaries : [],
-      successState: compactText(successState) || defaultSuccessState(primaryDirective),
+      successState: successStateText || defaultSuccessState(primaryDirective),
       cwd,
       autoExecuteSemanticAdmission,
     });

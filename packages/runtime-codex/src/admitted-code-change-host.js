@@ -815,6 +815,21 @@ export async function applyAdmittedCodeChange({
     semanticFrameContext,
   });
 
+  if (review.blocking) {
+    const blockingIssue = review.issues.find((issue) => issue.blocking) ?? review.issues[0] ?? null;
+    const message = blockingIssue?.detail
+      ? `${blockingIssue.summary} ${blockingIssue.detail}`
+      : review.blockingReason ?? "Admitted code change remained blocked at deterministic execution time.";
+    throw new ValidationError(
+      message,
+      {
+        runId,
+        nodeId,
+        issues: review.issues,
+      },
+    );
+  }
+
   if (isCodeChangeSet(admittedOutput)) {
     const staged = await stageCodeChangeSet({
       admittedOutput,
@@ -829,14 +844,6 @@ export async function applyAdmittedCodeChange({
       staged,
       runId,
       nodeId,
-    });
-  }
-
-  if (review.blocking) {
-    throw new ValidationError("Admitted code change remained blocked at deterministic execution time.", {
-      runId,
-      nodeId,
-      issues: review.issues,
     });
   }
 

@@ -15,6 +15,7 @@ Semantix v0 adopts an **artifact-first, graph-based execution model** where:
 - All execution is driven by a compiled `.xplan` artifact
 - The Control Plane is the single source of truth
 - Semantic steps must **compile into strictly validated JSON outputs**
+- Semantic steps must lower deterministic critique inputs into the artifact when CT-MCP review is required
 - Deterministic execution owns all state mutation
 - Human approval is represented as explicit graph nodes
 - Runtime behavior is governed by **hard validation schemas**, not prompts
@@ -25,9 +26,10 @@ Semantix v0 adopts an **artifact-first, graph-based execution model** where:
 
 1. **No transcript-driven execution**
 2. **All semantic output must be admitted via schema validation**
-3. **Approval is a structural node, not a flag**
-4. **Artifacts are self-contained and immutable**
-5. **The runtime decides; the model proposes**
+3. **Critical review consumes admitted structure, not loose prose**
+4. **Approval is a structural node, not a flag**
+5. **Artifacts are self-contained and immutable**
+6. **The runtime decides; the model proposes**
 
 ---
 
@@ -39,6 +41,8 @@ Only three node types are allowed:
 - `deterministic_execution`
 - `approval_gate`
 
+CT-MCP is not a fourth node type in v0. It is a deterministic critique subsystem invoked after semantic admission and before approval readiness. Its findings are merged into the same review artifact fields used by other deterministic validators: issues, evidence, interventions, risk flags, and recommendations.
+
 ---
 
 ## Semantic Node Output Contract (NEW)
@@ -48,6 +52,7 @@ A `semantic_generation` node succeeds only if:
 - The model output parses as valid JSON
 - The output matches EXACTLY the node’s `hard_validation_schema`
 - No additional properties are present (strict mode)
+- Required critique-lowering fields such as `ct_review_input` are present when specified by the schema
 
 All schemas MUST include:
 
@@ -60,6 +65,24 @@ Failure to validate results in:
 - immediate rejection
 - no retry or repair loop
 - node marked as failed
+
+---
+
+## CT-MCP Critique Input (NEW)
+
+When a semantic proposal can reach approval, the strict schema may require a `ct_review_input` object. This object is not an optional explanatory appendix. It is the compiler-lowered structure that deterministic critical review consumes.
+
+The default code-change schema requires:
+
+- `reasoning_chain`: claims, evidence, assumptions, conclusions, and explicit relations
+- `plan_steps`: step identifiers, dependencies, and optional shared resources
+- `assumptions`: confidence-bearing assumptions with falsification conditions
+- `numeric_claims`: arithmetic claims that can be recomputed
+- `concurrency`: ordered operations, shared resources, and protections
+
+If `ct_review_input` is missing or malformed, semantic admission fails under the same strict schema rules as any other required field. If CT-MCP finds contradictions, missing prerequisites, unsafe confidence, arithmetic mismatch, or concurrency hazards, the runtime records deterministic review issues and blocks or escalates approval according to issue severity.
+
+This keeps the trust boundary clear: the model performs semantic lowering, but the artifact owns the lowered structure, and deterministic review owns the decision about whether it is safe enough to approve.
 
 ---
 
@@ -175,6 +198,8 @@ ALL schemas must:
 | Missing required field | Hard reject |
 | Extra field | Hard reject |
 | Invalid path | Hard reject |
+| Missing `ct_review_input` when required | Hard reject |
+| CT-MCP blocking critique issue | Pause with blocked approval |
 | Unsatisfied constraint | Compile failure |
 | Stale approval | Reject action |
 
@@ -204,6 +229,7 @@ ALL schemas must:
 - Advanced provenance verification
 - AST-level enforcement (Hoplon)
 - Dynamic graph expansion
+- CT-MCP as an independent orchestration runtime or agent
 
 These are deferred to later phases.
 

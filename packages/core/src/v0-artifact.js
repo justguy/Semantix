@@ -504,6 +504,205 @@ function createDefaultStateEffectPreview({ runId, targetSymbol }) {
 }
 
 function createDefaultCodeChangeSchema() {
+  const reasoningNodeSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["id", "label", "type"],
+    properties: {
+      id: {
+        type: "string",
+        minLength: 1,
+      },
+      label: {
+        type: "string",
+        minLength: 1,
+      },
+      type: {
+        type: "string",
+        enum: ["claim", "evidence", "conclusion", "assumption"],
+      },
+    },
+  };
+  const reasoningEdgeSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["from", "to", "relation"],
+    properties: {
+      from: {
+        type: "string",
+        minLength: 1,
+      },
+      to: {
+        type: "string",
+        minLength: 1,
+      },
+      relation: {
+        type: "string",
+        enum: ["supports", "implies", "contradicts", "requires"],
+      },
+    },
+  };
+  const reasoningChainSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["nodes", "edges"],
+    properties: {
+      nodes: {
+        type: "array",
+        minItems: 2,
+        items: reasoningNodeSchema,
+      },
+      edges: {
+        type: "array",
+        items: reasoningEdgeSchema,
+      },
+    },
+  };
+  const planStepSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["id", "description", "dependencies"],
+    properties: {
+      id: {
+        type: "string",
+        minLength: 1,
+      },
+      description: {
+        type: "string",
+        minLength: 1,
+      },
+      dependencies: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      resources: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+    },
+  };
+  const assumptionSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["description", "confidence", "falsification_condition"],
+    properties: {
+      description: {
+        type: "string",
+        minLength: 1,
+      },
+      confidence: {
+        type: "number",
+      },
+      falsification_condition: {
+        type: "string",
+      },
+    },
+  };
+  const numericClaimSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["claim_type", "claimed_result"],
+    properties: {
+      claim_type: {
+        type: "string",
+        enum: ["sum", "weighted_average", "percentage", "growth", "product"],
+      },
+      values: {
+        type: "array",
+        items: {
+          type: "number",
+        },
+      },
+      weights: {
+        type: "array",
+        items: {
+          type: "number",
+        },
+      },
+      part: {
+        type: "number",
+      },
+      whole: {
+        type: "number",
+      },
+      rate: {
+        type: "number",
+      },
+      periods: {
+        type: "number",
+      },
+      claimed_result: {
+        type: "number",
+      },
+      tolerance: {
+        type: "number",
+      },
+    },
+  };
+  const concurrencySchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["steps", "shared_resources", "protections"],
+    properties: {
+      steps: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      shared_resources: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      protections: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+      },
+      delivery_model: {
+        type: "string",
+        enum: ["at_least_once", "at_most_once", "exactly_once"],
+      },
+      retry_behavior: {
+        type: "string",
+        enum: ["none", "automatic", "manual"],
+      },
+    },
+  };
+  const ctReviewInputSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["reasoning_chain", "plan_steps", "assumptions", "numeric_claims", "concurrency"],
+    properties: {
+      reasoning_chain: reasoningChainSchema,
+      plan_steps: {
+        type: "array",
+        items: planStepSchema,
+      },
+      assumptions: {
+        type: "array",
+        items: assumptionSchema,
+      },
+      numeric_claims: {
+        type: "array",
+        items: numericClaimSchema,
+      },
+      concurrency: concurrencySchema,
+      confidence_score: {
+        type: "number",
+      },
+      has_destructive_side_effects: {
+        type: "boolean",
+      },
+    },
+  };
   const referenceSchema = {
     type: "object",
     additionalProperties: false,
@@ -633,12 +832,13 @@ function createDefaultCodeChangeSchema() {
       type: "array",
       items: supportingContextSchema,
     },
+    ct_review_input: ctReviewInputSchema,
   };
 
   return {
     type: "object",
     additionalProperties: false,
-    required: ["summary", "references", "parameters", "supporting_context"],
+    required: ["summary", "references", "parameters", "supporting_context", "ct_review_input"],
     properties,
     oneOf: [
       {
@@ -651,13 +851,14 @@ function createDefaultCodeChangeSchema() {
           "references",
           "parameters",
           "supporting_context",
+          "ct_review_input",
         ],
         properties,
       },
       {
         type: "object",
         additionalProperties: false,
-        required: ["summary", "changes", "references", "parameters", "supporting_context"],
+        required: ["summary", "changes", "references", "parameters", "supporting_context", "ct_review_input"],
         properties,
       },
     ],
@@ -685,11 +886,14 @@ function createDefaultBlueprint({ runId, intent, cwd }) {
           review_expectations: [
             "Return either one legacy repo-scoped code change proposal or a CodeChangeSet with changes[].",
             "Prefer CodeChangeSet for multi-file work.",
-            "Provide diff_preview for modify_file changes before execution.",
+            "Provide diff_preview or content for modify_file changes before execution.",
+            "If using diff_preview, it must be applyable: simple +/-/space lines or unified diff hunks with numeric ranges.",
+            "Use content for full-file replacements when exact hunk context is uncertain.",
             "Provide content for create_file changes before execution.",
             "List referenced repo symbols explicitly.",
             "Mark invented parameters with source='invented'.",
             "Provide supporting_context entries for claimed dependencies.",
+            "Provide ct_review_input with reasoning_chain, plan_steps, assumptions, numeric_claims, and concurrency so deterministic CT-MCP review can run before approval.",
           ],
         },
         hard_constraints: [

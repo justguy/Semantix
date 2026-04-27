@@ -148,6 +148,20 @@ explicit. That gives the runtime a reliable way to:
 - track provenance
 - keep normal computation fast and cheap
 
+## Deterministic Critique Gate
+
+Some semantic constraints cannot be reduced to simple field presence or path checks. They still need to be made structural before they can affect execution. Semantix handles that by requiring semantic nodes to lower critique inputs into the admitted JSON artifact, then running deterministic critique over that structure.
+
+The current CT-MCP gate follows this shape:
+
+1. The neural unit emits a proposal plus `ct_review_input`.
+2. The runtime parses and validates the full output against `hard_validation_schema`.
+3. CT-MCP reviews the admitted `ct_review_input` for contradictions, broken plan dependencies, unsupported confidence, arithmetic mismatch, and concurrency hazards.
+4. Findings are merged into issues, evidence, risk flags, and recommendations.
+5. Approval is blocked, escalated, or allowed based on deterministic review state.
+
+This is deliberately not a loose second LLM call. The model performs semantic lowering, but the schema decides whether the lowered structure exists and CT-MCP decides whether that structure is coherent enough to proceed.
+
 ## Bifurcated Type System
 
 Semantix should support both deterministic types and semantic constructs.
@@ -289,6 +303,8 @@ LLM failure:
 - `CoercionExhausted`
 
 This keeps failures legible to both the language runtime and the developer.
+
+The same failure discipline applies to critique lowering. Missing `ct_review_input` is a schema failure. A contradictory reasoning graph is not a parse failure; it is an admitted proposal with a deterministic critique issue that blocks approval until the contradiction is resolved or explicitly escalated.
 
 ## Deterministic Arithmetic
 
@@ -444,6 +460,8 @@ prefer a deterministic final gate:
 
 Semantix is strongest when semantic reasoning produces signals and the deterministic runtime
 turns those signals into explicit decisions.
+
+CT-MCP is one concrete implementation of this principle. It does not authorize execution. It names deterministic critique signals such as circular reasoning, orphaned conclusions, invalid plan dependencies, arithmetic mismatches, and concurrency hazards. The Semantix runtime then converts those signals into approval state.
 
 ## State vs Output
 

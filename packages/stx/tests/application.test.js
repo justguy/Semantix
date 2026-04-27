@@ -9,6 +9,61 @@ import { createStxApplication } from "../src/application.js";
 
 const DEFAULT_TARGET_SYMBOL = "semantix.host.apply_admitted_semantic";
 
+function createCtReviewInput(summary = "The proposed change is grounded and approval-gated.") {
+  return {
+    reasoning_chain: {
+      nodes: [
+        {
+          id: "e1",
+          label: "The proposal includes explicit supporting context and waits for approval.",
+          type: "evidence",
+        },
+        {
+          id: "c1",
+          label: summary,
+          type: "conclusion",
+        },
+      ],
+      edges: [
+        {
+          from: "e1",
+          to: "c1",
+          relation: "supports",
+        },
+      ],
+    },
+    plan_steps: [
+      {
+        id: "semantic",
+        description: "Compile the semantic proposal.",
+        dependencies: [],
+        resources: [],
+      },
+      {
+        id: "approval",
+        description: "Require fresh approval before execution.",
+        dependencies: ["semantic"],
+        resources: [],
+      },
+    ],
+    assumptions: [
+      {
+        description: "The referenced workspace context is present when execution is approved.",
+        confidence: 0.8,
+        falsification_condition: "A referenced file or symbol is missing during deterministic review.",
+      },
+    ],
+    numeric_claims: [],
+    concurrency: {
+      steps: [],
+      shared_resources: [],
+      protections: [],
+    },
+    confidence_score: 0.9,
+    has_destructive_side_effects: true,
+  };
+}
+
 async function createHarness(t, runner, connectorOptions = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), "semantix-stx-app-"));
   const dataDir = join(rootDir, "data");
@@ -115,6 +170,7 @@ test("default STX application leaves Codex home unset unless configured", async 
               value: "verifyToken",
             },
           ],
+          ct_review_input: createCtReviewInput("verifyToken is grounded before approval."),
         }),
         stderr: "",
       };
@@ -155,6 +211,7 @@ test("default STX application catches a plausible bad code change before approva
             value: "routes/auth.ts",
           },
         ],
+        ct_review_input: createCtReviewInput("signToken must be verified before approval."),
       }),
       stderr: "",
     }),
@@ -231,8 +288,9 @@ test("default STX application completes the happy-path code change flow after ap
             kind: "symbol",
             value: "verifyToken",
           },
-        ],
-      }),
+          ],
+          ct_review_input: createCtReviewInput("verifyToken is grounded before approval."),
+        }),
       stderr: "",
     }),
   );
@@ -324,6 +382,7 @@ test("default STX application applies an approved multi-file CodeChangeSet", asy
             value: "verifyToken",
           },
         ],
+        ct_review_input: createCtReviewInput("The multi-file changeset is approval-gated."),
       }),
       stderr: "",
     }),
@@ -406,8 +465,9 @@ test("default STX HTTP flow bootstraps review and applies the approved code chan
             kind: "symbol",
             value: "verifyToken",
           },
-        ],
-      }),
+          ],
+          ct_review_input: createCtReviewInput("verifyToken is grounded before approval."),
+        }),
       stderr: "",
     }),
   );

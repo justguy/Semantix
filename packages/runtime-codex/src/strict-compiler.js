@@ -673,6 +673,74 @@ function getRawWorkspaceRoot(semanticFrameContext) {
   );
 }
 
+function getSemanticPromptText(semanticFrameContext) {
+  return [
+    semanticFrameContext?.prompt,
+    semanticFrameContext?.context?.primary_directive,
+    semanticFrameContext?.context?.primaryDirective,
+    semanticFrameContext?.context?.prompt,
+  ]
+    .filter((value) => typeof value === "string" && value.trim())
+    .join("\n");
+}
+
+function parseJsonStringLiteralAt(text, quoteIndex) {
+  if (text[quoteIndex] !== "\"") {
+    return null;
+  }
+
+  let escaped = false;
+  for (let index = quoteIndex + 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      const literal = text.slice(quoteIndex, index + 1);
+      try {
+        const parsed = JSON.parse(literal);
+        return typeof parsed === "string" ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractExactContentContracts(semanticFrameContext) {
+  const prompt = getSemanticPromptText(semanticFrameContext);
+  if (!prompt) {
+    return [];
+  }
+
+  const contracts = [];
+  const markerPattern = /(?:this\s+exact\s+content|exact(?:ly)?(?:\s+this)?\s+content)\s*:/gi;
+  let match;
+  while ((match = markerPattern.exec(prompt)) !== null) {
+    const quoteIndex = prompt.indexOf("\"", markerPattern.lastIndex);
+    if (quoteIndex === -1) {
+      continue;
+    }
+
+    const content = parseJsonStringLiteralAt(prompt, quoteIndex);
+    if (content !== null) {
+      contracts.push({
+        content,
+        sha256: sha256Text(content),
+      });
+    }
+  }
+
+  return dedupeReviewItems(contracts, (contract) => contract.sha256);
+}
+
 function diffPreviewDeclaresNoRepositoryChanges(diffPreview) {
   if (typeof diffPreview !== "string") {
     return false;
@@ -984,12 +1052,504 @@ function getProposalDiffPreview(admittedOutput) {
   return previews.length > 0 ? previews.join("\n") : null;
 }
 
+function normalizeDiffPreviewLines(diffPreview) {
+  const lines = String(diffPreview ?? "").replace(/\r\n/g, "\n").split("\n");
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
+function isDiffMetadataLine(line) {
+  return (
+    !line ||
+    line.startsWith("diff ") ||
+    line.startsWith("index ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ")
+  );
+}
+
+function isSimpleDiffLine(line) {
+  return !line || line[0] === "+" || line[0] === "-" || line[0] === " " || line === "\\ No newline at end of file";
+}
+
+function validateBareHunkDiffPreviewSyntax(diffLines) {
+  let sawBareHunk = false;
+
+  for (const line of diffLines) {
+    if (isDiffMetadataLine(line)) {
+      continue;
+    }
+
+    if (!sawBareHunk) {
+      if (line === "@@") {
+        sawBareHunk = true;
+        continue;
+      }
+      return null;
+    }
+
+    if (line.startsWith("@@ ")) {
+      return null;
+    }
+
+    if (!isSimpleDiffLine(line)) {
+      return {
+        detail: `Unsupported bare diff_preview line '${line}'.`,
+        evidence: line,
+      };
+    }
+  }
+
+  return sawBareHunk ? false : null;
+}
+
+function validateUnifiedDiffPreviewSyntax(diffLines) {
+  let lineIndex = 0;
+  let sawHunk = false;
+
+  while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@")) {
+    const line = diffLines[lineIndex];
+    if (!isDiffMetadataLine(line)) {
+      return {
+        detail: `Unsupported diff_preview metadata before the first hunk: '${line}'.`,
+        evidence: line,
+      };
+    }
+    lineIndex += 1;
+  }
+
+  while (lineIndex < diffLines.length) {
+    const header = diffLines[lineIndex];
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(header);
+    if (!match) {
+      return {
+        detail: `Invalid unified diff hunk header '${header}'. Use numeric ranges such as '@@ -1,3 +1,4 @@'.`,
+        evidence: header,
+      };
+    }
+
+    sawHunk = true;
+    lineIndex += 1;
+    while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@")) {
+      const line = diffLines[lineIndex];
+      if (!isSimpleDiffLine(line)) {
+        return {
+          detail: `Unsupported unified diff_preview line '${line}'.`,
+          evidence: line,
+        };
+      }
+      lineIndex += 1;
+    }
+  }
+
+  if (!sawHunk) {
+    return {
+      detail: "diff_preview did not include a unified diff hunk.",
+      evidence: null,
+    };
+  }
+
+  return false;
+}
+
+function validateDiffPreviewSyntax(diffPreview) {
+  if (typeof diffPreview !== "string" || diffPreview.trim().length === 0) {
+    return {
+      detail: "diff_preview must be a non-empty simple diff or unified diff.",
+      evidence: diffPreview ?? null,
+    };
+  }
+
+  const diffLines = normalizeDiffPreviewLines(diffPreview);
+  const bareHunkIssue = validateBareHunkDiffPreviewSyntax(diffLines);
+  if (bareHunkIssue === false) {
+    return null;
+  }
+  if (bareHunkIssue) {
+    return bareHunkIssue;
+  }
+
+  const normalizedDiff = diffLines.join("\n");
+  const isUnifiedDiff =
+    normalizedDiff.includes("\n@@ ") ||
+    normalizedDiff.startsWith("@@ ") ||
+    normalizedDiff.startsWith("--- ");
+
+  if (isUnifiedDiff) {
+    return validateUnifiedDiffPreviewSyntax(diffLines) || null;
+  }
+
+  for (const line of diffLines) {
+    if (!isSimpleDiffLine(line)) {
+      return {
+        detail: `diff_preview line must start with '+', '-', or space: '${line}'.`,
+        evidence: line,
+      };
+    }
+  }
+
+  return null;
+}
+
+function extractBareHunkSimpleDiffLines(diffLines) {
+  const simpleLines = [];
+  let sawBareHunk = false;
+
+  for (const line of diffLines) {
+    if (isDiffMetadataLine(line)) {
+      continue;
+    }
+
+    if (line === "@@") {
+      sawBareHunk = true;
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      return null;
+    }
+
+    if (!sawBareHunk) {
+      return null;
+    }
+
+    simpleLines.push(line);
+  }
+
+  return sawBareHunk ? simpleLines : null;
+}
+
+function toDiffLineRecord(content) {
+  const normalized = String(content ?? "").replace(/\r\n/g, "\n");
+  const hasTrailingNewline = normalized.endsWith("\n");
+  const lines = normalized.split("\n");
+  if (hasTrailingNewline) {
+    lines.pop();
+  }
+  return lines;
+}
+
+function toDiffContentRecord(content) {
+  const normalized = String(content ?? "").replace(/\r\n/g, "\n");
+  const hasTrailingNewline = normalized.endsWith("\n");
+  const lines = normalized.split("\n");
+  if (hasTrailingNewline) {
+    lines.pop();
+  }
+  return {
+    lines,
+    hasTrailingNewline,
+  };
+}
+
+function fromDiffContentRecord(lines, hasTrailingNewline) {
+  if (lines.length === 0) {
+    return "";
+  }
+
+  const body = lines.join("\n");
+  return hasTrailingNewline ? `${body}\n` : body;
+}
+
+function validateSimpleDiffPreviewApplication(currentContent, diffLines) {
+  const nextLines = toDiffLineRecord(currentContent);
+
+  for (const line of diffLines) {
+    if (!line) {
+      continue;
+    }
+
+    const prefix = line[0];
+    const value = line.slice(1);
+    if (prefix === "+") {
+      nextLines.push(value);
+      continue;
+    }
+
+    if (prefix === "-") {
+      const index = nextLines.indexOf(value);
+      if (index === -1) {
+        return {
+          detail: `diff_preview removal did not match the current file: '${line}'.`,
+          evidence: line,
+        };
+      }
+      nextLines.splice(index, 1);
+      continue;
+    }
+
+    if (prefix === " ") {
+      if (!nextLines.includes(value)) {
+        return {
+          detail: `diff_preview context line did not match the current file: '${line}'.`,
+          evidence: line,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function buildSimpleDiffPreviewContent(currentContent, diffLines) {
+  const current = toDiffContentRecord(currentContent);
+  const nextLines = [...current.lines];
+
+  for (const line of diffLines) {
+    if (!line) {
+      continue;
+    }
+
+    const prefix = line[0];
+    const value = line.slice(1);
+    if (prefix === "+") {
+      nextLines.push(value);
+      continue;
+    }
+
+    if (prefix === "-") {
+      const index = nextLines.indexOf(value);
+      if (index === -1) {
+        return {
+          issue: {
+            detail: `diff_preview removal did not match the current file: '${line}'.`,
+            evidence: line,
+          },
+        };
+      }
+      nextLines.splice(index, 1);
+      continue;
+    }
+
+    if (prefix === " " && !nextLines.includes(value)) {
+      return {
+        issue: {
+          detail: `diff_preview context line did not match the current file: '${line}'.`,
+          evidence: line,
+        },
+      };
+    }
+  }
+
+  const nextHasTrailingNewline =
+    nextLines.length === 0 ? false : current.hasTrailingNewline || current.lines.length === 0;
+  return {
+    content: fromDiffContentRecord(nextLines, nextHasTrailingNewline),
+  };
+}
+
+function validateUnifiedDiffPreviewApplication(currentContent, diffLines) {
+  const currentLines = toDiffLineRecord(currentContent);
+  let sourceIndex = 0;
+  let lineIndex = 0;
+
+  while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@ ")) {
+    lineIndex += 1;
+  }
+
+  while (lineIndex < diffLines.length) {
+    const header = diffLines[lineIndex];
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(header);
+    if (!match) {
+      return {
+        detail: `Invalid unified diff hunk header '${header}'.`,
+        evidence: header,
+      };
+    }
+
+    const oldStart = Number(match[1]);
+    const oldCount = match[2] == null ? 1 : Number(match[2]);
+    sourceIndex = Math.max(oldStart - 1, 0);
+    lineIndex += 1;
+
+    let consumedOldLines = 0;
+    while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@ ")) {
+      const line = diffLines[lineIndex];
+      if (line === "\\ No newline at end of file") {
+        lineIndex += 1;
+        continue;
+      }
+
+      const prefix = line[0];
+      const value = line.slice(1);
+      if (prefix === " " || prefix === "-") {
+        if (currentLines[sourceIndex] !== value) {
+          return {
+            detail: `diff_preview did not match the current file at '${line}'.`,
+            evidence: line,
+          };
+        }
+        sourceIndex += 1;
+        consumedOldLines += 1;
+      }
+      lineIndex += 1;
+    }
+
+    if (consumedOldLines !== oldCount) {
+      return {
+        detail: `diff_preview hunk count did not match ${header}.`,
+        evidence: header,
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildUnifiedDiffPreviewContent(currentContent, diffLines) {
+  const current = toDiffContentRecord(currentContent);
+  const output = [];
+  let sourceIndex = 0;
+  let lineIndex = 0;
+  let hasTrailingNewline = current.hasTrailingNewline;
+
+  while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@ ")) {
+    lineIndex += 1;
+  }
+
+  while (lineIndex < diffLines.length) {
+    const header = diffLines[lineIndex];
+    const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(header);
+    if (!match) {
+      return {
+        issue: {
+          detail: `Invalid unified diff hunk header '${header}'.`,
+          evidence: header,
+        },
+      };
+    }
+
+    const oldStart = Number(match[1]);
+    const oldCount = match[2] == null ? 1 : Number(match[2]);
+    const copyEnd = Math.max(oldStart - 1, 0);
+    output.push(...current.lines.slice(sourceIndex, copyEnd));
+    sourceIndex = copyEnd;
+    lineIndex += 1;
+
+    let consumedOldLines = 0;
+    while (lineIndex < diffLines.length && !diffLines[lineIndex].startsWith("@@ ")) {
+      const line = diffLines[lineIndex];
+      if (line === "\\ No newline at end of file") {
+        hasTrailingNewline = false;
+        lineIndex += 1;
+        continue;
+      }
+
+      const prefix = line[0];
+      const value = line.slice(1);
+      if (prefix === " " || prefix === "-") {
+        if (current.lines[sourceIndex] !== value) {
+          return {
+            issue: {
+              detail: `diff_preview did not match the current file at '${line}'.`,
+              evidence: line,
+            },
+          };
+        }
+        if (prefix === " ") {
+          output.push(value);
+        }
+        sourceIndex += 1;
+        consumedOldLines += 1;
+      } else if (prefix === "+") {
+        output.push(value);
+      }
+      lineIndex += 1;
+    }
+
+    if (consumedOldLines !== oldCount) {
+      return {
+        issue: {
+          detail: `diff_preview hunk count did not match ${header}.`,
+          evidence: header,
+        },
+      };
+    }
+  }
+
+  output.push(...current.lines.slice(sourceIndex));
+  const nextHasTrailingNewline =
+    output.length === 0 ? false : hasTrailingNewline || current.lines.length === 0;
+  return {
+    content: fromDiffContentRecord(output, nextHasTrailingNewline),
+  };
+}
+
+function validateDiffPreviewAgainstCurrentFile(currentContent, diffPreview) {
+  const syntaxIssue = validateDiffPreviewSyntax(diffPreview);
+  if (syntaxIssue) {
+    return syntaxIssue;
+  }
+
+  const diffLines = normalizeDiffPreviewLines(diffPreview);
+  const bareHunkLines = extractBareHunkSimpleDiffLines(diffLines);
+  if (bareHunkLines) {
+    return validateSimpleDiffPreviewApplication(currentContent, bareHunkLines);
+  }
+
+  const normalizedDiff = diffLines.join("\n");
+  const isUnifiedDiff =
+    normalizedDiff.includes("\n@@ ") ||
+    normalizedDiff.startsWith("@@ ") ||
+    normalizedDiff.startsWith("--- ");
+
+  return isUnifiedDiff
+    ? validateUnifiedDiffPreviewApplication(currentContent, diffLines)
+    : validateSimpleDiffPreviewApplication(currentContent, diffLines);
+}
+
+function buildModifyFileProposedContent(currentContent, change) {
+  if (typeof change?.diff_preview === "string") {
+    const syntaxIssue = validateDiffPreviewSyntax(change.diff_preview);
+    if (syntaxIssue) {
+      return { issue: syntaxIssue };
+    }
+
+    const diffLines = normalizeDiffPreviewLines(change.diff_preview);
+    const bareHunkLines = extractBareHunkSimpleDiffLines(diffLines);
+    if (bareHunkLines) {
+      return buildSimpleDiffPreviewContent(currentContent, bareHunkLines);
+    }
+
+    const normalizedDiff = diffLines.join("\n");
+    const isUnifiedDiff =
+      normalizedDiff.includes("\n@@ ") ||
+      normalizedDiff.startsWith("@@ ") ||
+      normalizedDiff.startsWith("--- ");
+
+    return isUnifiedDiff
+      ? buildUnifiedDiffPreviewContent(currentContent, diffLines)
+      : buildSimpleDiffPreviewContent(currentContent, diffLines);
+  }
+
+  if (typeof change?.content === "string") {
+    return {
+      content: change.content,
+    };
+  }
+
+  return {
+    issue: {
+      detail: "modify_file requires diff_preview or content.",
+      evidence: null,
+    },
+  };
+}
+
 function formatChangeLabel(change) {
   return change.source === "legacy_single_file" ? "legacy proposal" : `changes[${change.index}]`;
 }
 
 function buildReviewInterventions(issueCode) {
   const map = {
+    content_mismatch: [
+      {
+        kind: "regenerate_content",
+        detail: "Regenerate the proposal so content exactly matches the user-provided exact content literal.",
+      },
+    ],
     invented_parameter: [
       {
         kind: "fix_assumption",
@@ -1016,6 +1576,12 @@ function buildReviewInterventions(issueCode) {
       {
         kind: "fix_assumption",
         detail: "Replace the invented reference with a repo symbol that actually exists.",
+      },
+    ],
+    invalid_diff_preview: [
+      {
+        kind: "regenerate_diff_preview",
+        detail: "Regenerate the proposal with an applyable simple diff or a unified diff with numeric hunk ranges.",
       },
     ],
     stale_precondition: [
@@ -1095,6 +1661,7 @@ export function buildDeterministicCodeChangeReview({
     : [];
   const issues = [];
   const evidence = [];
+  const exactContentContracts = extractExactContentContracts(semanticFrameContext);
 
   if (!isCodeChangeProposal(admittedOutput)) {
     return {
@@ -1222,16 +1789,19 @@ export function buildDeterministicCodeChangeReview({
     const targetPath = resolveProposalPath(workspaceRoot, change.workspace_path);
     const targetPathIsInside = targetPath && isPathInsideWorkspace(workspaceRoot, targetPath);
     if (!targetPath || !targetPathIsInside) {
+      const invalidTargetDetail = targetPath
+        ? `workspace_path resolved to ${targetPath}, outside the allowed workspace scope.`
+        : "workspace_path is required.";
       issues.push(
         createReviewIssue({
           issueCode: "invalid_target_path",
           message: `${label} has an invalid workspace_path.`,
-          detail: targetPath ? `workspace_path resolved to ${targetPath}.` : "workspace_path is required.",
+          detail: invalidTargetDetail,
           affectedFiles: changeAffectedFiles,
           evidence: [
             {
               kind: "target_path",
-              detail: targetPath ? `workspace_path resolved to ${targetPath}.` : "workspace_path is required.",
+              detail: invalidTargetDetail,
               path: change.workspace_path,
             },
           ],
@@ -1244,16 +1814,19 @@ export function buildDeterministicCodeChangeReview({
     const newTargetPath = resolveProposalPath(workspaceRoot, change.new_workspace_path);
     const newTargetPathIsInside = newTargetPath && isPathInsideWorkspace(workspaceRoot, newTargetPath);
     if (change.operation === "rename_file" && (!newTargetPath || !newTargetPathIsInside)) {
+      const invalidNewTargetDetail = newTargetPath
+        ? `new_workspace_path resolved to ${newTargetPath}, outside the allowed workspace scope.`
+        : "new_workspace_path is required for rename_file.";
       issues.push(
         createReviewIssue({
           issueCode: "invalid_target_path",
           message: `${label} has an invalid new_workspace_path.`,
-          detail: newTargetPath ? `new_workspace_path resolved to ${newTargetPath}.` : "new_workspace_path is required for rename_file.",
+          detail: invalidNewTargetDetail,
           affectedFiles: changeAffectedFiles,
           evidence: [
             {
               kind: "target_path",
-              detail: newTargetPath ? `new_workspace_path resolved to ${newTargetPath}.` : "new_workspace_path is required.",
+              detail: invalidNewTargetDetail,
               path: change.new_workspace_path,
             },
           ],
@@ -1283,6 +1856,28 @@ export function buildDeterministicCodeChangeReview({
           affectedFiles: changeAffectedFiles,
         }),
       );
+    }
+    let diffPreviewIssue = null;
+    if (change.operation === "modify_file" && hasDiffPreview) {
+      diffPreviewIssue = validateDiffPreviewSyntax(change.diff_preview);
+      if (diffPreviewIssue) {
+        issues.push(
+          createReviewIssue({
+            issueCode: "invalid_diff_preview",
+            message: `${label} has an invalid diff_preview.`,
+            detail: diffPreviewIssue.detail,
+            affectedFiles: changeAffectedFiles,
+            evidence: [
+              {
+                kind: "diff_preview",
+                detail: diffPreviewIssue.detail,
+                path: change.workspace_path,
+                value: diffPreviewIssue.evidence,
+              },
+            ],
+          }),
+        );
+      }
     }
     if (change.operation === "create_file" && !hasContent) {
       issues.push(
@@ -1347,6 +1942,60 @@ export function buildDeterministicCodeChangeReview({
         }),
       );
       continue;
+    }
+
+    if (change.operation === "modify_file" && hasDiffPreview && !diffPreviewIssue) {
+      const applicationIssue = validateDiffPreviewAgainstCurrentFile(
+        readWorkspaceFile(targetPath),
+        change.diff_preview,
+      );
+      if (applicationIssue) {
+        issues.push(
+          createReviewIssue({
+            issueCode: "invalid_diff_preview",
+            message: `${label} has an invalid diff_preview.`,
+            detail: applicationIssue.detail,
+            affectedFiles: changeAffectedFiles,
+            evidence: [
+              {
+                kind: "diff_preview",
+                detail: applicationIssue.detail,
+                path: change.workspace_path,
+                value: applicationIssue.evidence,
+              },
+            ],
+          }),
+        );
+      }
+    }
+
+    if (change.operation === "modify_file" && exactContentContracts.length > 0) {
+      const proposedContent = buildModifyFileProposedContent(readWorkspaceFile(targetPath), change);
+      if (proposedContent.content !== undefined) {
+        const contentHash = sha256Text(proposedContent.content);
+        const matchingContract = exactContentContracts.find((contract) => contract.sha256 === contentHash);
+        if (!matchingContract) {
+          issues.push(
+            createReviewIssue({
+              issueCode: "content_mismatch",
+              message: `${label} content does not match the exact content requested by the user.`,
+              detail: "The user supplied an exact JSON string literal, but the proposed final file bytes differ.",
+              affectedFiles: changeAffectedFiles,
+              evidence: [
+                {
+                  kind: "content_sha256",
+                  detail: "Proposed final content differed from the exact prompt literal.",
+                  path: change.workspace_path,
+                  expectedSha256: exactContentContracts[0].sha256,
+                  actualSha256: contentHash,
+                  expectedLength: exactContentContracts[0].content.length,
+                  actualLength: proposedContent.content.length,
+                },
+              ],
+            }),
+          );
+        }
+      }
     }
 
     if (change.precondition_sha256 === undefined) {
@@ -1658,12 +2307,16 @@ Return exactly one JSON document that satisfies the provided hard_validation_sch
 If the schema represents a code change proposal:
 - emit either the legacy single-file shape or a CodeChangeSet with changes[]
 - prefer CodeChangeSet for multi-file work
-- include diff_preview for modify_file changes
+- include either diff_preview or content for modify_file changes
+- diff_preview must be an applyable simple diff using +/-/space lines or a unified diff with numeric hunk ranges such as @@ -1,3 +1,4 @@
+- use content for full-file replacements when exact hunk context is uncertain
+- never use descriptive hunk headers such as @@ functionName; those are invalid
 - include content for create_file changes
 - include precondition_sha256 when replacing or deleting existing file contents from known bytes
 - list referenced symbols explicitly
 - mark invented parameters with source="invented"
-- include supporting_context for claimed dependencies`;
+- include supporting_context for claimed dependencies
+- include ct_review_input when the schema requires it; lower the request into reasoning_chain, plan_steps, assumptions, numeric_claims, and concurrency so deterministic CT-MCP review can run before approval`;
 }
 
 export function buildStrictCompilerInput({

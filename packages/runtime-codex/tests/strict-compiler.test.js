@@ -138,6 +138,217 @@ test("flags target paths outside the allowed workspace", async (t) => {
   assert.equal(review.issues[0].code, "invalid_target_path");
 });
 
+test("flags invalid diff previews before approval", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+      summary: "Update the login handler.",
+      diff_preview: "@@ loginHandler\n+ const claims = verifyToken(\"demo\");\n",
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, true);
+  assert.equal(review.issues[0].code, "invalid_diff_preview");
+  assert.match(review.issues[0].detail, /numeric ranges/);
+});
+
+test("flags diff previews that do not match current file bytes before approval", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+      summary: "Update the login handler.",
+      diff_preview: " loginHandler\n+ const claims = verifyToken(\"demo\");\n",
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, true);
+  assert.equal(review.issues[0].code, "invalid_diff_preview");
+  assert.match(review.issues[0].detail, /context line did not match/);
+});
+
+test("flags full-file content that differs from exact prompt content", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const exactContent =
+    "export function loginHandler() {\n  const claims = verifyToken(\"demo\");\n  return Boolean(claims);\n}\nexport function verifyToken() { return true; }\n";
+  const alteredContent =
+    "export function loginHandler() {\n const claims = verifyToken(\"demo\");\n return Boolean(claims);\n}\nexport function verifyToken() { return true; }\n";
+
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      summary: "Replace auth route exactly.",
+      changes: [
+        {
+          operation: "modify_file",
+          workspace_path: "routes/auth.ts",
+          content: alteredContent,
+        },
+      ],
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      prompt: `Replace routes/auth.ts with this exact content: ${JSON.stringify(exactContent)}`,
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, true);
+  assert.equal(review.issues[0].code, "content_mismatch");
+});
+
+test("flags diff previews whose final file differs from exact prompt content", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const exactContent =
+    "export function loginHandler() {\n  const claims = verifyToken(\"demo\");\n  return true;\n}\nexport function verifyToken() { return true; }\n";
+
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+      summary: "Patch auth route exactly.",
+      diff_preview: "+ const claims = verifyToken(\"demo\");\n",
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      prompt: `Replace routes/auth.ts with this exact content: ${JSON.stringify(exactContent)}`,
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, true);
+  assert.equal(review.issues[0].code, "content_mismatch");
+});
+
+test("accepts full-file content that matches exact prompt content", async (t) => {
+  const workspaceRoot = await createWorkspace(t);
+  const exactContent =
+    "export function loginHandler() {\n  const claims = verifyToken(\"demo\");\n  return Boolean(claims);\n}\nexport function verifyToken() { return true; }\n";
+
+  const review = buildDeterministicCodeChangeReview({
+    admittedOutput: {
+      summary: "Replace auth route exactly.",
+      changes: [
+        {
+          operation: "modify_file",
+          workspace_path: "routes/auth.ts",
+          content: exactContent,
+        },
+      ],
+      references: [
+        {
+          kind: "function",
+          name: "verifyToken",
+          required: true,
+        },
+      ],
+      parameters: [],
+      supporting_context: [
+        {
+          kind: "file",
+          value: "routes/auth.ts",
+        },
+        {
+          kind: "symbol",
+          value: "verifyToken",
+        },
+      ],
+    },
+    semanticFrameContext: {
+      prompt: `Replace routes/auth.ts with this exact content: ${JSON.stringify(exactContent)}`,
+      context: {
+        workspace_root: workspaceRoot,
+      },
+    },
+  });
+
+  assert.equal(review.blocking, false);
+  assert.equal(review.issues.length, 0);
+});
+
 test("accepts a strict CodeChangeSet proposal with top-level grounding", async (t) => {
   const workspaceRoot = await createWorkspace(t);
   const review = buildDeterministicCodeChangeReview({

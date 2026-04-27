@@ -7,6 +7,108 @@ import test from "node:test";
 
 import { createStxApplication } from "../src/application.js";
 
+function createCtReviewInput(summary = "The semantic proposal is grounded and approval-gated.") {
+  return {
+    reasoning_chain: {
+      nodes: [
+        {
+          id: "e1",
+          label: "The proposal includes supporting context and waits for approval.",
+          type: "evidence",
+        },
+        {
+          id: "c1",
+          label: summary,
+          type: "conclusion",
+        },
+      ],
+      edges: [
+        {
+          from: "e1",
+          to: "c1",
+          relation: "supports",
+        },
+      ],
+    },
+    plan_steps: [
+      {
+        id: "semantic",
+        description: "Compile the semantic proposal.",
+        dependencies: [],
+        resources: [],
+      },
+      {
+        id: "approval",
+        description: "Require fresh approval before execution.",
+        dependencies: ["semantic"],
+        resources: [],
+      },
+    ],
+    assumptions: [
+      {
+        description: "The referenced workspace context is present when execution is approved.",
+        confidence: 0.8,
+        falsification_condition: "A referenced file or symbol is missing during deterministic review.",
+      },
+    ],
+    numeric_claims: [],
+    concurrency: {
+      steps: [],
+      shared_resources: [],
+      protections: [],
+    },
+    confidence_score: 0.9,
+    has_destructive_side_effects: true,
+  };
+}
+
+function createContradictoryCtReviewInput() {
+  return {
+    ...createCtReviewInput("The request can be satisfied as written."),
+    reasoning_chain: {
+      nodes: [
+        {
+          id: "c1",
+          label: "The output must not be funny.",
+          type: "claim",
+        },
+        {
+          id: "c2",
+          label: "The output must make the user laugh.",
+          type: "claim",
+        },
+        {
+          id: "e1",
+          label: "Making a user laugh normally requires humor or amusement.",
+          type: "evidence",
+        },
+        {
+          id: "cn1",
+          label: "The requested outcome contains conflicting constraints.",
+          type: "conclusion",
+        },
+      ],
+      edges: [
+        {
+          from: "e1",
+          to: "c2",
+          relation: "supports",
+        },
+        {
+          from: "c1",
+          to: "c2",
+          relation: "contradicts",
+        },
+        {
+          from: "e1",
+          to: "cn1",
+          relation: "supports",
+        },
+      ],
+    },
+  };
+}
+
 async function createHarness(t, runner) {
   const rootDir = await mkdtemp(join(tmpdir(), "semantix-codex-layer-"));
   const dataDir = join(rootDir, "data");
@@ -85,6 +187,7 @@ test("Codex Semantix layer projects a blocked proposal into the demo-flow issue 
             value: "routes/auth.ts",
           },
         ],
+        ct_review_input: createCtReviewInput("signToken must be verified before approval."),
       }),
       stderr: "",
     }),
@@ -168,6 +271,7 @@ test("Codex Semantix layer approves and resumes a safe proposal with one call", 
             value: "verifyToken",
           },
         ],
+        ct_review_input: createCtReviewInput("verifyToken is grounded before approval."),
       }),
       stderr: "",
     }),
@@ -194,6 +298,117 @@ test("Codex Semantix layer approves and resumes a safe proposal with one call", 
   assert.equal(completedFlow.result.completed, true);
   assert.match(targetContent, /const claims = verifyToken\(token\);/);
   assert.equal(completedFlow.steps.find((step) => step.id === 12)?.status, "complete");
+});
+
+test("Codex Semantix layer projects CT-MCP contradictions into blocking issues", async (t) => {
+  const { application, workspaceRoot } = await createHarness(
+    t,
+    async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        workspace_path: join(workspaceRoot, "routes", "auth.ts"),
+        summary: "Add email verification route with verifyToken().",
+        diff_preview: "+ const claims = verifyToken(token);\n",
+        references: [
+          {
+            kind: "function",
+            name: "verifyToken",
+            required: true,
+          },
+        ],
+        parameters: [],
+        supporting_context: [
+          {
+            kind: "file",
+            value: "routes/auth.ts",
+          },
+          {
+            kind: "symbol",
+            value: "verifyToken",
+          },
+        ],
+        ct_review_input: createContradictoryCtReviewInput(),
+      }),
+      stderr: "",
+    }),
+  );
+
+  const flow = await application.codexLayer.start({
+    runId: "run-layer-ct-contradiction",
+    actor: "test",
+    primaryDirective: "tell me a sad and not funny joke that will make me laugh",
+    strictBoundaries: [
+      "Keep the backend authoritative for artifact freshness.",
+      "Require fresh approval before any execution step becomes real.",
+    ],
+    successState: "Block contradictory semantic constraints before approval.",
+  });
+
+  assert.equal(flow.phase, "needs_intervention");
+  assert.equal(flow.approval.ready, false);
+  assert.equal(flow.issues[0].code, "ct_reasoning_contradiction");
+  assert.equal(flow.issues[0].blocking, true);
+  assert.match(flow.issues[0].summary, /contradictory semantic constraints/);
+  assert.equal(flow.recommendations[0].action, "regenerate_with_ct_review");
+});
+
+test("Codex Semantix layer blocks exact-content byte mismatches before approval", async (t) => {
+  const exactContent =
+    "export function loginHandler() {\n  const claims = verifyToken(\"demo\");\n  return Boolean(claims);\n}\nexport function verifyToken() { return true; }\n";
+  const alteredContent =
+    "export function loginHandler() {\n const claims = verifyToken(\"demo\");\n return Boolean(claims);\n}\nexport function verifyToken() { return true; }\n";
+  const { application } = await createHarness(
+    t,
+    async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        summary: "Replace auth route exactly.",
+        changes: [
+          {
+            operation: "modify_file",
+            workspace_path: "routes/auth.ts",
+            content: alteredContent,
+          },
+        ],
+        references: [
+          {
+            kind: "function",
+            name: "verifyToken",
+            required: true,
+          },
+        ],
+        parameters: [],
+        supporting_context: [
+          {
+            kind: "file",
+            value: "routes/auth.ts",
+          },
+          {
+            kind: "symbol",
+            value: "verifyToken",
+          },
+        ],
+        ct_review_input: createCtReviewInput("Exact file replacement is grounded before approval."),
+      }),
+      stderr: "",
+    }),
+  );
+
+  const flow = await application.codexLayer.start({
+    runId: "run-layer-exact-content-mismatch",
+    actor: "test",
+    primaryDirective: `Replace routes/auth.ts with this exact content: ${JSON.stringify(exactContent)}`,
+    strictBoundaries: [
+      "Only touch routes/auth.ts inside the current workspace.",
+      "Require fresh approval before any execution step becomes real.",
+    ],
+    successState: "Block exact-content byte mismatches before approval.",
+  });
+
+  assert.equal(flow.phase, "needs_intervention");
+  assert.equal(flow.approval.ready, false);
+  assert.equal(flow.issues[0].code, "content_mismatch");
+  assert.equal(flow.issues[0].blocking, true);
 });
 
 test("Codex Semantix layer applies a fix and re-runs semantic admission", async (t) => {
@@ -235,6 +450,7 @@ test("Codex Semantix layer applies a fix and re-runs semantic admission", async 
                     value: "routes/auth.ts",
                   },
                 ],
+          ct_review_input: createCtReviewInput(`${symbol} is reviewed before approval.`),
         }),
         stderr: "",
       };

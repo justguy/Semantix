@@ -10,6 +10,7 @@ It is designed to:
 - eliminate conversational drift
 - support approval-driven workflows
 - integrate with runtime validation (Ajv/Zod)
+- lower semantic critique inputs for deterministic CT-MCP review
 
 ---
 
@@ -85,6 +86,19 @@ You MUST strictly conform to this schema.
    - lower confidence score
    - flag requires_approval = true
 
+5. If the schema requires `ct_review_input`, emit it as structured data, not prose:
+   - `reasoning_chain` for claims, evidence, conclusions, assumptions, and relations
+   - `plan_steps` for dependencies and shared resources
+   - `assumptions` with confidence and falsification conditions
+   - `numeric_claims` for any arithmetic claim
+   - `concurrency` for ordered operations, shared resources, and protections
+
+6. If emitting `diff_preview` for a `modify_file` proposal:
+   - use an applyable simple diff with `+`, `-`, and context lines, or a unified diff with numeric hunk ranges
+   - valid unified hunk headers look like `@@ -1,3 +1,4 @@`
+   - descriptive hunk headers like `@@ loginHandler` are invalid and must be blocked before approval
+   - use `content` instead of `diff_preview` when a full-file replacement is clearer or exact hunk context is uncertain
+
 ---
 
 ## OUTPUT FORMAT (STRICT EXECUTION IR)
@@ -116,7 +130,22 @@ You MUST strictly conform to this schema.
       "constraint_id": "string",
       "affected_parameters": ["string"]
     }
-  ]
+  ],
+
+  "ct_review_input": {
+    "reasoning_chain": {
+      "nodes": [],
+      "edges": []
+    },
+    "plan_steps": [],
+    "assumptions": [],
+    "numeric_claims": [],
+    "concurrency": {
+      "steps": [],
+      "shared_resources": [],
+      "protections": []
+    }
+  }
 }
 
 ---
@@ -191,3 +220,5 @@ You do not decide what happens.
 You only propose what is valid within the constraints.
 
 The runtime decides.
+
+If CT-MCP critique input is present in the schema, the runtime will validate it structurally and then run deterministic critique before approval. Contradictions, unsupported confidence, invalid dependencies, arithmetic mismatches, and concurrency hazards may block approval even when the JSON shape itself is valid.

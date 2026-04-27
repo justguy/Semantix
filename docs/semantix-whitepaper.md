@@ -11,6 +11,7 @@ Semantix proposes a different split of responsibility.
 - Humans define intent, invariants, success conditions, permissions, and escalation rules.
 - Models perform bounded semantic work such as generation, extraction, summarization, ranking, and interpretation.
 - Compilers and runtimes translate soft instructions into hard boundaries where possible.
+- Deterministic critique layers review lowered reasoning structure before approval.
 - Deterministic systems remain the authority over state, permissions, side effects, and approval-gated execution.
 
 Semantix is best understood first as a semantic programming language for AI. It translates human intent into bounded semantic contracts that machines can execute. Operationally, those compiled contracts are enforced through a semantic control plane for LLM-mediated execution.
@@ -144,6 +145,7 @@ Its job is to:
 
 - decide what execution is allowed to proceed
 - block actions that violate hard constraints or policy
+- challenge admitted semantic reasoning through deterministic critique before approval
 - downgrade trust when only soft semantic checks are satisfied
 - force escalation when residual risk exceeds system authority
 - ensure that nothing becomes real until the required contract has been met
@@ -232,9 +234,12 @@ Owner:
 - layered verification
 - provenance and grounding checks
 - semantic critique systems
+- deterministic critique over admitted `ct_review_input`
 - human review for high-risk cases
 
 For high-risk semantic claims, verification should not rely on the same model family and evidence path as generation when avoidable. Otherwise the review layer collapses toward one correlated signal, and trust must be downgraded or escalated rather than overstated.
+
+In the current implementation path, CT-MCP supplies one deterministic semantic-invariant check. The model lowers claims, evidence, dependencies, assumptions, numeric claims, and concurrency descriptions into `ct_review_input` inside the strict semantic output. CT-MCP consumes that admitted structure and returns issues such as contradictions, orphaned conclusions, missing prerequisites, arithmetic mismatches, or concurrency hazards. Those findings do not bypass Semantix approval. They feed the same backend-owned issue and recommendation machinery that determines whether approval can become fresh and executable.
 
 This framing also explains Semantix's failure philosophy. Constraint failures may retry. Policy violations hard-stop. Approval-required boundaries pause and escalate. Recovery is architectural, not rhetorical. There is no apology loop.
 
@@ -340,6 +345,8 @@ At the node level, the review surface should show:
 - required next action
 
 Confidence needs to mean something more precise than a single reassuring number. In Semantix, it should be a structured aggregation of provenance strength, source coverage, verifier agreement, retry friction, critique signals, and change safety, with each contributing signal versioned independently, the aggregation method itself treated as a versioned runtime setting, and the whole score recomputed when relevant inputs, verifier settings, or model settings change. It is not model self-report. It is a runtime-owned summary of how much evidence the system has to trust the node right now.
+
+This is why critique inputs are part of the artifact rather than an after-the-fact conversation. If a proposal claims that a migration can run safely before backup validation, the review surface should show the lowered plan dependency and the deterministic critique finding. If a prompt asks for mutually incompatible outcomes, the surface should show the conflicting claims and the relation that made approval unsafe. The useful output is not "the model seems uncertain." It is a specific, versioned finding the user can fix.
 
 The color model is intentionally simple:
 
