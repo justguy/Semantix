@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createStxApplication } from "../src/application.js";
+import { classifyCodexRequest } from "../src/codex-semantix-layer.js";
 
 const DEFAULT_TARGET_SYMBOL = "semantix.host.apply_admitted_semantic";
 
@@ -80,6 +81,7 @@ async function createHarness(t, runner, connectorOptions = {}) {
   const application = createStxApplication({
     dataDir,
     workspaceRoot,
+    classificationProvider: async (input) => classifyCodexRequest(input),
     connectorOptions: {
       runner,
       cwd: workspaceRoot,

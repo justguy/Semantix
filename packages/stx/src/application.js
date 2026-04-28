@@ -9,7 +9,7 @@ import {
   CodexCliRuntimeAdapter,
 } from "../../runtime-codex/src/index.js";
 import { createControlPlaneServer } from "./http/server.js";
-import { createCodexSemantixLayer } from "./codex-semantix-layer.js";
+import { createCodexSemantixLayer, createLlmClassificationProvider } from "./codex-semantix-layer.js";
 import { runCriticalReview } from "./ct-review.js";
 import { FileRunStore } from "./storage/file-run-store.js";
 
@@ -226,6 +226,9 @@ export function createStxApplication({
   workspaceRoot = getDefaultWorkspaceRoot(),
   adapterOptions,
   connectorOptions,
+  classificationProvider,
+  classificationModel = process.env.SEMANTIX_CLASSIFIER_MODEL ?? "gpt-5.3-codex-spark",
+  classificationTimeoutMs = Number(process.env.SEMANTIX_CLASSIFIER_TIMEOUT_MS ?? 20000),
 } = {}) {
   const effectiveWorkspaceRoot = resolve(workspaceRoot);
   const store = new FileRunStore({
@@ -253,6 +256,13 @@ export function createStxApplication({
   const codexLayer = createCodexSemantixLayer({
     service,
     defaultCwd: effectiveWorkspaceRoot,
+    classifier:
+      classificationProvider ??
+      createLlmClassificationProvider({
+        connector,
+        model: classificationModel,
+        timeoutMs: classificationTimeoutMs,
+      }),
   });
 
   const server = createControlPlaneServer({

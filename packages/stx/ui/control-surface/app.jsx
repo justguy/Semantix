@@ -1619,6 +1619,11 @@ function FlowStepBody({
     const thumb = effort === "high" ? "84%" : effort === "medium" ? "50%" : "16%";
     const signals = classification.signals || {};
     const effortDetails = [
+      signals.classifierModel
+        ? `Classifier: ${signals.classifier === "llm" ? signals.classifierModel : `${signals.classifier} (${signals.classifierModel})`}`
+        : signals.classifier
+          ? `Classifier: ${signals.classifier}`
+          : "",
       `Risk: ${risk}`,
       Number.isFinite(signals.wordCount) ? `Directive words: ${signals.wordCount}` : "",
       Number.isFinite(signals.hardConstraintCount) ? `Constraint markers: ${signals.hardConstraintCount}` : "",

@@ -6,7 +6,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createStxApplication } from "../src/application.js";
-import { classifyCodexRequest } from "../src/codex-semantix-layer.js";
+import {
+  classifyCodexRequest,
+  createLlmClassificationProvider,
+} from "../src/codex-semantix-layer.js";
 
 function createCtReviewInput(summary = "The semantic proposal is grounded and approval-gated.") {
   return {
@@ -126,6 +129,7 @@ async function createHarness(t, runner) {
   const application = createStxApplication({
     dataDir,
     workspaceRoot,
+    classificationProvider: async (input) => classifyCodexRequest(input),
     connectorOptions: {
       runner,
       cwd: workspaceRoot,
@@ -197,6 +201,75 @@ test("Codex request classification varies with semantic risk and prompt constrai
   assert.equal(destructive.riskLevel, "high");
   assert.equal(conflicted.confidenceScore < simple.confidenceScore, true);
   assert.equal(destructive.confidenceScore < simple.confidenceScore, true);
+});
+
+test("Codex request classification can use a mini model provider", async () => {
+  const calls = [];
+  const classifier = createLlmClassificationProvider({
+    model: "gpt-5.3-codex-spark",
+    connector: {
+      async execute(input) {
+        calls.push(input);
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            complexity: "high",
+            effort: "high",
+            riskLevel: "medium",
+            confidenceScore: 0.67,
+            reasons: ["The prompt requests multi-agent project execution."],
+            suggestedSteps: ["Fast classification", "Constraint validation"],
+            signals: {
+              effortScore: 7,
+              riskScore: 2,
+            },
+          }),
+          stderr: "",
+        };
+      },
+    },
+  });
+
+  const classification = await classifier({
+    primaryDirective: "continue tasks using subagents and commit tracker json",
+    strictBoundaries: ["Require approval before execution."],
+    successState: "Classify before planning.",
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].model, "gpt-5.3-codex-spark");
+  assert.match(calls[0].input, /Semantix fast classifier/);
+  assert.equal(classification.effort, "high");
+  assert.equal(classification.riskLevel, "medium");
+  assert.equal(classification.confidenceScore, 0.67);
+  assert.equal(classification.signals.classifier, "llm");
+  assert.equal(classification.signals.classifierModel, "gpt-5.3-codex-spark");
+});
+
+test("Codex request classification falls back when the mini model fails", async () => {
+  const classifier = createLlmClassificationProvider({
+    model: "gpt-5.3-codex-spark",
+    connector: {
+      async execute() {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: "model unavailable",
+        };
+      },
+    },
+  });
+
+  const classification = await classifier({
+    primaryDirective: "Say hello.",
+    strictBoundaries: [],
+    successState: "Return a greeting.",
+  });
+
+  assert.equal(classification.effort, "low");
+  assert.equal(classification.signals.classifier, "heuristic_fallback");
+  assert.equal(classification.signals.classifierModel, "gpt-5.3-codex-spark");
+  assert.match(classification.reasons[0], /Mini-model classification failed/);
 });
 
 test("Codex Semantix layer projects a blocked proposal into the demo-flow issue state", async (t) => {

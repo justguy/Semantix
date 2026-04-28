@@ -16,6 +16,39 @@ function countWords(value) {
   return compactText(value).match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
 }
 
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function extractJsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+
+  const direct = tryParseJson(text);
+  if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+    return direct;
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    const extracted = tryParseJson(text.slice(start, end + 1));
+    if (extracted && typeof extracted === "object" && !Array.isArray(extracted)) {
+      return extracted;
+    }
+  }
+
+  return null;
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
@@ -43,6 +76,19 @@ function normalizeBand(score) {
   }
 
   return "low";
+}
+
+function normalizeLevel(value, fallback) {
+  const normalized = compactText(value).toLowerCase();
+  return ["low", "medium", "high"].includes(normalized) ? normalized : fallback;
+}
+
+function normalizeStringArray(value, fallback = []) {
+  const values = Array.isArray(value) ? value : fallback;
+  return values
+    .map((entry) => compactText(entry))
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 export function classifyCodexRequest({
@@ -153,6 +199,7 @@ export function classifyCodexRequest({
       effortScore,
       riskScore,
       semanticContradictionSignals: 0,
+      classifier: "heuristic",
     },
     reasons:
       reasons.length > 0
@@ -163,6 +210,139 @@ export function classifyCodexRequest({
       "Structured Semantix review",
       "Approval-gated execution",
     ]),
+  };
+}
+
+export function buildLlmClassificationPrompt({
+  primaryDirective,
+  strictBoundaries = [],
+  successState,
+} = {}) {
+  return [
+    "You are the Semantix fast classifier. Classify the user's requested work before planning or execution.",
+    "Use semantic judgment. Do not use hardcoded keyword rules. Do not invent repo facts.",
+    "Return exactly one JSON object and no markdown.",
+    "Schema:",
+    JSON.stringify({
+      complexity: "low|medium|high",
+      effort: "low|medium|high",
+      riskLevel: "low|medium|high",
+      confidenceScore: "number from 0.0 to 1.0",
+      reasons: ["short evidence-backed reasons tied to the prompt"],
+      suggestedSteps: ["short step labels"],
+      signals: {
+        effortScore: "optional integer 0-10",
+        riskScore: "optional integer 0-10",
+        semanticContradictionSignals: "optional integer, only if the prompt itself contains semantic tension",
+      },
+    }),
+    "Input:",
+    JSON.stringify({
+      primaryDirective: String(primaryDirective ?? ""),
+      strictBoundaries: Array.isArray(strictBoundaries) ? strictBoundaries : [],
+      successState: String(successState ?? ""),
+    }),
+  ].join("\n");
+}
+
+export function normalizeLlmClassification(rawClassification, input = {}, { model } = {}) {
+  const fallback = classifyCodexRequest(input);
+  const raw = rawClassification && typeof rawClassification === "object" ? rawClassification : {};
+  const confidence = Number(raw.confidenceScore ?? raw.confidence_score);
+  const confidenceScore = Number.isFinite(confidence)
+    ? Number(clamp(confidence, 0.05, 0.99).toFixed(2))
+    : fallback.confidenceScore;
+  const effort = normalizeLevel(raw.effort ?? raw.complexity, fallback.effort);
+  const riskLevel = normalizeLevel(raw.riskLevel ?? raw.risk_level, fallback.riskLevel);
+  const effortScore = Number(raw.signals?.effortScore ?? raw.signals?.effort_score);
+  const riskScore = Number(raw.signals?.riskScore ?? raw.signals?.risk_score);
+  const semanticContradictionSignals = Number(
+    raw.signals?.semanticContradictionSignals ??
+    raw.signals?.semantic_contradiction_signals ??
+    0,
+  );
+
+  return {
+    complexity: normalizeLevel(raw.complexity ?? effort, effort),
+    effort,
+    riskLevel,
+    confidenceScore,
+    confidenceBand: normalizeBand(confidenceScore),
+    signals: {
+      ...fallback.signals,
+      effortScore: Number.isFinite(effortScore) ? effortScore : fallback.signals.effortScore,
+      riskScore: Number.isFinite(riskScore) ? riskScore : fallback.signals.riskScore,
+      semanticContradictionSignals: Number.isFinite(semanticContradictionSignals)
+        ? semanticContradictionSignals
+        : 0,
+      classifier: "llm",
+      classifierModel: model ?? null,
+    },
+    reasons: normalizeStringArray(raw.reasons, fallback.reasons),
+    suggestedSteps: unique([
+      ...normalizeStringArray(raw.suggestedSteps ?? raw.suggested_steps, fallback.suggestedSteps),
+      "Structured Semantix review",
+      "Approval-gated execution",
+    ]),
+  };
+}
+
+function fallbackClassification(input, { model, error } = {}) {
+  const fallback = classifyCodexRequest(input);
+  return {
+    ...fallback,
+    signals: {
+      ...fallback.signals,
+      classifier: "heuristic_fallback",
+      classifierModel: model ?? null,
+      classifierError: compactText(error?.message ?? error).slice(0, 180),
+    },
+    reasons: unique([
+      "Mini-model classification failed; deterministic fallback was used.",
+      ...fallback.reasons,
+    ]),
+  };
+}
+
+export function createLlmClassificationProvider({
+  connector,
+  model = process.env.SEMANTIX_CLASSIFIER_MODEL ?? "gpt-5.3-codex-spark",
+  timeoutMs = Number(process.env.SEMANTIX_CLASSIFIER_TIMEOUT_MS ?? 20000),
+} = {}) {
+  if (!connector || typeof connector.execute !== "function") {
+    throw new Error("createLlmClassificationProvider requires a connector with execute().");
+  }
+
+  return async function classifyWithMiniModel(input = {}) {
+    const controller = new AbortController();
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+
+    try {
+      const result = await connector.execute({
+        input: buildLlmClassificationPrompt(input),
+        model,
+        approvalPolicy: "never",
+        sandboxMode: "read-only",
+        signal: controller.signal,
+      });
+
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr || `Classifier exited with ${result.exitCode}`);
+      }
+
+      const parsed = extractJsonObject(result.finalJsonObject ?? result.stdout);
+      if (!parsed) {
+        throw new Error("Classifier did not return a JSON object.");
+      }
+
+      return normalizeLlmClassification(parsed, input, { model });
+    } catch (error) {
+      return fallbackClassification(input, { model, error });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   };
 }
 
@@ -1121,6 +1301,7 @@ export class CodexSemantixLayer {
     service,
     defaultCwd,
     defaultActor = "operator",
+    classifier,
   } = {}) {
     if (!service) {
       throw new Error("CodexSemantixLayer requires a ControlPlaneService.");
@@ -1129,10 +1310,19 @@ export class CodexSemantixLayer {
     this.service = service;
     this.defaultCwd = defaultCwd;
     this.defaultActor = defaultActor;
+    this.classifier = classifier;
   }
 
   classify(input) {
     return classifyCodexRequest(input);
+  }
+
+  async classifyAsync(input) {
+    if (typeof this.classifier === "function") {
+      return this.classifier(input);
+    }
+
+    return this.classify(input);
   }
 
   async start({
@@ -1151,7 +1341,7 @@ export class CodexSemantixLayer {
       throw new Error("CodexSemantixLayer.start requires primaryDirective.");
     }
 
-    const classification = this.classify({
+    const classification = await this.classifyAsync({
       primaryDirective,
       strictBoundaries,
       successState,
