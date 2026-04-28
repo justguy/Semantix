@@ -469,6 +469,9 @@ test("Codex Semantix layer blocks review-artifact-only admission when project wo
   assert.equal(flow.steps.find((step) => step.id === 7)?.status, "required");
   assert.equal(flow.steps.find((step) => step.id === 8)?.status, "blocked");
   assert.equal(flow.execution.progress.find((entry) => entry.id === "validate")?.done, false);
+  assert.equal(flow.advanced.inspectors["node.semantic.generate"].compiler?.hardValidationSchema, undefined);
+  assert.equal(flow.advanced.inspectors["node.semantic.generate"].compiler?.admittedOutput, undefined);
+  assert.equal(flow.advanced.inspectors["node.semantic.generate"].outputPreview?.preview, undefined);
 });
 
 test("Codex Semantix layer blocks exact-content byte mismatches before approval", async (t) => {

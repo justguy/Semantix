@@ -420,6 +420,7 @@ function compactFlowNode(node) {
     hardValidationSchema,
     pathPolicies,
     admittedOutput,
+    stateEffectPreview,
     ...compactNode
   } = node;
 
@@ -431,17 +432,152 @@ function compactFlowNode(node) {
     };
   }
 
+  if (stateEffectPreview) {
+    compactNode.stateEffectPreview = compactStateEffect(stateEffectPreview);
+  }
+
   return compactNode;
+}
+
+function compactRecord(record) {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) =>
+      value !== undefined &&
+      value !== null &&
+      !(Array.isArray(value) && value.length === 0),
+    ),
+  );
+}
+
+function compactIssue(issue) {
+  if (!issue || typeof issue !== "object") return issue;
+  return compactRecord({
+    code: issue.code ?? issue.type,
+    type: issue.type,
+    severity: issue.severity,
+    blocking: Boolean(issue.blocking),
+    summary: issue.summary ?? issue.message,
+    detail: issue.detail,
+    affectedSymbols: Array.isArray(issue.affectedSymbols) ? [...issue.affectedSymbols] : undefined,
+    affectedFiles: Array.isArray(issue.affectedFiles) ? [...issue.affectedFiles] : undefined,
+  });
+}
+
+function compactFlowIssue(issue) {
+  return compactRecord({
+    ...compactIssue(issue),
+    evidence: Array.isArray(issue?.evidence) ? issue.evidence.slice(0, 6).map(compactEvidenceItem) : undefined,
+    nodeId: issue?.nodeId,
+    fixOptions: Array.isArray(issue?.fixOptions) ? issue.fixOptions : undefined,
+  });
+}
+
+function compactEvidenceItem(item) {
+  if (!item || typeof item !== "object") return item;
+  return compactRecord({
+    kind: item.kind,
+    detail: item.detail ?? item.value ?? item.summary,
+    path: item.path,
+    symbol: item.symbol,
+  });
+}
+
+function compactIntervention(intervention) {
+  if (!intervention || typeof intervention !== "object") return intervention;
+  return compactRecord({
+    kind: intervention.kind,
+    detail: intervention.detail ?? intervention.label,
+    source: intervention.source,
+  });
+}
+
+function compactStateEffect(effect) {
+  if (!effect || typeof effect !== "object") return effect;
+  return compactRecord({
+    id: effect.id ?? null,
+    kind: effect.kind ?? null,
+    operation: effect.operation ?? null,
+    target: effect.target ?? null,
+    targets: Array.isArray(effect.targets) ? [...effect.targets] : undefined,
+    summary: effect.summary ?? null,
+    previewRef: effect.previewRef ?? null,
+    policyState: effect.policyState ?? null,
+    riskFlags: Array.isArray(effect.riskFlags) ? [...effect.riskFlags] : [],
+  });
+}
+
+function compactOutputPreview(outputPreview) {
+  if (!outputPreview || typeof outputPreview !== "object") return outputPreview;
+  return {
+    summary: outputPreview.summary ?? null,
+    structuredData: Array.isArray(outputPreview.structuredData)
+      ? outputPreview.structuredData.map(compactStateEffect)
+      : [],
+    previewRef: outputPreview.previewRef ?? null,
+    diffPreview: typeof outputPreview.diffPreview === "string" && outputPreview.diffPreview.length <= 4000
+      ? outputPreview.diffPreview
+      : "",
+    stateEffects: Array.isArray(outputPreview.stateEffects)
+      ? outputPreview.stateEffects.map(compactStateEffect)
+      : undefined,
+  };
+}
+
+function compactCompiler(compiler) {
+  if (!compiler || typeof compiler !== "object") return undefined;
+  return {
+    promptVersion: compiler.promptVersion ?? null,
+    outputSchemaId: compiler.outputSchemaId ?? null,
+  };
+}
+
+function compactCritique(critique) {
+  if (!critique || typeof critique !== "object") return undefined;
+  return compactRecord({
+    summary: critique.summary,
+    blocking: critique.blocking,
+    riskFlags: Array.isArray(critique.riskFlags) ? [...critique.riskFlags] : [],
+    issues: Array.isArray(critique.issues) ? critique.issues.map(compactIssue) : undefined,
+    evidence: Array.isArray(critique.evidence) ? critique.evidence.slice(0, 10).map(compactEvidenceItem) : undefined,
+    interventions: Array.isArray(critique.interventions) ? critique.interventions.slice(0, 10).map(compactIntervention) : undefined,
+  });
+}
+
+function compactSemanticReview(review) {
+  if (!review || typeof review !== "object") return undefined;
+  return compactRecord({
+    blocking: review.blocking,
+    blockingReason: review.blockingReason,
+    targetPath: review.targetPath,
+    targetPaths: Array.isArray(review.targetPaths) ? [...review.targetPaths] : undefined,
+    issues: Array.isArray(review.issues) ? review.issues.map(compactIssue) : undefined,
+    evidence: Array.isArray(review.evidence) ? review.evidence.slice(0, 10).map(compactEvidenceItem) : undefined,
+    interventions: Array.isArray(review.interventions) ? review.interventions.slice(0, 10).map(compactIntervention) : undefined,
+  });
 }
 
 function compactFlowInspectors(inspectors) {
   return Object.fromEntries(
     Object.entries(inspectors).map(([nodeId, inspector]) => [
       nodeId,
-      {
-        ...inspector,
+      compactRecord({
         node: compactFlowNode(inspector?.node),
-      },
+        overview: inspector?.overview,
+        outputPreview: compactOutputPreview(inspector?.outputPreview),
+        proposedChanges: Array.isArray(inspector?.proposedChanges)
+          ? inspector.proposedChanges.map(compactStateEffect)
+          : undefined,
+        approvals: inspector?.approvals,
+        issues: Array.isArray(inspector?.issues) ? inspector.issues.map(compactIssue) : undefined,
+        compiler: compactCompiler(inspector?.compiler),
+        runtimeSessions: Array.isArray(inspector?.runtimeSessions)
+          ? inspector.runtimeSessions.map((session) => compactRecord({
+              id: session?.id,
+              runtimeId: session?.runtimeId,
+              status: session?.status,
+            }))
+          : undefined,
+      }),
     ]),
   );
 }
@@ -817,7 +953,7 @@ export async function buildCodexSemantixFlowProjection({
   const issuesWithFixOptions = issues.map((issue) => ({
     ...issue,
     fixOptions: fixOptionsForIssue(issue),
-  }));
+  })).map(compactFlowIssue);
   const analysis = buildAnalysis({
     artifact,
     classification: projectedClassification,
