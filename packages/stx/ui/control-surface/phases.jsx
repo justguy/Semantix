@@ -11,7 +11,7 @@ function PromptView({ t, prompt, setPrompt, onCompile, isBusy }) {
           What should Semantix compile for review?
         </h1>
         <p style={{ fontSize: 14, color: t.textDim, margin: "0 0 24px", lineHeight: 1.6, maxWidth: 620 }}>
-          This is not a shell. Describe the outcome. Semantix will freeze the intent contract, compile a review artifact, surface exact issues like missing symbols or invalid paths, and wait for approval before anything becomes real.
+          This is not a shell. Describe the outcome. Semantix will freeze the intent contract, compile semantic output, surface exact issues like missing symbols or invalid paths, and wait for approval before anything becomes real.
         </p>
 
         <div style={{ background: t.panel, border: `1px solid ${t.border}`, borderRadius: 14, boxShadow: t.shadowLg, overflow: "hidden" }}>
@@ -44,11 +44,11 @@ function PromptView({ t, prompt, setPrompt, onCompile, isBusy }) {
             }}
           >
             <span style={{ fontSize: 11, color: t.textFaint, fontFamily: 'ui-monospace, Menlo, monospace' }}>
-              control-plane: review artifact · freshness-bound approval · audit recording
+              control-plane: semantic artifact · freshness-bound approval · audit recording
             </span>
             <div style={{ flex: 1 }} />
             <Btn t={t} variant="primary" icon={<Icon.Spark />} onClick={onCompile} disabled={isBusy}>
-              Compile review artifact
+              Compile semantic artifact
             </Btn>
           </div>
         </div>
@@ -602,7 +602,7 @@ function SimpleReviewSurface({
           <ExecutionStateCard
             t={t}
             artifact={artifact}
-            eyebrow="Awaiting code changes"
+            eyebrow="Awaiting admitted output"
             title={executionSummary.title}
             body={executionSummary.body}
           />
@@ -824,7 +824,7 @@ function IntentBar({
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             <Pill t={t} risk="info">{runtimeKind}</Pill>
             <Pill t={t}>{nodes.length} nodes</Pill>
-            <Pill t={t}>{changes.length} admitted code change{changes.length === 1 ? "" : "s"}</Pill>
+            <Pill t={t}>{changes.length} admitted change{changes.length === 1 ? "" : "s"}</Pill>
             {affectedFileCount > 0 ? <Pill t={t} risk="info">{affectedFileCount} file{affectedFileCount === 1 ? "" : "s"}</Pill> : null}
             {advisoryChanges.length > 0 ? <Pill t={t} risk="orange">{advisoryChanges.length} advisory preview{advisoryChanges.length === 1 ? "" : "s"} hidden</Pill> : null}
             <Pill t={t} risk={gates.some((gate) => gate.status === "approved") ? "green" : "orange"}>
@@ -1098,7 +1098,7 @@ function DoneView({ t, artifact, approvals, onNewRun }) {
                 t={t}
                 artifact={artifact}
                 eyebrow="Execution result"
-                title="No admitted code-change diff was recorded"
+                title="No admitted diff was recorded"
                 body={summarizeExecutionState(artifact).body}
               />
             </div>

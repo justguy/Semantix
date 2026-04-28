@@ -878,7 +878,7 @@ export class ControlPlaneService {
     return run.intent;
   }
 
-  async compilePlan({ runId, actor = "system", blueprint, cwd } = {}) {
+  async compilePlan({ runId, actor = "system", blueprint, classification, cwd } = {}) {
     const run = await this.ensureRunState(runId);
     if (!run.intent && !blueprint?.intent_contract) {
       throw new ValidationError("Cannot compile a plan before an intent contract exists.", {
@@ -904,6 +904,7 @@ export class ControlPlaneService {
         status: "pending_review",
       },
       blueprint,
+      classification,
       planVersion,
       graphVersion,
       generatedAt,
@@ -1011,6 +1012,8 @@ export class ControlPlaneService {
     primaryDirective,
     strictBoundaries = [],
     successState,
+    blueprint,
+    classification,
     cwd,
     autoExecuteSemanticAdmission = true,
   }) {
@@ -1025,6 +1028,8 @@ export class ControlPlaneService {
     const artifact = await this.compilePlan({
       runId,
       actor,
+      blueprint,
+      classification,
       cwd,
     });
 
@@ -2322,7 +2327,7 @@ export class ControlPlaneService {
       planVersion: artifact.planVersion,
       artifactHash: artifact.artifactHash,
       afterNodeId: executableNode.id,
-      reason: "awaiting_approval",
+      reason: deterministicNode ? "awaiting_approval" : "semantic_output_admitted",
       createdAt: emittedAt,
     });
 
@@ -2405,6 +2410,41 @@ export class ControlPlaneService {
           payload: preview,
         }),
       );
+    }
+
+    if (!deterministicNode) {
+      artifact.plan.status = "completed";
+      await this.saveRunState(run);
+      await this.appendAudit(
+        runId,
+        createAuditRecord({
+          runId,
+          action: "run.completed",
+          actor,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          nodeId: executableNode.id,
+          details: {
+            kind: "semantic_output",
+          },
+          timestamp: emittedAt,
+        }),
+      );
+      await this.emit(
+        runId,
+        makeEvent({
+          runId,
+          type: "run.completed",
+          timestamp: emittedAt,
+          nodeId: executableNode.id,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          payload: {
+            kind: "semantic_output",
+          },
+        }),
+      );
+      return artifact;
     }
 
     const approvalGate = deterministicNode ? getApprovalGate(artifact, deterministicNode.id) : null;

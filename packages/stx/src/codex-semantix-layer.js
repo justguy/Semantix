@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 
+import { createDefaultSemanticResponseSchema } from "../../core/src/index.js";
+import { runCriticalReview } from "./ct-review.js";
+
 function compactText(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
 }
@@ -24,26 +27,72 @@ function tryParseJson(text) {
   }
 }
 
-function extractJsonObject(value) {
+function looksLikeClassificationObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      (
+        value.complexity != null ||
+        value.effort != null ||
+        value.riskLevel != null ||
+        value.risk_level != null ||
+        value.confidenceScore != null ||
+        value.confidence_score != null ||
+        value.outputKind != null ||
+        value.output_kind != null ||
+        value.signals != null ||
+        value.reasons != null
+      ),
+  );
+}
+
+function extractJsonObject(value, depth = 0) {
+  if (depth > 6) return null;
+
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value;
+    if (looksLikeClassificationObject(value)) {
+      return value;
+    }
+
+    for (const candidate of Object.values(value)) {
+      const extracted = extractJsonObject(candidate, depth + 1);
+      if (extracted) return extracted;
+    }
+
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const candidate of value) {
+      const extracted = extractJsonObject(candidate, depth + 1);
+      if (extracted) return extracted;
+    }
+
+    return null;
   }
 
   const text = String(value ?? "").trim();
   if (!text) return null;
 
   const direct = tryParseJson(text);
-  if (direct && typeof direct === "object" && !Array.isArray(direct)) {
-    return direct;
+  const directObject = extractJsonObject(direct, depth + 1);
+  if (directObject) {
+    return directObject;
+  }
+
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines.slice().reverse()) {
+    const parsedLine = tryParseJson(line);
+    const lineObject = extractJsonObject(parsedLine, depth + 1);
+    if (lineObject) return lineObject;
   }
 
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) {
     const extracted = tryParseJson(text.slice(start, end + 1));
-    if (extracted && typeof extracted === "object" && !Array.isArray(extracted)) {
-      return extracted;
-    }
+    return extractJsonObject(extracted, depth + 1);
   }
 
   return null;
@@ -83,6 +132,96 @@ function normalizeLevel(value, fallback) {
   return ["low", "medium", "high"].includes(normalized) ? normalized : fallback;
 }
 
+function normalizeOutputKind(value, fallback = "code_change") {
+  const normalized = compactText(value).toLowerCase().replaceAll("-", "_");
+  return ["semantic_response", "code_change"].includes(normalized) ? normalized : fallback;
+}
+
+function inferOutputRouting({
+  primaryDirective,
+  successState,
+} = {}) {
+  const directiveText = compactText(primaryDirective).toLowerCase();
+  const taskText = directiveText || compactText(successState).toLowerCase();
+  const materialWorkspaceTerms = [
+    "codebase",
+    "commit",
+    "component",
+    "database",
+    "delete",
+    "endpoint",
+    "feature branch",
+    "file",
+    "files",
+    "fix",
+    "implement",
+    "json",
+    "login",
+    "migrate",
+    "migration",
+    "modify",
+    "package",
+    "prohect",
+    "push",
+    "refactor",
+    "repo",
+    "repository",
+    "route",
+    "signup",
+    "subagent",
+    "subagents",
+    "task",
+    "tasks",
+    "test",
+    "tracker",
+    "trcker",
+    "wire",
+  ];
+  const materialVerbTerms = [
+    "add",
+    "build",
+    "change",
+    "create",
+    "delete",
+    "execute",
+    "executuon",
+    "fix",
+    "implement",
+    "migrate",
+    "modify",
+    "refactor",
+    "rename",
+    "update",
+    "wire",
+  ];
+  const semanticOnlyTerms = [
+    "answer",
+    "describe",
+    "design",
+    "draft",
+    "explain",
+    "joke",
+    "outline",
+    "poem",
+    "say",
+    "story",
+    "summarize",
+    "tell me",
+    "write",
+  ];
+  const asksForSemanticOutput = hasAny(taskText, semanticOnlyTerms);
+  const requiresFileChanges =
+    hasAny(taskText, materialWorkspaceTerms) ||
+    (hasAny(taskText, materialVerbTerms) && !asksForSemanticOutput);
+  const semanticOnly = asksForSemanticOutput && !requiresFileChanges;
+
+  return {
+    outputKind: semanticOnly ? "semantic_response" : "code_change",
+    requiresExecution: requiresFileChanges,
+    requiresFileChanges,
+  };
+}
+
 function normalizeStringArray(value, fallback = []) {
   const values = Array.isArray(value) ? value : fallback;
   return values
@@ -99,6 +238,10 @@ export function classifyCodexRequest({
   const directiveText = compactText(primaryDirective).toLowerCase();
   const fallbackText = compactText(successState).toLowerCase();
   const taskText = directiveText || fallbackText;
+  const routing = inferOutputRouting({
+    primaryDirective,
+    successState,
+  });
   const wordCount = countWords(taskText);
   const hardConstraintCount = countMatches(taskText, [
     "must",
@@ -191,6 +334,7 @@ export function classifyCodexRequest({
     complexity: effort,
     effort,
     riskLevel,
+    outputKind: routing.outputKind,
     confidenceScore,
     confidenceBand: normalizeBand(confidenceScore),
     signals: {
@@ -199,6 +343,8 @@ export function classifyCodexRequest({
       effortScore,
       riskScore,
       semanticContradictionSignals: 0,
+      requiresExecution: routing.requiresExecution,
+      requiresFileChanges: routing.requiresFileChanges,
       classifier: "heuristic",
     },
     reasons:
@@ -208,7 +354,7 @@ export function classifyCodexRequest({
     suggestedSteps: unique([
       ...suggestedSteps,
       "Structured Semantix review",
-      "Approval-gated execution",
+      ...(routing.requiresExecution ? ["Approval-gated execution"] : ["Semantic response admission"]),
     ]),
   };
 }
@@ -228,12 +374,15 @@ export function buildLlmClassificationPrompt({
       effort: "low|medium|high",
       riskLevel: "low|medium|high",
       confidenceScore: "number from 0.0 to 1.0",
+      outputKind: "semantic_response|code_change",
       reasons: ["short evidence-backed reasons tied to the prompt"],
       suggestedSteps: ["short step labels"],
       signals: {
         effortScore: "optional integer 0-10",
         riskScore: "optional integer 0-10",
         semanticContradictionSignals: "optional integer, only if the prompt itself contains semantic tension",
+        requiresExecution: "boolean, true only if real project/workspace execution is requested",
+        requiresFileChanges: "boolean, true only if the request should change files or repo state",
       },
     }),
     "Input:",
@@ -254,6 +403,10 @@ export function normalizeLlmClassification(rawClassification, input = {}, { mode
     : fallback.confidenceScore;
   const effort = normalizeLevel(raw.effort ?? raw.complexity, fallback.effort);
   const riskLevel = normalizeLevel(raw.riskLevel ?? raw.risk_level, fallback.riskLevel);
+  const routing = inferOutputRouting(input);
+  const rawOutputKind = raw.outputKind ?? raw.output_kind;
+  const hasRawOutputKind = rawOutputKind != null;
+  const outputKind = normalizeOutputKind(rawOutputKind, fallback.outputKind ?? routing.outputKind);
   const effortScore = Number(raw.signals?.effortScore ?? raw.signals?.effort_score);
   const riskScore = Number(raw.signals?.riskScore ?? raw.signals?.risk_score);
   const semanticContradictionSignals = Number(
@@ -266,6 +419,7 @@ export function normalizeLlmClassification(rawClassification, input = {}, { mode
     complexity: normalizeLevel(raw.complexity ?? effort, effort),
     effort,
     riskLevel,
+    outputKind,
     confidenceScore,
     confidenceBand: normalizeBand(confidenceScore),
     signals: {
@@ -275,6 +429,18 @@ export function normalizeLlmClassification(rawClassification, input = {}, { mode
       semanticContradictionSignals: Number.isFinite(semanticContradictionSignals)
         ? semanticContradictionSignals
         : 0,
+      requiresExecution:
+        typeof raw.signals?.requiresExecution === "boolean" || typeof raw.signals?.requires_execution === "boolean"
+          ? Boolean(raw.signals.requiresExecution ?? raw.signals.requires_execution)
+          : hasRawOutputKind
+            ? outputKind === "code_change"
+            : routing.requiresExecution,
+      requiresFileChanges:
+        typeof raw.signals?.requiresFileChanges === "boolean" || typeof raw.signals?.requires_file_changes === "boolean"
+          ? Boolean(raw.signals.requiresFileChanges ?? raw.signals.requires_file_changes)
+          : hasRawOutputKind
+            ? outputKind === "code_change"
+            : routing.requiresFileChanges,
       classifier: "llm",
       classifierModel: model ?? null,
     },
@@ -282,7 +448,7 @@ export function normalizeLlmClassification(rawClassification, input = {}, { mode
     suggestedSteps: unique([
       ...normalizeStringArray(raw.suggestedSteps ?? raw.suggested_steps, fallback.suggestedSteps),
       "Structured Semantix review",
-      "Approval-gated execution",
+      ...(outputKind === "code_change" ? ["Approval-gated execution"] : ["Semantic response admission"]),
     ]),
   };
 }
@@ -591,6 +757,42 @@ function collectInspectorIssues(inspectors) {
   });
 }
 
+function collectSemanticCriticalReviewIssues(artifact) {
+  const nodes = artifact?.plan?.nodes ?? [];
+  const issues = [];
+
+  for (const node of nodes.filter(isSemanticGenerationNode)) {
+    if (!node?.admittedOutput?.ct_review_input) continue;
+    const downstreamDeterministicNode = nodes.find(
+      (candidate) => isDeterministicExecutionNode(candidate) && candidate.inputNodeId === node.id,
+    );
+    if (downstreamDeterministicNode) continue;
+
+    const report = runCriticalReview({
+      xplanNode: node,
+      admittedOutput: node.admittedOutput,
+      extractedClaims: node.admittedOutput.ct_review_input,
+      intent: artifact.intent,
+    });
+
+    for (const issue of report.issues ?? []) {
+      issues.push(normalizeIssue(issue, node.id));
+    }
+  }
+
+  return issues;
+}
+
+function dedupeIssues(issues) {
+  const seen = new Set();
+  return issues.filter((issue) => {
+    const key = `${issue.code}:${issue.summary}:${issue.affectedSymbols.join("|")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function compactFlowNode(node) {
   if (!node || typeof node !== "object") {
     return node;
@@ -607,6 +809,8 @@ function compactFlowNode(node) {
   if (admittedOutput) {
     compactNode.admittedOutputSummary = {
       summary: admittedOutput.summary ?? null,
+      responseKind: admittedOutput.response_kind ?? null,
+      hasResponse: typeof admittedOutput.response === "string" && admittedOutput.response.length > 0,
       changeCount: Array.isArray(admittedOutput.changes) ? admittedOutput.changes.length : 0,
       hasDiffPreview: typeof admittedOutput.diff_preview === "string" && admittedOutput.diff_preview.length > 0,
     };
@@ -835,10 +1039,10 @@ function buildExecutionProgress(artifact, { issues = [], approval } = {}) {
   const hasBlockingIssues = issues.some((issue) => issue.blocking);
   const hasStateEffects = materialStateEffects(artifact).length > 0;
   const validationDone =
-    artifact?.plan?.status === "completed" ||
+    (artifact?.plan?.status === "completed" && !hasBlockingIssues) ||
     Boolean(approval?.approved) ||
     Boolean(approval?.ready) ||
-    (semanticDone && hasStateEffects && !hasBlockingIssues);
+    (semanticDone && !hasBlockingIssues && (hasStateEffects || !deterministicNode));
   const deterministicRunning = deterministicNode?.executionStatus === "running";
 
   const labels = [
@@ -848,8 +1052,8 @@ function buildExecutionProgress(artifact, { issues = [], approval } = {}) {
       done: Boolean(artifact?.plan?.nodes?.length),
     },
     {
-      id: "code",
-      label: "Code",
+      id: "semantic",
+      label: deterministicNode ? "Proposal" : "Response",
       done: semanticDone,
     },
     {
@@ -857,13 +1061,16 @@ function buildExecutionProgress(artifact, { issues = [], approval } = {}) {
       label: "Validate",
       done: validationDone,
     },
-    {
+  ];
+
+  if (deterministicNode) {
+    labels.push({
       id: "execute",
       label: "Execute",
-      done: artifact?.plan?.status === "completed",
+      done: artifact?.plan?.status === "completed" && !hasBlockingIssues,
       current: deterministicRunning,
-    },
-  ];
+    });
+  }
 
   const current = labels.find((entry) => entry.current) ?? labels.find((entry) => !entry.done);
   return labels.map((entry) => ({
@@ -875,16 +1082,16 @@ function buildExecutionProgress(artifact, { issues = [], approval } = {}) {
 function resolvePhase({ artifact, issues, approval }) {
   const deterministicNode = getDeterministicNode(artifact);
 
-  if (artifact?.plan?.status === "completed") {
-    return "completed";
-  }
-
   if (artifact?.plan?.status === "failed") {
     return "failed";
   }
 
   if (issues.some((issue) => issue.blocking)) {
     return "needs_intervention";
+  }
+
+  if (artifact?.plan?.status === "completed") {
+    return "completed";
   }
 
   if (approval.ready) {
@@ -904,16 +1111,15 @@ function buildFlowSteps({ artifact, issues, approval }) {
   const hasPlan = (artifact?.plan?.nodes ?? []).length > 0;
   const hasIssues = issues.length > 0;
   const hasBlockingIssues = issues.some((issue) => issue.blocking);
-  const completed = artifact?.plan?.status === "completed";
+  const completed = artifact?.plan?.status === "completed" && !hasBlockingIssues;
   const semanticDone = runtimeNode?.executionStatus === "succeeded";
   const semanticFinished = semanticDone || runtimeNode?.executionStatus === "failed" || hasIssues || completed;
   const reEvaluated = Number(artifact?.planVersion ?? 1) > 1 || Number(runtimeNode?.revision ?? 1) > 1;
   const deterministicRunning = deterministicNode?.executionStatus === "running";
-
-  return [
+  const steps = [
     { id: 1, label: "Input", status: "complete" },
-    { id: 2, label: "Fast Classification", status: "complete" },
-    { id: 3, label: "Review Plan", status: hasPlan ? "complete" : "pending" },
+    { id: 2, label: "Classification", status: "complete" },
+    { id: 3, label: deterministicNode ? "Review Plan" : "Semantic Response", status: hasPlan ? "complete" : "pending" },
     {
       id: 4,
       label: "Issue Detection",
@@ -921,30 +1127,39 @@ function buildFlowSteps({ artifact, issues, approval }) {
     },
     { id: 5, label: "Effort Indicator", status: "complete" },
     { id: 6, label: "Why? Explanation", status: hasIssues || hasPlan ? "available" : "pending" },
-    {
-      id: 7,
-      label: "Fix Issues",
-      status: hasBlockingIssues ? "required" : hasIssues ? "optional" : semanticFinished ? "not_required" : "pending",
-    },
-    {
-      id: 8,
-      label: "Re-evaluation",
-      status:
-        hasBlockingIssues
-          ? "blocked"
-          : reEvaluated && semanticFinished && !hasIssues
-            ? "complete"
-            : semanticFinished
-              ? "not_required"
-              : "pending",
-    },
     { id: 9, label: "Advanced View", status: semanticFinished ? "available" : "pending" },
-    {
+  ];
+
+  if (hasIssues || hasBlockingIssues || reEvaluated) {
+    steps.push(
+      {
+        id: 7,
+        label: "Fix Issues",
+        status: hasBlockingIssues ? "required" : hasIssues ? "optional" : "not_required",
+      },
+      {
+        id: 8,
+        label: "Re-evaluation",
+        status:
+          hasBlockingIssues
+            ? "blocked"
+            : reEvaluated && semanticFinished && !hasIssues
+              ? "complete"
+              : "pending",
+      },
+    );
+  }
+
+  if (approval.required) {
+    steps.push({
       id: 10,
       label: "Approval",
       status: approval.approved || completed ? "complete" : approval.ready ? "ready" : "pending",
-    },
-    {
+    });
+  }
+
+  if (deterministicNode) {
+    steps.push({
       id: 11,
       label: "Execution",
       status:
@@ -953,9 +1168,11 @@ function buildFlowSteps({ artifact, issues, approval }) {
           : deterministicRunning
             ? "running"
             : "pending",
-    },
-    { id: 12, label: "Result", status: completed ? "complete" : "pending" },
-  ];
+    });
+  }
+
+  steps.push({ id: 12, label: "Result", status: completed ? "complete" : "pending" });
+  return steps.sort((left, right) => left.id - right.id);
 }
 
 function buildApproval(artifact, issues) {
@@ -987,14 +1204,24 @@ function buildApproval(artifact, issues) {
   };
 }
 
-function buildResult(artifact) {
-  const completed = artifact?.plan?.status === "completed";
+function buildResult(artifact, { issues = [] } = {}) {
+  const completed = artifact?.plan?.status === "completed" && !issues.some((issue) => issue.blocking);
   const effects = materialStateEffects(artifact);
   const filesUpdated = completed ? unique(effects.flatMap(stateEffectTargets)) : [];
+  const outputs = (artifact?.plan?.nodes ?? [])
+    .filter((node) => isSemanticGenerationNode(node) && node.executionStatus === "succeeded" && node.admittedOutput)
+    .map((node) => compactRecord({
+      nodeId: node.id,
+      kind: node.admittedOutput?.response ? "semantic_output" : "semantic_proposal",
+      summary: node.outputSummary ?? node.admittedOutput?.summary ?? null,
+      response: node.admittedOutput?.response ?? null,
+      responseKind: node.admittedOutput?.response_kind ?? null,
+    }));
 
   return {
     completed,
     filesUpdated,
+    outputs,
     stateEffects: effects.map((effect) => ({
       id: effect.id,
       kind: effect.kind,
@@ -1031,7 +1258,11 @@ function buildAnalysis({ artifact, classification, issues, approval, result }) {
   } else if (approval.ready) {
     summary = "Semantic admission produced material state effects and the artifact is ready for fresh approval.";
   } else if (result.completed) {
-    summary = `Execution completed with ${result.stateEffects.length} material state effect${result.stateEffects.length === 1 ? "" : "s"}.`;
+    if (result.outputs?.length > 0 && result.stateEffects.length === 0) {
+      summary = `Semantic response completed with ${result.outputs.length} admitted output${result.outputs.length === 1 ? "" : "s"}.`;
+    } else {
+      summary = `Execution completed with ${result.stateEffects.length} material state effect${result.stateEffects.length === 1 ? "" : "s"}.`;
+    }
   } else if (effects.length > 0) {
     summary = `${effects.length} material state effect${effects.length === 1 ? "" : "s"} await review.`;
   }
@@ -1081,6 +1312,17 @@ function buildRecommendations({ issues, approval, result }) {
   }
 
   if (result.completed) {
+    if (result.outputs?.length > 0 && result.filesUpdated.length === 0) {
+      return [{
+        id: "result.semantic_output",
+        label: "Review admitted response",
+        action: "inspect_result",
+        source: "result",
+        nodeId: result.outputs[0]?.nodeId ?? null,
+        reason: `${result.outputs.length} semantic output${result.outputs.length === 1 ? "" : "s"} admitted.`,
+      }];
+    }
+
     return [{
       id: "result.audit",
       label: "Review audit trail",
@@ -1108,9 +1350,12 @@ export async function buildCodexSemantixFlowProjection({
   }
 
   const inspectors = await loadInspectors(service, artifact);
-  const issues = collectInspectorIssues(inspectors);
+  const issues = dedupeIssues([
+    ...collectInspectorIssues(inspectors),
+    ...collectSemanticCriticalReviewIssues(artifact),
+  ]);
   const approval = buildApproval(artifact, issues);
-  const result = buildResult(artifact);
+  const result = buildResult(artifact, { issues });
   const phase = resolvePhase({
     artifact,
     issues,
@@ -1118,6 +1363,7 @@ export async function buildCodexSemantixFlowProjection({
   });
   const effectiveClassification =
     classification ??
+    artifact.classification ??
     classifyCodexRequest({
       primaryDirective: artifact.intent?.primaryDirective,
       strictBoundaries: artifact.intent?.strictBoundaries,
@@ -1178,7 +1424,7 @@ export async function buildCodexSemantixFlowProjection({
       inspectors: compactFlowInspectors(inspectors),
     },
     execution: {
-      status: getDeterministicNode(artifact)?.executionStatus ?? "not_started",
+      status: getDeterministicNode(artifact)?.executionStatus ?? getRuntimeNode(artifact)?.executionStatus ?? "not_started",
       progress: buildExecutionProgress(artifact, { issues, approval }),
     },
     result,
@@ -1193,6 +1439,76 @@ export async function buildCodexSemantixFlowProjection({
 function defaultSuccessState(primaryDirective) {
   const task = compactText(primaryDirective) || "the requested change";
   return `Preview, validate, and apply ${task} only after Semantix approval gates pass.`;
+}
+
+function defaultSemanticResponseSuccessState(primaryDirective) {
+  const task = compactText(primaryDirective) || "the requested response";
+  return `Compile a Semantix-reviewed semantic response for: ${task}`;
+}
+
+function normalizeSuccessStateForClassification({ primaryDirective, successState, classification }) {
+  const successStateText = compactText(successState);
+  if (shouldUseSemanticResponseBlueprint(classification)) {
+    if (!successStateText || /\breview artifact\b|\bfile updated\b|\bexecution step\b|\bapply\b/.test(successStateText.toLowerCase())) {
+      return defaultSemanticResponseSuccessState(primaryDirective);
+    }
+    return successStateText;
+  }
+
+  return successStateText || defaultSuccessState(primaryDirective);
+}
+
+function shouldUseSemanticResponseBlueprint(classification) {
+  return (
+    classification?.outputKind === "semantic_response" &&
+    classification?.signals?.requiresFileChanges !== true
+  );
+}
+
+function buildSemanticResponseBlueprint({
+  primaryDirective,
+  strictBoundaries = [],
+  successState,
+} = {}) {
+  return {
+    intent_contract: {
+      primary_directive: primaryDirective,
+      strict_boundaries: [...strictBoundaries],
+      success_state: successState,
+    },
+    semantic_frames: [
+      {
+        frame_id: "frame.semantic.respond",
+        node_id: "node.semantic.respond",
+        prompt: primaryDirective,
+        context: {
+          workflow: "semantic_response",
+          success_state: successState,
+          strict_boundaries: [...strictBoundaries],
+          review_expectations: [
+            "Return a user-visible semantic response, not a repo code-change proposal.",
+            "Do not include workspace_path, diff_preview, changes, target files, or file operations.",
+            "Put the final user-visible answer in response.",
+            "Preserve prompt-level tensions in ct_review_input instead of pretending they are file or repo issues.",
+            "Provide ct_review_input with reasoning_chain, plan_steps, assumptions, numeric_claims, and concurrency so deterministic CT-MCP review can run before the response is admitted.",
+          ],
+        },
+        hard_constraints: [],
+      },
+    ],
+    execution_graph: {
+      nodes: [
+        {
+          node_id: "node.semantic.respond",
+          kind: "semantic_generation",
+          title: "Compile Semantic Response",
+          depends_on: [],
+          frame_id: "frame.semantic.respond",
+          base_validation_schema: createDefaultSemanticResponseSchema(),
+        },
+      ],
+    },
+  };
 }
 
 function resolveArtifactIdentity(flowOrArtifact) {
@@ -1346,13 +1662,27 @@ export class CodexSemantixLayer {
       strictBoundaries,
       successState,
     });
+    const effectiveSuccessState = normalizeSuccessStateForClassification({
+      primaryDirective,
+      successState: successStateText,
+      classification,
+    });
+    const blueprint = shouldUseSemanticResponseBlueprint(classification)
+      ? buildSemanticResponseBlueprint({
+          primaryDirective: directiveText,
+          strictBoundaries: Array.isArray(strictBoundaries) ? strictBoundaries : [],
+          successState: effectiveSuccessState,
+        })
+      : undefined;
 
     const artifact = await this.service.bootstrapRun({
       runId,
       actor,
       primaryDirective: directiveText,
       strictBoundaries: Array.isArray(strictBoundaries) ? strictBoundaries : [],
-      successState: successStateText || defaultSuccessState(primaryDirective),
+      successState: effectiveSuccessState,
+      blueprint,
+      classification,
       cwd,
       autoExecuteSemanticAdmission,
     });

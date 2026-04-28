@@ -312,7 +312,7 @@ function Inspector({ t, artifact, node, approvals, payload, isLoading, loadError
           )}
           {advisoryChanges.length > 0 && (
             <KV t={t} label="Hidden previews">
-              {advisoryChanges.length} advisory host preview{advisoryChanges.length === 1 ? "" : "s"} omitted until admitted code-change output is available.
+              {advisoryChanges.length} advisory host preview{advisoryChanges.length === 1 ? "" : "s"} omitted until admitted output is available.
             </KV>
           )}
         </>
@@ -327,7 +327,7 @@ function Inspector({ t, artifact, node, approvals, payload, isLoading, loadError
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {affectedScope.length > 0 && (
             <div>
-              <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Affected files / symbols</div>
+              <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Affected scope</div>
               <ScopePills t={t} items={affectedScope} />
             </div>
           )}

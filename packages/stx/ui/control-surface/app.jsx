@@ -8,7 +8,7 @@ const PHASES = {
   done: "done",
 };
 
-const DEFAULT_PROMPT = "tell me a sad and not funny joke that will make me laugh";
+const DEFAULT_PROMPT = "";
 
 function findFirstAttentionNode(artifact) {
   const nodes = getNodes(artifact);
@@ -397,7 +397,7 @@ function SemantixApp({
         setDisplayedArtifact(null);
         setApprovals({});
         setPhase(PHASES.prompt);
-        setActionNotice(`Run ${runId} does not have a compiled review artifact yet.`);
+        setActionNotice(`Run ${runId} does not have a compiled Semantix artifact yet.`);
         return;
       }
       setActionError(error.message || `Unable to load run ${runId}.`);
@@ -580,7 +580,9 @@ function SemantixApp({
       setDecisionHints({});
       applyFreshArtifact(artifact, {
         syncDisplay: true,
-        notice: "Codex generated a Semantix-reviewed proposal and paused at the control gate.",
+        notice: flow.approval?.required
+          ? "Codex generated a Semantix-reviewed proposal and paused at the control gate."
+          : "Codex generated a Semantix-reviewed semantic response.",
       });
       setActiveFlowStep(recommendedFlowStep({ flow, phase: phaseFromArtifact(artifact) }));
     } catch (error) {
@@ -596,7 +598,7 @@ function SemantixApp({
       } else {
         setPhase(PHASES.prompt);
       }
-      setActionError(error.message || "Failed to compile a review artifact.");
+      setActionError(error.message || "Failed to compile a Semantix artifact.");
     } finally {
       setBusyAction(null);
     }
@@ -657,7 +659,7 @@ function SemantixApp({
         method: "POST",
         body: JSON.stringify({
           actor: "reviewer",
-          reason: "Approved from the Semantix demo flow.",
+          reason: "Approved from the Semantix control surface.",
         }),
       });
       setFlowProjection(flow);
@@ -691,7 +693,7 @@ function SemantixApp({
     syncSelectionsForArtifact(hydratedLatestArtifact, selectedNodeRef);
     setApprovals(syncApprovalsFromArtifact(hydratedLatestArtifact, decisionHints));
     setActionError(null);
-    setActionNotice("Re-opened the latest review artifact from backend truth.");
+    setActionNotice("Re-opened the latest Semantix artifact from backend truth.");
     setPhase(PHASES.review);
   }
 
@@ -735,8 +737,8 @@ function SemantixApp({
           artifactHash: hydratedDisplayedArtifact.artifactHash,
           reason:
             decision === "approve"
-              ? "Approved from the Semantix demo flow."
-              : "Rejected from the Semantix demo flow.",
+              ? "Approved from the Semantix control surface."
+              : "Rejected from the Semantix control surface.",
         }),
       });
 
@@ -1034,28 +1036,53 @@ function SemantixApp({
 }
 
 const FLOW_STORY_STEPS = [
-  { id: 1, label: "Input", time: "0:00 - 0:05", caption: "Enter the outcome and start the run." },
-  { id: 2, label: "Fast Classification", time: "0:05 - 0:07", caption: "Semantix classifies risk, effort, and constraints first." },
-  { id: 3, label: "Review Plan", time: "0:07 - 0:10", caption: "Semantix turns the prompt into an approval-gated execution plan before any action can run." },
-  { id: 4, label: "Issue Detection", time: "0:10 - 0:15", caption: "Problems are surfaced before any state change becomes real." },
-  { id: 5, label: "Effort Indicator", time: "0:15 - 0:18", caption: "The run explains how much reasoning was required." },
-  { id: 6, label: "Why? Explanation", time: "0:18 - 0:25", caption: "Evidence and boundaries explain the classification." },
-  { id: 7, label: "Fix Issues", time: "0:25 - 0:40", caption: "The user picks the next fix instead of approving blindly." },
-  { id: 8, label: "Re-evaluation", time: "0:40 - 0:45", caption: "Semantix re-checks the artifact after a fix." },
-  { id: 9, label: "Advanced View", time: "0:45 - 1:05", caption: "Detailed graph and node data remain available on demand." },
-  { id: 10, label: "Approval", time: "1:05 - 1:15", caption: "Fresh approval is recorded only when the artifact is ready." },
-  { id: 11, label: "Execution", time: "1:15 - 1:25", caption: "Approved work executes through the deterministic boundary." },
-  { id: 12, label: "Result", time: "1:25 - 1:30", caption: "The final state shows material effects, not mock success." },
+  { id: 1, label: "Input", caption: "Enter the outcome and start the run." },
+  { id: 2, label: "Classification", caption: "Semantix classifies risk, effort, routing, and constraints first." },
+  { id: 3, label: "Review Plan", caption: "The backend compiles the semantic node for this prompt." },
+  { id: 4, label: "Issue Detection", caption: "Problems are surfaced before any state change becomes real." },
+  { id: 5, label: "Effort Indicator", caption: "The run reports how much reasoning was required." },
+  { id: 6, label: "Why? Explanation", caption: "Evidence and boundaries explain the classification." },
+  { id: 7, label: "Fix Issues", caption: "Available when backend issues require intervention." },
+  { id: 8, label: "Re-evaluation", caption: "Available after a fix has been applied." },
+  { id: 9, label: "Advanced View", caption: "Detailed graph and node data remain available on demand." },
+  { id: 10, label: "Approval", caption: "Fresh approval is recorded only when execution is ready." },
+  { id: 11, label: "Execution", caption: "Approved work executes through the deterministic boundary." },
+  { id: 12, label: "Result", caption: "The final state shows admitted output and material effects." },
 ];
+
+const FLOW_STORY_STEP_BY_ID = new Map(FLOW_STORY_STEPS.map((step) => [step.id, step]));
+
+function flowDisplaySteps(flow) {
+  const backendSteps = Array.isArray(flow?.steps) && flow.steps.length > 0 ? flow.steps : FLOW_STORY_STEPS;
+  return backendSteps
+    .map((step) => ({
+      ...(FLOW_STORY_STEP_BY_ID.get(Number(step.id)) || {}),
+      ...step,
+      id: Number(step.id),
+    }))
+    .filter((step) => Number.isFinite(step.id))
+    .sort((left, right) => left.id - right.id);
+}
 
 function flowStoryStep(flow, stepId) {
   return flow?.steps?.find((step) => Number(step.id) === Number(stepId)) || null;
+}
+
+function stepExists(flow, stepId) {
+  return flowDisplaySteps(flow).some((step) => step.id === stepId);
+}
+
+function resultStepId(flow) {
+  return stepExists(flow, 12) ? 12 : flowDisplaySteps(flow).at(-1)?.id ?? 1;
 }
 
 function inferMaxReachableFlowStep({ flow, phase }) {
   if (phase === PHASES.prompt) return 1;
   if (phase === PHASES.compiling) return 2;
   if (!flow) return 1;
+  const availableSteps = flowDisplaySteps(flow);
+  const availableIds = availableSteps.map((step) => step.id);
+  const maxAvailable = Math.max(1, ...availableIds);
 
   const touchedStepIds = (flow.steps || [])
     .filter((step) => !["pending", "not_started"].includes(step.status))
@@ -1063,22 +1090,22 @@ function inferMaxReachableFlowStep({ flow, phase }) {
     .filter(Number.isFinite);
   let maxStep = Math.max(3, ...touchedStepIds);
 
-  if (flow.result?.completed || phase === PHASES.done) maxStep = 12;
-  else if (flow.execution?.status === "running" || phase === PHASES.running) maxStep = Math.max(maxStep, 11);
-  else if (flow.approval?.ready || flow.approval?.approved) maxStep = Math.max(maxStep, 10);
-  else if ((flow.issues || []).length > 0) maxStep = Math.max(maxStep, 9);
+  if (flow.result?.completed || phase === PHASES.done) maxStep = resultStepId(flow);
+  else if ((flow.execution?.status === "running" || phase === PHASES.running) && stepExists(flow, 11)) maxStep = Math.max(maxStep, 11);
+  else if ((flow.approval?.ready || flow.approval?.approved) && stepExists(flow, 10)) maxStep = Math.max(maxStep, 10);
+  else if ((flow.issues || []).length > 0 && stepExists(flow, 9)) maxStep = Math.max(maxStep, 9);
 
-  return Math.max(1, Math.min(12, maxStep));
+  return Math.max(1, Math.min(maxAvailable, maxStep));
 }
 
 function recommendedFlowStep({ flow, phase }) {
   if (phase === PHASES.prompt) return 1;
   if (phase === PHASES.compiling) return 2;
   if (!flow) return 3;
-  if (flow.result?.completed || phase === PHASES.done) return 12;
-  if (flow.execution?.status === "running" || phase === PHASES.running) return 11;
+  if (flow.result?.completed || phase === PHASES.done) return resultStepId(flow);
+  if ((flow.execution?.status === "running" || phase === PHASES.running) && stepExists(flow, 11)) return 11;
   if ((flow.issues || []).length > 0 || flow.approval?.blocked) return 4;
-  if (flow.approval?.ready) return 10;
+  if (flow.approval?.ready && stepExists(flow, 10)) return 10;
   if ((flow.steps || []).find((step) => Number(step.id) === 4)?.status === "pending") return 3;
   return 3;
 }
@@ -1162,9 +1189,15 @@ function FlowExperience({
   actionError,
   actionNotice,
 }) {
+  const displaySteps = flowDisplaySteps(flow);
   const maxReachableStep = inferMaxReachableFlowStep({ flow, phase });
-  const visibleStepId = Math.max(1, Math.min(activeStep, maxReachableStep));
-  const step = FLOW_STORY_STEPS.find((entry) => entry.id === visibleStepId) || FLOW_STORY_STEPS[0];
+  const requestedStepId = Math.max(1, Math.min(activeStep, maxReachableStep));
+  const step =
+    displaySteps.find((entry) => entry.id === requestedStepId) ||
+    displaySteps.find((entry) => entry.id > requestedStepId) ||
+    displaySteps.at(-1) ||
+    FLOW_STORY_STEPS[0];
+  const visibleStepId = step.id;
   const backendStep = flowStoryStep(flow, step.id);
   const status = flowStepStatus(flow, phase, step.id);
   const tone = flowStoryTone(status, true);
@@ -1205,6 +1238,7 @@ function FlowExperience({
           phase={phase}
           activeStep={visibleStepId}
           maxReachableStep={maxReachableStep}
+          steps={displaySteps}
           setActiveStep={setActiveStep}
         />
 
@@ -1229,7 +1263,7 @@ function FlowExperience({
               {title}
             </h1>
             <div style={{ marginTop: 8, color: t.textDim, fontSize: 13.5, lineHeight: 1.5, maxWidth: 760 }}>
-              {step.caption}
+              {step.caption || ""}
             </div>
           </div>
 
@@ -1249,7 +1283,7 @@ function FlowExperience({
                 <span style={{ color: t.textFaint, marginRight: 4 }}>{step.id}.</span>{step.label}
               </div>
               <div style={{ color: t.textFaint, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }}>
-                {step.time}
+                {step.time || ""}
               </div>
             </div>
 
@@ -1340,7 +1374,7 @@ function FlowHeader({
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 800, color: t.text, fontSize: 16 }}>Semantix</div>
           <div style={{ color: t.textFaint, fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace" }}>
-            v0.5 Demo Flow
+            v0.5 control surface
           </div>
         </div>
       </div>
@@ -1397,7 +1431,8 @@ function FlowHeader({
   );
 }
 
-function FlowStepRail({ t, flow, phase, activeStep, maxReachableStep, setActiveStep }) {
+function FlowStepRail({ t, flow, phase, activeStep, maxReachableStep, steps, setActiveStep }) {
+  const displaySteps = steps?.length ? steps : flowDisplaySteps(flow);
   return (
     <aside
       style={{
@@ -1413,7 +1448,7 @@ function FlowStepRail({ t, flow, phase, activeStep, maxReachableStep, setActiveS
         Flow
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {FLOW_STORY_STEPS.map((step) => {
+        {displaySteps.map((step) => {
           const locked = step.id > maxReachableStep;
           const active = step.id === activeStep;
           const status = flowStepStatus(flow, phase, step.id);
@@ -1909,18 +1944,34 @@ function FlowStepBody({
 
   if (stepId === 12) {
     const files = result.filesUpdated || stateEffects.map((effect) => effect.target || effect.workspace_path).filter(Boolean);
+    const outputs = result.outputs || [];
     const resultSummaries = readableFlowItems(stateEffects.map((effect) => effect.summary));
+    const semanticOutput = outputs.find((output) => output.response) || outputs[0] || null;
     return (
       <CenteredStep t={t}>
         <div style={{ width: 58, height: 58, borderRadius: 999, background: result.completed ? t.greenSoft : t.panelAlt, color: result.completed ? t.green : t.textDim, display: "grid", placeItems: "center", fontWeight: 900 }}>
           {result.completed ? "OK" : "--"}
         </div>
         <div style={{ color: result.completed ? t.green : t.text, fontWeight: 850, fontSize: 18 }}>
-          {result.completed ? "Changes applied" : "No committed result yet"}
+          {result.completed ? (semanticOutput && !files.length ? "Response admitted" : "Changes applied") : "No committed result yet"}
         </div>
         <div style={{ color: t.textDim }}>
-          {files.length ? `${files.length} file${files.length === 1 ? "" : "s"} updated.` : "No material state effects have been committed."}
+          {semanticOutput && !files.length
+            ? firstFlowText(semanticOutput.summary, `${outputs.length} semantic output${outputs.length === 1 ? "" : "s"} admitted.`)
+            : files.length
+              ? `${files.length} file${files.length === 1 ? "" : "s"} updated.`
+              : "No material state effects have been committed."}
         </div>
+        {semanticOutput?.response ? (
+          <div style={{ maxWidth: 760, width: "100%", border: `1px solid ${t.border}`, borderRadius: 8, background: t.panelAlt, padding: 14, textAlign: "left" }}>
+            <div style={{ fontSize: 10.5, color: t.textFaint, textTransform: "uppercase", letterSpacing: 1, fontWeight: 850, marginBottom: 8 }}>
+              Semantic output
+            </div>
+            <div style={{ color: t.text, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+              {semanticOutput.response}
+            </div>
+          </div>
+        ) : null}
         {resultSummaries.length ? (
           <div style={{ maxWidth: 760, width: "100%", border: `1px solid ${t.border}`, borderRadius: 8, background: t.panelAlt, padding: 14, textAlign: "left" }}>
             <div style={{ fontSize: 10.5, color: t.textFaint, textTransform: "uppercase", letterSpacing: 1, fontWeight: 850, marginBottom: 8 }}>
@@ -2111,6 +2162,9 @@ function summarizeFlowStep(flow, step) {
       : `Execution ${flow?.execution?.status || "pending"}.`;
   }
   if (step.id === 12) {
+    if (result.outputs?.length > 0 && !(result.filesUpdated?.length > 0)) {
+      return `${result.outputs.length} semantic output${result.outputs.length === 1 ? "" : "s"} admitted.`;
+    }
     if (result.filesUpdated?.length > 0) {
       return `${result.filesUpdated.length} file${result.filesUpdated.length === 1 ? "" : "s"} updated.`;
     }
@@ -2153,6 +2207,9 @@ function FlowStatusStrip({ t, flow }) {
         ) : null}
         {result.filesUpdated?.length > 0 ? (
           <Pill t={t} risk="info">{result.filesUpdated.length} file{result.filesUpdated.length === 1 ? "" : "s"}</Pill>
+        ) : null}
+        {result.outputs?.length > 0 && !(result.filesUpdated?.length > 0) ? (
+          <Pill t={t} risk="info">{result.outputs.length} output{result.outputs.length === 1 ? "" : "s"}</Pill>
         ) : null}
       </div>
 
@@ -2219,7 +2276,7 @@ function TopBar({
 }) {
   const phaseLabels = {
     prompt: "New run",
-    compiling: "Compiling review artifact",
+    compiling: "Compiling semantic artifact",
     review: "Pending review",
     running: "Executing approved work",
     done: "Run complete",
@@ -2261,7 +2318,7 @@ function TopBar({
         </div>
         <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: -0.1 }}>Semantix</span>
         <span style={{ fontSize: 11, color: t.textFaint, fontFamily: "ui-monospace, Menlo, monospace" }}>
-          demo flow
+          control surface
         </span>
       </div>
 

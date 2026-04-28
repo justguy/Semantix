@@ -35,6 +35,59 @@ function json(response, statusCode, payload) {
   response.end(`${JSON.stringify(payload)}\n`);
 }
 
+function compactRecord(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) =>
+      value !== undefined &&
+      value !== null &&
+      !(Array.isArray(value) && value.length === 0),
+    ),
+  );
+}
+
+function compactInspectorPayload(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  const {
+    hardValidationSchema,
+    pathPolicies,
+    admittedOutput,
+    ...node
+  } = payload.node ?? {};
+  const outputPreview = payload.outputPreview
+    ? compactRecord({
+        summary: payload.outputPreview.summary,
+        structuredData: payload.outputPreview.structuredData,
+        previewRef: payload.outputPreview.previewRef,
+        diffPreview: typeof payload.outputPreview.diffPreview === "string" ? payload.outputPreview.diffPreview : undefined,
+        stateEffects: payload.outputPreview.stateEffects,
+      })
+    : undefined;
+
+  return compactRecord({
+    ...payload,
+    node: compactRecord({
+      ...node,
+      admittedOutputSummary: admittedOutput
+        ? compactRecord({
+            summary: admittedOutput.summary,
+            responseKind: admittedOutput.response_kind,
+            hasResponse: typeof admittedOutput.response === "string" && admittedOutput.response.length > 0,
+            changeCount: Array.isArray(admittedOutput.changes) ? admittedOutput.changes.length : 0,
+            hasDiffPreview: typeof admittedOutput.diff_preview === "string" && admittedOutput.diff_preview.length > 0,
+          })
+        : undefined,
+    }),
+    outputPreview,
+    compiler: payload.compiler
+      ? compactRecord({
+          promptVersion: payload.compiler.promptVersion,
+          outputSchemaId: payload.compiler.outputSchemaId,
+        })
+      : undefined,
+  });
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -571,10 +624,12 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         return json(
           response,
           200,
-          await service.getNodeInspectorPayload({
-            runId: match.runId,
-            nodeId: match.nodeId,
-          }),
+          compactInspectorPayload(
+            await service.getNodeInspectorPayload({
+              runId: match.runId,
+              nodeId: match.nodeId,
+            }),
+          ),
         );
       }
 

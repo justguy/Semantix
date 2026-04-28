@@ -865,6 +865,50 @@ function createDefaultCodeChangeSchema() {
   };
 }
 
+export function createDefaultSemanticResponseSchema() {
+  const ctReviewInputSchema = createDefaultCodeChangeSchema().properties.ct_review_input;
+  const supportingContextSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", "value"],
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["prompt", "constraint", "note", "result"],
+      },
+      value: {
+        type: "string",
+        minLength: 1,
+      },
+    },
+  };
+
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "response", "supporting_context", "ct_review_input"],
+    properties: {
+      summary: {
+        type: "string",
+        minLength: 1,
+      },
+      response: {
+        type: "string",
+        minLength: 1,
+      },
+      response_kind: {
+        type: "string",
+        enum: ["answer", "creative_text", "analysis", "refusal"],
+      },
+      supporting_context: {
+        type: "array",
+        items: supportingContextSchema,
+      },
+      ct_review_input: ctReviewInputSchema,
+    },
+  };
+}
+
 function createDefaultBlueprint({ runId, intent, cwd }) {
   return {
     intent_contract: {
@@ -880,7 +924,6 @@ function createDefaultBlueprint({ runId, intent, cwd }) {
         context: {
           workflow: "code_change_execution",
           workspace_root: cwd ?? process.cwd(),
-          preferred_demo: "email_verification",
           success_state: intent.successState,
           strict_boundaries: [...(intent.strictBoundaries ?? [])],
           review_expectations: [
@@ -1178,12 +1221,16 @@ function buildRuntimePlan({
       };
     });
 
+  const firstSemanticNodeId =
+    runtimeNodes.find((node) => node.nodeType === "semantic_generation")?.id ??
+    runtimeNodes[0]?.id ??
+    "node.semantic.generate";
   const checkpoints = [
     createCheckpoint({
       runId,
       planVersion,
       artifactHash,
-      afterNodeId: "node.semantic.generate",
+      afterNodeId: firstSemanticNodeId,
       reason: "awaiting_semantic_admission",
       createdAt: generatedAt,
     }),
@@ -1214,6 +1261,7 @@ export function buildSemantixV0Artifact({
   runId,
   intent,
   blueprint,
+  classification,
   planVersion,
   graphVersion,
   generatedAt = Date.now(),
@@ -1313,6 +1361,7 @@ export function buildSemantixV0Artifact({
     artifactHash,
     generatedAt,
     freshnessState: "fresh",
+    classification: classification ? cloneJson(classification) : null,
     artifact_metadata: {
       ...artifactMetadata,
       artifact_hash: artifactHash,

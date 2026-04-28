@@ -15,7 +15,7 @@ const indexTemplate = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Semantix - Demo Flow</title>
+  <title>Semantix Control Surface</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {

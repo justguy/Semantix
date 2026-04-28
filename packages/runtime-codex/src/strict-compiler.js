@@ -2438,6 +2438,7 @@ export function normalizeStrictCompilerEnvelope({
     admittedOutput,
     semanticFrameContext,
   });
+  const isCodeChange = isCodeChangeProposal(admittedOutput) && !semanticReview.semanticOnly;
 
   return {
     executionStatus: "succeeded",
@@ -2451,7 +2452,7 @@ export function normalizeStrictCompilerEnvelope({
     inspectorPatch: {
       proposedAction: {
         summary: outputSummary,
-        kind: "code_change",
+        kind: isCodeChange ? "code_change" : "semantic_response",
       },
       outputPreview: {
         summary: outputSummary,
