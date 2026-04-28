@@ -8,20 +8,29 @@ function hasAny(text, terms) {
   return terms.some((term) => text.includes(term));
 }
 
+function countMatches(text, terms) {
+  return terms.reduce((count, term) => count + (text.includes(term) ? 1 : 0), 0);
+}
+
+function countWords(value) {
+  return compactText(value).match(/[\p{L}\p{N}]+(?:['-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+}
+
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function classifyConfidence(effort, riskLevel) {
-  if (riskLevel === "high" || effort === "high") {
-    return 0.58;
-  }
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
-  if (riskLevel === "medium" || effort === "medium") {
-    return 0.72;
-  }
+function classifyConfidence({ effortScore, riskScore }) {
+  const score =
+    0.94 -
+    Math.min(0.24, effortScore * 0.045) -
+    Math.min(0.28, riskScore * 0.07);
 
-  return 0.88;
+  return Number(clamp(score, 0.38, 0.92).toFixed(2));
 }
 
 function normalizeBand(score) {
@@ -41,11 +50,26 @@ export function classifyCodexRequest({
   strictBoundaries = [],
   successState,
 } = {}) {
-  const taskText = compactText([
-    primaryDirective,
-    successState,
-  ].join(" ")).toLowerCase();
-
+  const directiveText = compactText(primaryDirective).toLowerCase();
+  const fallbackText = compactText(successState).toLowerCase();
+  const taskText = directiveText || fallbackText;
+  const wordCount = countWords(taskText);
+  const hardConstraintCount = countMatches(taskText, [
+    "must",
+    "strictly",
+    "prohibited",
+    "forbidden",
+    "exactly",
+    "only",
+    "zero",
+    "all",
+    "never",
+    "always",
+    "cannot",
+    "without",
+    "before",
+    "after",
+  ]);
   const reasons = [];
   const suggestedSteps = ["Fast classification"];
   let effortScore = 0;
@@ -55,6 +79,11 @@ export function classifyCodexRequest({
     effortScore += 1;
     suggestedSteps.push("Code proposal");
     reasons.push("Code generation or modification task detected.");
+  }
+
+  if (hasAny(taskText, ["design", "outline", "architecture", "workflow", "essay", "write", "tell me"])) {
+    effortScore += 1;
+    reasons.push("Structured semantic output requested.");
   }
 
   if (hasAny(taskText, ["auth", "authentication", "verification", "token", "signup", "login"])) {
@@ -75,17 +104,42 @@ export function classifyCodexRequest({
     reasons.push("Persistent or sensitive state may change.");
   }
 
+  if (hasAny(taskText, ["deploy", "execute", "execution", "approve", "approval", "agent", "orchestration"])) {
+    effortScore += 1;
+    riskScore += 1;
+    reasons.push("Execution or approval workflow semantics are involved.");
+  }
+
+  if (hardConstraintCount >= 3) {
+    effortScore += 1;
+    reasons.push(`${hardConstraintCount} hard constraint markers were detected in the prompt.`);
+  }
+
+  if (wordCount >= 80) {
+    effortScore += 1;
+    reasons.push("Long-form prompt requires constraint tracking.");
+  }
+
+  if (wordCount >= 160) {
+    effortScore += 1;
+    suggestedSteps.push("Deeper semantic decomposition");
+    reasons.push("Large prompt likely needs multi-step review.");
+  }
+
   if (Array.isArray(strictBoundaries) && strictBoundaries.length > 0) {
     effortScore += 1;
     suggestedSteps.push("Constraint validation");
-    reasons.push("Explicit boundaries require validation.");
+    reasons.push(`${strictBoundaries.length} explicit ${strictBoundaries.length === 1 ? "boundary requires" : "boundaries require"} validation.`);
   }
 
   const effort =
-    effortScore >= 5 ? "high" : effortScore >= 2 ? "medium" : "low";
+    effortScore >= 6 ? "high" : effortScore >= 2 ? "medium" : "low";
   const riskLevel =
-    riskScore >= 3 ? "high" : riskScore >= 1 ? "medium" : "low";
-  const confidenceScore = classifyConfidence(effort, riskLevel);
+    riskScore >= 4 ? "high" : riskScore >= 1 ? "medium" : "low";
+  const confidenceScore = classifyConfidence({
+    effortScore,
+    riskScore,
+  });
 
   return {
     complexity: effort,
@@ -93,6 +147,13 @@ export function classifyCodexRequest({
     riskLevel,
     confidenceScore,
     confidenceBand: normalizeBand(confidenceScore),
+    signals: {
+      wordCount,
+      hardConstraintCount,
+      effortScore,
+      riskScore,
+      semanticContradictionSignals: 0,
+    },
     reasons:
       reasons.length > 0
         ? reasons
@@ -428,6 +489,7 @@ function buildPlanItems(artifact) {
       nodeType: node.nodeType,
       status: node.executionStatus,
       reviewStatus: node.reviewStatus,
+      summary: node.outputSummary ?? node.inputSummary ?? "",
       confidenceScore: node.confidenceScore,
       riskFlags: [...(node.riskFlags ?? [])],
     }));
@@ -450,10 +512,17 @@ function buildGraph(artifact) {
   };
 }
 
-function buildExecutionProgress(artifact) {
+function buildExecutionProgress(artifact, { issues = [], approval } = {}) {
   const semanticNode = getRuntimeNode(artifact);
   const deterministicNode = getDeterministicNode(artifact);
   const semanticDone = semanticNode?.executionStatus === "succeeded";
+  const hasBlockingIssues = issues.some((issue) => issue.blocking);
+  const hasStateEffects = materialStateEffects(artifact).length > 0;
+  const validationDone =
+    artifact?.plan?.status === "completed" ||
+    Boolean(approval?.approved) ||
+    Boolean(approval?.ready) ||
+    (semanticDone && hasStateEffects && !hasBlockingIssues);
   const deterministicRunning = deterministicNode?.executionStatus === "running";
 
   const labels = [
@@ -470,7 +539,7 @@ function buildExecutionProgress(artifact) {
     {
       id: "validate",
       label: "Validate",
-      done: semanticDone,
+      done: validationDone,
     },
     {
       id: "execute",
@@ -522,12 +591,13 @@ function buildFlowSteps({ artifact, issues, approval }) {
   const completed = artifact?.plan?.status === "completed";
   const semanticDone = runtimeNode?.executionStatus === "succeeded";
   const semanticFinished = semanticDone || runtimeNode?.executionStatus === "failed" || hasIssues || completed;
+  const reEvaluated = Number(artifact?.planVersion ?? 1) > 1 || Number(runtimeNode?.revision ?? 1) > 1;
   const deterministicRunning = deterministicNode?.executionStatus === "running";
 
   return [
     { id: 1, label: "Input", status: "complete" },
     { id: 2, label: "Fast Classification", status: "complete" },
-    { id: 3, label: "Plan Appears", status: hasPlan ? "complete" : "pending" },
+    { id: 3, label: "Review Plan", status: hasPlan ? "complete" : "pending" },
     {
       id: 4,
       label: "Issue Detection",
@@ -538,12 +608,19 @@ function buildFlowSteps({ artifact, issues, approval }) {
     {
       id: 7,
       label: "Fix Issues",
-      status: hasBlockingIssues ? "required" : hasIssues ? "optional" : semanticFinished ? "complete" : "pending",
+      status: hasBlockingIssues ? "required" : hasIssues ? "optional" : semanticFinished ? "not_required" : "pending",
     },
     {
       id: 8,
       label: "Re-evaluation",
-      status: hasBlockingIssues ? "blocked" : semanticFinished ? "complete" : "pending",
+      status:
+        hasBlockingIssues
+          ? "blocked"
+          : reEvaluated && semanticFinished && !hasIssues
+            ? "complete"
+            : semanticFinished
+              ? "not_required"
+              : "pending",
     },
     { id: 9, label: "Advanced View", status: semanticFinished ? "available" : "pending" },
     {
@@ -597,7 +674,7 @@ function buildApproval(artifact, issues) {
 function buildResult(artifact) {
   const completed = artifact?.plan?.status === "completed";
   const effects = materialStateEffects(artifact);
-  const filesUpdated = unique(effects.flatMap(stateEffectTargets));
+  const filesUpdated = completed ? unique(effects.flatMap(stateEffectTargets)) : [];
 
   return {
     completed,
@@ -730,13 +807,20 @@ export async function buildCodexSemantixFlowProjection({
       strictBoundaries: artifact.intent?.strictBoundaries,
       successState: artifact.intent?.successState,
     });
+  const projectedClassification = {
+    ...effectiveClassification,
+    signals: {
+      ...(effectiveClassification.signals ?? {}),
+      semanticContradictionSignals: issues.filter((issue) => issue.code === "ct_reasoning_contradiction").length,
+    },
+  };
   const issuesWithFixOptions = issues.map((issue) => ({
     ...issue,
     fixOptions: fixOptionsForIssue(issue),
   }));
   const analysis = buildAnalysis({
     artifact,
-    classification: effectiveClassification,
+    classification: projectedClassification,
     issues,
     approval,
     result,
@@ -763,7 +847,7 @@ export async function buildCodexSemantixFlowProjection({
       strictBoundaries: [...(artifact.intent?.strictBoundaries ?? [])],
       successState: artifact.intent?.successState ?? "",
     },
-    classification: effectiveClassification,
+    classification: projectedClassification,
     plan: {
       status: artifact.plan?.status,
       items: buildPlanItems(artifact),
@@ -779,7 +863,7 @@ export async function buildCodexSemantixFlowProjection({
     },
     execution: {
       status: getDeterministicNode(artifact)?.executionStatus ?? "not_started",
-      progress: buildExecutionProgress(artifact),
+      progress: buildExecutionProgress(artifact, { issues, approval }),
     },
     result,
     steps: buildFlowSteps({

@@ -123,6 +123,7 @@ function buildDefaultCodeChangePreview(input, { runId, artifact, inputNode, inte
     xplanNode: inputNode,
     admittedOutput: input,
     extractedClaims: input?.ct_review_input,
+    intent,
   });
   const mergedIssues = [
     ...review.issues,

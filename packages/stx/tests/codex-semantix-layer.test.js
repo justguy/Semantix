@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createStxApplication } from "../src/application.js";
+import { classifyCodexRequest } from "../src/codex-semantix-layer.js";
 
 function createCtReviewInput(summary = "The semantic proposal is grounded and approval-gated.") {
   return {
@@ -163,6 +164,40 @@ function createTaskInput() {
     successState: "Preview the proposed code change and block invented references before execution.",
   };
 }
+
+test("Codex request classification varies with semantic risk and prompt constraints", () => {
+  const simple = classifyCodexRequest({
+    primaryDirective: "Say hello.",
+    strictBoundaries: [],
+    successState: "Return a greeting.",
+  });
+  const conflicted = classifyCodexRequest({
+    primaryDirective: "tell me a sad and not funny joke that will make me laugh",
+    strictBoundaries: [
+      "Keep the backend authoritative for artifact freshness.",
+      "Require fresh approval before any execution step becomes real.",
+      "Do not exceed the user-stated scope.",
+    ],
+    successState: "Compile a fresh review artifact and wait for explicit approval.",
+  });
+  const destructive = classifyCodexRequest({
+    primaryDirective: "Delete billing secrets, run a database migration, deploy auth email changes, and update payment login flows.",
+    strictBoundaries: [
+      "Require backup validation before migration.",
+      "Require fresh approval before execution.",
+    ],
+    successState: "Preview destructive changes without applying them.",
+  });
+
+  assert.equal(simple.effort, "low");
+  assert.equal(simple.riskLevel, "low");
+  assert.equal(conflicted.effort, "medium");
+  assert.equal(conflicted.riskLevel, "low");
+  assert.equal(conflicted.signals.semanticContradictionSignals, 0);
+  assert.equal(destructive.riskLevel, "high");
+  assert.equal(conflicted.confidenceScore < simple.confidenceScore, true);
+  assert.equal(destructive.confidenceScore < simple.confidenceScore, true);
+});
 
 test("Codex Semantix layer projects a blocked proposal into the demo-flow issue state", async (t) => {
   const { application, workspaceRoot } = await createHarness(
@@ -350,6 +385,90 @@ test("Codex Semantix layer projects CT-MCP contradictions into blocking issues",
   assert.equal(flow.issues[0].blocking, true);
   assert.match(flow.issues[0].summary, /contradictory semantic constraints/);
   assert.equal(flow.recommendations[0].action, "regenerate_with_ct_review");
+});
+
+test("Codex Semantix layer blocks review-artifact-only admission when project work obligations are missing", async (t) => {
+  const { application, workspaceRoot } = await createHarness(
+    t,
+    async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        summary: "Prepare a fresh review artifact and wait for approval.",
+        changes: [
+          {
+            operation: "create_file",
+            workspace_path: join(workspaceRoot, ".semantix", "reviews", "run-layer-scope.semantic-review.json"),
+            summary: "Record approval-only review state.",
+            content: "{}",
+          },
+        ],
+        references: [
+          {
+            kind: "file",
+            name: "semantic review artifact",
+            path: join(workspaceRoot, ".semantix", "reviews", "run-layer-scope.semantic-review.json"),
+            source: "invented",
+            required: true,
+            supporting_context: ["Success state requires compiling a fresh review artifact before execution."],
+          },
+        ],
+        parameters: [
+          {
+            name: "review_artifact_path",
+            source: "invented",
+            evidence: "Chosen under the allowed workspace root.",
+          },
+        ],
+        supporting_context: [
+          {
+            kind: "note",
+            value: "The success state requires compiling a fresh review artifact and waiting for explicit approval.",
+          },
+        ],
+        ct_review_input: {
+          ...createCtReviewInput("Create a review artifact proposal and do not perform execution until approval is granted."),
+          plan_steps: [
+            {
+              id: "s1",
+              description: "Record run metadata and the user-requested task continuation intent in a review artifact.",
+              dependencies: [],
+              resources: ["review-artifact"],
+            },
+            {
+              id: "s2",
+              description: "Wait for explicit approval before any execution step becomes real.",
+              dependencies: ["s1"],
+              resources: ["approval-gate"],
+            },
+          ],
+          has_destructive_side_effects: false,
+        },
+      }),
+      stderr: "",
+    }),
+  );
+
+  const flow = await application.codexLayer.start({
+    runId: "run-layer-scope",
+    actor: "test",
+    primaryDirective:
+      "continue executuon of tasks, use subagents and adjust the effort level to the task complexity. use subagents where possible. make sure to tread the trcker json as an integral prt of the prohect and commit it as you commit other work.",
+    strictBoundaries: [
+      "Keep the backend authoritative for artifact freshness.",
+      "Require fresh approval before any execution step becomes real.",
+      "Do not exceed the user-stated scope.",
+    ],
+    successState: "Compile a fresh review artifact and wait for explicit approval before execution.",
+  });
+
+  assert.equal(flow.phase, "needs_intervention");
+  assert.equal(flow.approval.ready, false);
+  assert.equal(flow.issues.some((issue) => issue.code === "ct_scope_coverage_gap"), true);
+  assert.equal(flow.issues.some((issue) => issue.code === "ct_scope_obligation_missing"), true);
+  assert.equal(flow.steps.find((step) => step.id === 4)?.status, "blocked");
+  assert.equal(flow.steps.find((step) => step.id === 7)?.status, "required");
+  assert.equal(flow.steps.find((step) => step.id === 8)?.status, "blocked");
+  assert.equal(flow.execution.progress.find((entry) => entry.id === "validate")?.done, false);
 });
 
 test("Codex Semantix layer blocks exact-content byte mismatches before approval", async (t) => {

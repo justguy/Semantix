@@ -438,6 +438,12 @@ test("accepts generated artifact targets and Semantix metadata references", asyn
           source: "grounded",
           required: true,
         },
+        {
+          kind: "dependency",
+          name: "semantix.host.apply_admitted_semantic",
+          source: "grounded",
+          required: true,
+        },
       ],
       parameters: [
         {

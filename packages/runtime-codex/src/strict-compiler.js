@@ -937,6 +937,8 @@ function isSemantixMetadataReference(reference) {
 
   return (
     metadataNames.has(name) ||
+    name === "semantix.host.apply_admitted_semantic" ||
+    name.startsWith("semantix.host.") ||
     name.startsWith("effect.") ||
     name.startsWith("checkpoint.") ||
     name.startsWith("artifact.")

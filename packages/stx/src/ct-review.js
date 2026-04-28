@@ -10,6 +10,151 @@ function compactText(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
 }
 
+function normalizedText(value) {
+  return compactText(value).toLowerCase();
+}
+
+function admittedOutputText(admittedOutput) {
+  return normalizedText(JSON.stringify(admittedOutput ?? {}));
+}
+
+function extractedClaimsText(extractedClaims) {
+  if (!isObject(extractedClaims)) return "";
+  const pieces = [
+    ...asArray(extractedClaims.plan_steps).map((step) => step?.description),
+    ...asArray(extractedClaims.reasoning_chain?.nodes).map((node) => node?.label),
+    ...asArray(extractedClaims.assumptions).map((assumption) => assumption?.description),
+  ];
+  return normalizedText(pieces.filter(Boolean).join(" "));
+}
+
+function getDirectiveText(options, xplanNode) {
+  return normalizedText(
+    options.primaryDirective ??
+    options.intent?.primaryDirective ??
+    xplanNode.inputSummary ??
+    xplanNode.input_summary ??
+    "",
+  );
+}
+
+function changePaths(admittedOutput) {
+  const paths = [];
+  for (const change of asArray(admittedOutput?.changes)) {
+    if (typeof change?.workspace_path === "string") paths.push(change.workspace_path);
+    if (typeof change?.new_workspace_path === "string") paths.push(change.new_workspace_path);
+  }
+  if (typeof admittedOutput?.workspace_path === "string") {
+    paths.push(admittedOutput.workspace_path);
+  }
+  return paths;
+}
+
+function isReviewArtifactPath(path) {
+  const normalized = String(path ?? "").replaceAll("\\", "/").toLowerCase();
+  return (
+    normalized.includes("/.semantix/reviews/") ||
+    normalized.includes("/.semantix/review-artifacts/") ||
+    normalized.includes("/review-artifacts/")
+  );
+}
+
+function actionIntentRequiresMaterialWork(directiveText) {
+  return /\b(continue|execute|executuon|implement|modify|refactor|build|add|delete|rename|migrate|commit|subagent|subagents|tracker|trcker|tasks?)\b/.test(directiveText);
+}
+
+function extractDirectiveObligations(directiveText) {
+  const obligations = [];
+  const add = (id, label, planPattern) => obligations.push({ id, label, planPattern });
+
+  if (/\bsub[- ]?agents?\b/.test(directiveText)) {
+    add("subagents", "Use subagents where appropriate.", /\b(sub[- ]?agents?|delegate|parallel agent|worker|explorer|spark)\b/);
+  }
+
+  if (/\beffort\b.*\bcomplexity\b|\bcomplexity\b.*\beffort\b|\beffort level\b/.test(directiveText)) {
+    add("adaptive_effort", "Adjust effort level to task complexity.", /\b(effort|complexity|risk|classification)\b/);
+  }
+
+  if ((/\b(tracker|trcker)\b/.test(directiveText) || /\btrack(er)? json\b/.test(directiveText)) && /\bjson\b/.test(directiveText)) {
+    add("tracker_json", "Treat tracker JSON as project state.", /\b(tracker|trcker|json)\b/);
+  }
+
+  if (/\bcommit\b/.test(directiveText)) {
+    add("commit", "Commit the resulting project work.", /\b(commit|git|vcs)\b/);
+  }
+
+  if (/\bcontinue\b.*\btasks?\b|\bexecut(e|ion|ing|uon)\b.*\btasks?\b/.test(directiveText)) {
+    add("task_execution", "Continue or execute the requested project tasks.", /\b(task|execute|execution|continue|project work|workspace work)\b/);
+  }
+
+  return obligations;
+}
+
+function reviewIntentCoverage({ admittedOutput, directiveText, extractedClaims }) {
+  if (!directiveText) return [];
+
+  const issues = [];
+  const paths = changePaths(admittedOutput);
+  const allTargetsAreReviewArtifacts = paths.length > 0 && paths.every(isReviewArtifactPath);
+  const outputText = admittedOutputText(admittedOutput);
+  const planText = extractedClaimsText(extractedClaims);
+  const obligations = extractDirectiveObligations(directiveText);
+  const recordsOnlyApprovalState =
+    /\breview artifact\b/.test(outputText) &&
+    /\b(wait|waiting)\b/.test(outputText) &&
+    /\bapproval\b/.test(outputText);
+
+  if (actionIntentRequiresMaterialWork(directiveText) && allTargetsAreReviewArtifacts && recordsOnlyApprovalState) {
+    issues.push(
+      makeIssue({
+        code: "ct_scope_coverage_gap",
+        summary: "CT-MCP blocked a proposal that only records a review artifact instead of covering the requested work.",
+        detail: "The user requested executable/project work, but the admitted output only creates a Semantix review record.",
+        blocking: true,
+        evidence: [
+          {
+            kind: "scope_coverage",
+            detail: "All proposed targets are Semantix review artifacts.",
+            path: paths.join(", "),
+          },
+        ],
+        interventions: [
+          {
+            kind: "regenerate_scope",
+            detail: "Regenerate the semantic output so it proposes the actual requested work or explicitly blocks as impossible.",
+          },
+        ],
+      }),
+    );
+  }
+
+  for (const obligation of obligations) {
+    if (obligation.planPattern.test(planText)) continue;
+    issues.push(
+      makeIssue({
+        code: "ct_scope_obligation_missing",
+        summary: `CT-MCP found that the semantic plan does not cover: ${obligation.label}`,
+        detail: "The lowered ct_review_input must preserve concrete obligations from the user's directive before approval can be ready.",
+        blocking: true,
+        evidence: [
+          {
+            kind: "missing_obligation",
+            detail: obligation.label,
+          },
+        ],
+        interventions: [
+          {
+            kind: "regenerate_scope",
+            detail: "Regenerate the semantic output with plan steps that explicitly cover this directive obligation.",
+          },
+        ],
+      }),
+    );
+  }
+
+  return issues;
+}
+
 function makeIssue({
   code,
   summary,
@@ -459,6 +604,7 @@ export function runCriticalReview(xplanNodeOrOptions, extractedClaimsArgument) {
   const xplanNode = options.xplanNode ?? options.node ?? {};
   const admittedOutput = options.admittedOutput ?? {};
   const extractedClaims = options.extractedClaims ?? admittedOutput?.ct_review_input;
+  const directiveText = getDirectiveText(options, xplanNode);
   const report = {
     issues: [],
     riskFlags: [],
@@ -498,6 +644,11 @@ export function runCriticalReview(xplanNodeOrOptions, extractedClaimsArgument) {
       }),
       ...reviewNumericClaims(extractedClaims.numeric_claims),
       ...reviewConcurrency(extractedClaims.concurrency),
+      ...reviewIntentCoverage({
+        admittedOutput,
+        directiveText,
+        extractedClaims,
+      }),
     );
   }
 

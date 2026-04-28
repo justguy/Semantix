@@ -215,7 +215,7 @@ function SemantixApp({
   }, [isFreshView]);
 
   useAE(() => {
-    if (!currentRunId || !hydratedLatestArtifact) {
+    if (!currentRunId || !hydratedLatestArtifact || hydratedLatestArtifact.runId !== currentRunId) {
       return undefined;
     }
 
@@ -284,6 +284,15 @@ function SemantixApp({
   const staleApprovalCount = useAM(
     () => countStaleApprovals(approvals, hydratedLatestArtifact),
     [approvals, hydratedLatestArtifact],
+  );
+  const currentRunExists = useAM(
+    () =>
+      Boolean(currentRunId) &&
+      (
+        hydratedLatestArtifact?.runId === currentRunId ||
+        runSummaries.some((entry) => entry.runId === currentRunId)
+      ),
+    [currentRunId, hydratedLatestArtifact, runSummaries],
   );
 
   function syncSelectionsForArtifact(artifact, preserveSelectedNodeRef = selectedNodeRef) {
@@ -425,12 +434,20 @@ function SemantixApp({
           });
           return;
         }
+
+        if (!summary) {
+          const freshRunId = ensureRunId("", { reuseLocation: false });
+          setCurrentRunId(freshRunId);
+          setPhase(PHASES.prompt);
+          setActionNotice(`Run ${preferredRunId} no longer exists in the backend. Started a fresh local run.`);
+          return;
+        }
       } catch {
         // Fall back to prompt mode with a generated run id.
       }
 
       if (!cancelled) {
-        setCurrentRunId(ensureRunId(readRunIdFromLocation() || ""));
+        setCurrentRunId(ensureRunId("", { reuseLocation: false }));
         setPhase(PHASES.prompt);
       }
     }
@@ -443,7 +460,7 @@ function SemantixApp({
   }, []);
 
   useAE(() => {
-    if (!currentRunId) return undefined;
+    if (!currentRunId || !currentRunExists) return undefined;
 
     const stream = createEventStream(currentRunId);
     streamRef.current = stream;
@@ -471,10 +488,17 @@ function SemantixApp({
       stream.removeEventListener("run-event", onRunEvent);
       stream.close();
     };
-  }, [currentRunId]);
+  }, [currentRunId, currentRunExists]);
 
   useAE(() => {
-    if (!currentRunId || !isFreshView || !selectedNode || !hydratedLatestArtifact) {
+    if (
+      !currentRunId ||
+      !currentRunExists ||
+      hydratedLatestArtifact?.runId !== currentRunId ||
+      !isFreshView ||
+      !selectedNode ||
+      !hydratedLatestArtifact
+    ) {
       return undefined;
     }
 
@@ -1012,7 +1036,7 @@ function SemantixApp({
 const FLOW_STORY_STEPS = [
   { id: 1, label: "Input", time: "0:00 - 0:05", caption: "Enter the outcome and start the run." },
   { id: 2, label: "Fast Classification", time: "0:05 - 0:07", caption: "Semantix classifies risk, effort, and constraints first." },
-  { id: 3, label: "Plan Appears", time: "0:07 - 0:10", caption: "A plan is compiled before execution is possible." },
+  { id: 3, label: "Review Plan", time: "0:07 - 0:10", caption: "Semantix turns the prompt into an approval-gated execution plan before any action can run." },
   { id: 4, label: "Issue Detection", time: "0:10 - 0:15", caption: "Problems are surfaced before any state change becomes real." },
   { id: 5, label: "Effort Indicator", time: "0:15 - 0:18", caption: "The run explains how much reasoning was required." },
   { id: 6, label: "Why? Explanation", time: "0:18 - 0:25", caption: "Evidence and boundaries explain the classification." },
@@ -1069,10 +1093,10 @@ function flowStepStatus(flow, phase, stepId) {
 }
 
 function flowStoryTone(status, isActive) {
-  if (isActive) return "info";
-  if (status === "complete" || status === "available") return "green";
+  if (status === "complete") return "green";
   if (status === "blocked" || status === "required" || status === "failed") return "red";
   if (status === "warning" || status === "ready" || status === "running") return "orange";
+  if (status === "available" || status === "not_required" || status === "skipped" || isActive) return "info";
   return "yellow";
 }
 
@@ -1083,6 +1107,36 @@ function flowText(...values) {
 function compactFlowLine(value, fallback = "") {
   const text = flowText(value, fallback);
   return text.length > 150 ? `${text.slice(0, 147)}...` : text;
+}
+
+function readableFlowItem(value) {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return compactFlowLine(value);
+  }
+  if (Array.isArray(value)) {
+    return compactFlowLine(value.map(readableFlowItem).filter(Boolean).join(", "));
+  }
+  if (typeof value === "object") {
+    return compactFlowLine(
+      value.summary
+        || value.message
+        || value.detail
+        || value.label
+        || value.reason
+        || value.value
+        || value.path
+        || value.symbol
+        || value.name
+        || value.kind
+        || "",
+    );
+  }
+  return "";
+}
+
+function readableFlowItems(values) {
+  return asArray(values).map(readableFlowItem).filter(Boolean);
 }
 
 function FlowExperience({
@@ -1507,18 +1561,30 @@ function FlowStepBody({
   }
 
   if (stepId === 3) {
+    const planLines = planItems.map((item, index) => {
+      const title = flowText(item.title, item.id, `Step ${index + 1}`);
+      const state = flowText(item.reviewStatus, item.status);
+      const summary = flowText(item.summary);
+      return compactFlowLine([
+        `${index + 1}. ${title}`,
+        state ? `status: ${state}` : "",
+        summary && summary !== title ? summary : "",
+      ].filter(Boolean).join(" - "));
+    });
+
     return (
       <ListStep
         t={t}
-        eyebrow={planItems.length ? "Plan ready" : "Plan pending"}
+        eyebrow={planItems.length ? "Approval-gated plan compiled" : "Plan pending"}
         tone={planItems.length ? "green" : "yellow"}
-        items={planItems.map((item) => compactFlowLine(item.title || item.id))}
+        items={planLines}
         empty="No plan nodes have been returned yet."
       />
     );
   }
 
   if (stepId === 4) {
+    const hasBlockingIssues = issues.some((issue) => issue.blocking);
     if (status === "pending" || status === "running") {
       return (
         <CenteredStep t={t}>
@@ -1542,7 +1608,7 @@ function FlowStepBody({
       <ListStep
         t={t}
         eyebrow={issues.length ? "Issues detected" : "No issues detected"}
-        tone={issues.length ? "orange" : "green"}
+        tone={hasBlockingIssues ? "red" : issues.length ? "orange" : "green"}
         items={issues.map((issue) => compactFlowLine(issue.summary, issue.code))}
         empty="The backend did not report blocking issues."
       />
@@ -1551,6 +1617,17 @@ function FlowStepBody({
 
   if (stepId === 5) {
     const thumb = effort === "high" ? "84%" : effort === "medium" ? "50%" : "16%";
+    const signals = classification.signals || {};
+    const effortDetails = [
+      `Risk: ${risk}`,
+      Number.isFinite(signals.wordCount) ? `Directive words: ${signals.wordCount}` : "",
+      Number.isFinite(signals.hardConstraintCount) ? `Constraint markers: ${signals.hardConstraintCount}` : "",
+      Number.isFinite(signals.effortScore) ? `Effort score: ${signals.effortScore}` : "",
+      Number.isFinite(signals.semanticContradictionSignals ?? signals.contradictionSignals)
+        ? `Semantic contradictions (CT): ${signals.semanticContradictionSignals ?? signals.contradictionSignals}`
+        : "",
+    ].filter(Boolean);
+
     return (
       <div style={{ display: "grid", gap: 18, maxWidth: 620 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -1572,6 +1649,14 @@ function FlowStepBody({
         <div style={{ color: t.textDim }}>
           Confidence: <span style={{ color: confidence < 70 ? t.orange : t.green, fontWeight: 800 }}>{confidence || "n/a"}%</span>
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {effortDetails.map((item) => (
+            <div key={item} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.45, color: t.textDim }}>
+              <span style={{ color: t.accent }}>•</span>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -1582,12 +1667,14 @@ function FlowStepBody({
       ...asArray(classification.reasons),
       ...asArray(intent.strictBoundaries).map((boundary) => `Boundary: ${boundary}`),
     ];
+    const evidenceLines = readableFlowItems(evidence);
+
     return (
       <ListStep
         t={t}
         eyebrow="Why this path was chosen"
         tone="info"
-        items={evidence.map((item) => compactFlowLine(item))}
+        items={evidenceLines}
         empty="No backend evidence has been recorded yet."
       />
     );
@@ -1605,14 +1692,33 @@ function FlowStepBody({
       );
     }
 
+    if (!firstIssue) {
+      const neutral = status === "not_required" || status === "skipped";
+      return (
+        <CenteredStep t={t}>
+          <div style={{ width: 54, height: 54, borderRadius: 999, background: neutral ? t.panelAlt : t.greenSoft, color: neutral ? t.textDim : t.green, display: "grid", placeItems: "center", fontWeight: 900, fontSize: 22 }}>
+            {neutral ? "--" : "OK"}
+          </div>
+          <div style={{ color: neutral ? t.text : t.green, fontWeight: 800, fontSize: 17 }}>No fix required for this pass</div>
+          <div style={{ color: t.textDim, maxWidth: 520, lineHeight: 1.5 }}>
+            Issue detection returned no blocking findings. Continue to approval when the artifact is ready.
+          </div>
+        </CenteredStep>
+      );
+    }
+
+    const issueFixOptions = firstIssue.fixOptions || [];
+    const fixRequired = status === "required" || firstIssue.blocking;
+    const issueTone = fixRequired ? "red" : "orange";
+
     return (
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(260px, .8fr)", gap: 16 }}>
         <div>
-          <SectionKicker t={t} tone={firstIssue ? "orange" : "green"}>
+          <SectionKicker t={t} tone={issueTone}>
             {firstIssue ? compactFlowLine(firstIssue.summary, firstIssue.code) : "No fix required"}
           </SectionKicker>
           <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-            {(recommendations.length ? recommendations : firstIssue?.fixOptions || []).map((recommendation, index) => (
+            {(issueFixOptions.length ? issueFixOptions : recommendations.filter((recommendation) => recommendation.source === firstIssue.code)).map((recommendation, index) => (
               <div
                 key={`${recommendation.id || recommendation.action || index}`}
                 style={{
@@ -1628,7 +1734,7 @@ function FlowStepBody({
                 {recommendation.summary ? <div style={{ color: t.textDim, marginTop: 3 }}>{compactFlowLine(recommendation.summary)}</div> : null}
               </div>
             ))}
-            {!firstRecommendation ? <div style={{ color: t.textDim }}>No backend recommendation recorded.</div> : null}
+            {!firstRecommendation ? <div style={{ color: t.textDim }}>No automated fix was returned; manual review is required.</div> : null}
           </div>
         </div>
         <div style={{ border: `1px solid ${t.border}`, borderRadius: 8, background: t.panelAlt, padding: 12 }}>
@@ -1671,7 +1777,20 @@ function FlowStepBody({
       );
     }
 
-    const stillBlocked = issues.length > 0 || status === "blocked";
+    const stillBlocked = status === "blocked" || issues.some((issue) => issue.blocking);
+    if (status === "not_required" || status === "skipped") {
+      return (
+        <CenteredStep t={t}>
+          <div style={{ width: 54, height: 54, borderRadius: 999, background: t.panelAlt, color: t.textDim, display: "grid", placeItems: "center", fontWeight: 900, fontSize: 22 }}>
+            --
+          </div>
+          <div style={{ color: t.text, fontWeight: 800, fontSize: 17 }}>No re-evaluation required</div>
+          <div style={{ color: t.textDim, maxWidth: 520, lineHeight: 1.5 }}>
+            The first review pass did not require an issue-fix loop.
+          </div>
+        </CenteredStep>
+      );
+    }
     return (
       <CenteredStep t={t}>
         <div style={{ width: 54, height: 54, borderRadius: 999, background: stillBlocked ? t.redSoft : t.greenSoft, color: stillBlocked ? t.red : t.green, display: "grid", placeItems: "center", fontWeight: 900, fontSize: 22 }}>
@@ -1727,7 +1846,7 @@ function FlowStepBody({
   }
 
   if (stepId === 10) {
-    const blocked = approval.blocked || issues.length > 0;
+    const blocked = approval.blocked || issues.some((issue) => issue.blocking);
     const ready = !blocked && approval.ready;
     const pending = !blocked && !ready;
     return (
@@ -1785,6 +1904,7 @@ function FlowStepBody({
 
   if (stepId === 12) {
     const files = result.filesUpdated || stateEffects.map((effect) => effect.target || effect.workspace_path).filter(Boolean);
+    const resultSummaries = readableFlowItems(stateEffects.map((effect) => effect.summary));
     return (
       <CenteredStep t={t}>
         <div style={{ width: 58, height: 58, borderRadius: 999, background: result.completed ? t.greenSoft : t.panelAlt, color: result.completed ? t.green : t.textDim, display: "grid", placeItems: "center", fontWeight: 900 }}>
@@ -1796,6 +1916,18 @@ function FlowStepBody({
         <div style={{ color: t.textDim }}>
           {files.length ? `${files.length} file${files.length === 1 ? "" : "s"} updated.` : "No material state effects have been committed."}
         </div>
+        {resultSummaries.length ? (
+          <div style={{ maxWidth: 760, width: "100%", border: `1px solid ${t.border}`, borderRadius: 8, background: t.panelAlt, padding: 14, textAlign: "left" }}>
+            <div style={{ fontSize: 10.5, color: t.textFaint, textTransform: "uppercase", letterSpacing: 1, fontWeight: 850, marginBottom: 8 }}>
+              Result summary
+            </div>
+            <div style={{ display: "grid", gap: 8, color: t.text, fontSize: 13, lineHeight: 1.55 }}>
+              {resultSummaries.map((summary, index) => (
+                <div key={`${index}:${summary}`}>{summary}</div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {files.length ? (
           <div style={{ fontFamily: "ui-monospace, Menlo, monospace", color: t.textDim, fontSize: 12, lineHeight: 1.7, textAlign: "left" }}>
             {files.slice(0, 8).map((file) => <div key={file}>+ {file}</div>)}
@@ -1889,10 +2021,11 @@ function flowPhaseTone(phase) {
 }
 
 function flowStepTone(status) {
-  if (status === "complete" || status === "available") return "green";
+  if (status === "complete") return "green";
   if (status === "blocked" || status === "required") return "red";
   if (status === "warning" || status === "ready" || status === "running" || status === "optional") return "orange";
-  return "info";
+  if (status === "available" || status === "not_required" || status === "skipped") return "info";
+  return "yellow";
 }
 
 function formatFlowStatus(status) {
@@ -1944,6 +2077,7 @@ function summarizeFlowStep(flow, step) {
     );
   }
   if (step.id === 7) {
+    if (step.status === "not_required" || step.status === "skipped") return "No fix required for this pass.";
     return firstFlowText(
       firstRecommendation?.label,
       firstIssue?.fixOptions?.[0]?.label,
@@ -1951,6 +2085,7 @@ function summarizeFlowStep(flow, step) {
     );
   }
   if (step.id === 8) {
+    if (step.status === "not_required" || step.status === "skipped") return "No issue-fix re-evaluation required.";
     return step.status === "blocked"
       ? firstFlowText(firstIssue?.summary, "Re-evaluation is blocked by a backend issue.")
       : firstFlowText(analysis.summary, "No re-evaluation summary recorded.");
@@ -1974,7 +2109,7 @@ function summarizeFlowStep(flow, step) {
     if (result.filesUpdated?.length > 0) {
       return `${result.filesUpdated.length} file${result.filesUpdated.length === 1 ? "" : "s"} updated.`;
     }
-    return result.completed ? "Run completed." : `${result.stateEffects?.length ?? 0} material state effects committed.`;
+    return result.completed ? "Run completed." : `${result.stateEffects?.length ?? 0} material state effects awaiting execution.`;
   }
   return formatFlowStatus(step.status);
 }
@@ -2007,7 +2142,7 @@ function FlowStatusStrip({ t, flow }) {
         <Pill t={t}>{Math.round((classification.confidenceScore || 0) * 100)}% confidence</Pill>
         <Pill t={t} risk={issueCount > 0 ? "red" : "green"}>{issueCount} issue{issueCount === 1 ? "" : "s"}</Pill>
         {approval.required ? (
-          <Pill t={t} risk={approval.ready || approval.approved ? "green" : approval.blocked ? "red" : "orange"}>
+          <Pill t={t} risk={approval.approved ? "green" : approval.blocked ? "red" : approval.ready ? "orange" : "orange"}>
             approval {formatFlowStatus(approval.status)}
           </Pill>
         ) : null}
