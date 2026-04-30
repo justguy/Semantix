@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 6,
-    "updatedAt": "2026-04-30T04:00:42.175Z"
+    "rev": 8,
+    "updatedAt": "2026-04-30T04:05:53.550Z"
   },
   "tasks": [
     {
@@ -156,7 +156,7 @@
       "id": "stx-spec-stable-id-continuity",
       "title": "Preserve stable IDs across Spec Studio turns",
       "goal": "Make Semantix preserve requirement, finding, decision, grounded-fact, and context-request IDs across multi-turn evaluation when Phalanx passes prior session state.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "evaluator",
         "priorityId": "p0"
@@ -195,7 +195,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "This closes the most important Semantix-side prerequisite called out in the contract gaps."
+      "comment": "Landed packages/stx/src/spec-studio-id-continuity.js: checkIdContinuity / assertIdContinuity compare prior vs next packet for requirements / findings / groundedFacts plus context-request reissue. Catches drops, silent same-id mutation, supersedion w/o replacement, reuse-after-supersede, resolved-finding regression, resolved silent-remove. Decisions stay Phalanx-owned. 21 tests pass.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-readiness-and-update-safety",
