@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Semantix Spec Studio tracker initialized. Claude should execute one bounded task at a time in dependency order and Codex will review with targeted tests.",
+    "scratchpad": "Spec Studio JSON Probe swimlane is 7/7 complete. Review follow-up fixed deterministic probe output and probe-spec-studio-json URL parsing/default handling before commit. Verification: spec-studio-manual-json-http 13/13, spec-studio-phalanx-request-probe 3/3, npm test @semantix/stx 369/369 and @semantix/control-plane 27/27.",
     "swimlanes": [
       {
         "id": "contract",
@@ -23,6 +23,11 @@
         "id": "proof",
         "label": "Proof",
         "description": "End-to-end fixtures, reports, and review handoff evidence."
+      },
+      {
+        "id": "spec-studio-json-probe",
+        "label": "Spec Studio JSON Probe",
+        "description": "Semantix-only manual JSON discussion loop before live Phalanx wiring."
       }
     ],
     "priorities": [
@@ -43,8 +48,8 @@
         "label": "P3"
       }
     ],
-    "rev": 26,
-    "updatedAt": "2026-04-30T05:07:57.237Z"
+    "rev": 34,
+    "updatedAt": "2026-04-30T23:31:14.902Z"
   },
   "tasks": [
     {
@@ -633,6 +638,302 @@
       ],
       "comment": "Landed packages/stx/tests/spec-studio-end-to-end-proof.test.js: 10 tests across 8 flows (greenfield, update, ambiguous, replacement-blocked, degraded, hoplon-grounded ingestion+interpretation, reconsider/supersede, skipped-gap) plus cross-flow regression + authority-boundary assertion. Each packet checked by validator + Staff guard. Commands: node --test packages/stx/tests/... OR npm test. Repo: 333 stx + 27 control-plane green. Phalanx lock/session/Staff out of scope.",
       "assignee": "claude-opus"
+    },
+    {
+      "dependencies": [],
+      "id": "ss-json-001",
+      "title": "Add Spec Studio JSON evaluate endpoint",
+      "goal": "Expose a Semantix HTTP endpoint that accepts SemantixEvaluateRequest JSON and returns SemantixEvaluateResponse JSON without requiring Phalanx to run.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:25",
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:30"
+      ],
+      "definition_of_done": [
+        "POST /spec-studio/evaluate exists in the Semantix server.",
+        "The route uses createSemantixHandshakeAdapter.",
+        "Valid initial JSON returns HTTP 200 with a valid SemantixEvaluateResponse.",
+        "Invalid request shape returns HTTP 400 with validation details."
+      ],
+      "expected_changes": [
+        "packages/stx/src/http/server.js",
+        "packages/stx/src/application.js",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "manual-json",
+          "http",
+          "preintegration"
+        ],
+        "notes": "First gate for JSON-only testing before Phalanx live transport."
+      },
+      "assignee": "claude",
+      "blocker_reason": null,
+      "comment": "Starting implementation of POST /spec-studio/evaluate endpoint."
+    },
+    {
+      "dependencies": [
+        "ss-json-001"
+      ],
+      "id": "ss-json-002",
+      "title": "Add deterministic Spec Studio discussion evaluator mode",
+      "goal": "Provide a deterministic evaluator behind the JSON endpoint so initial -> question -> user answer -> ready can be proven without an LLM or Phalanx.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:61",
+        "packages/stx/tests/spec-studio-phalanx-request-probe.test.js:37"
+      ],
+      "definition_of_done": [
+        "Initial trigger returns an ambiguous needs_user packet with nextTurn.",
+        "Choice user_turn can return a ready packet.",
+        "context_response accepts nested Phalanx context episode shape.",
+        "skip, delegate, and reconsider bodies do not crash the endpoint.",
+        "Throwing or malformed evaluator behavior degrades honestly to a non-lockable Semantix packet."
+      ],
+      "expected_changes": [
+        "packages/stx/src/spec-studio-*.js",
+        "packages/stx/tests/spec-studio-*.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "deterministic-evaluator",
+          "degraded-path"
+        ],
+        "notes": "This is a transport/protocol evaluator, not production semantic reasoning."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002"
+      ],
+      "id": "ss-json-003",
+      "title": "Add copy-pasteable manual JSON fixtures",
+      "goal": "Create fixture request bodies that can be posted manually to Semantix for every supported discussion turn shape.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:86"
+      ],
+      "definition_of_done": [
+        "Fixture folder exists under packages/stx/tests/fixtures/spec-studio-manual-json/.",
+        "Fixtures include initial, choice-turn, free-turn, skip-turn, delegate-turn, reconsider-turn, context-response-nested, and malformed-request JSON.",
+        "Valid fixtures are accepted by automated tests.",
+        "Malformed fixture is rejected with HTTP 400."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/fixtures/spec-studio-manual-json/**",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "fixtures",
+          "manual-json",
+          "curl-ready"
+        ],
+        "notes": "Fixtures should be useful both in tests and by copy-pasting into curl/Postman."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002",
+        "ss-json-003"
+      ],
+      "id": "ss-json-004",
+      "title": "Add Spec Studio manual JSON HTTP regression tests",
+      "goal": "Start the Semantix HTTP server in-process and prove the manual JSON fixtures work over HTTP before Phalanx is wired.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:138"
+      ],
+      "definition_of_done": [
+        "Tests cover initial request without optional arrays.",
+        "Tests cover user choice with currentPacket.",
+        "Tests cover nested context-response episode.",
+        "Tests cover skip, delegate, and reconsider bodies.",
+        "Tests cover malformed request returning HTTP 400.",
+        "Tests cover evaluator failure returning non-lockable Semantix degraded response."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/src/http/server.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**"
+      ],
+      "context": {
+        "tags": [
+          "http-test",
+          "regression",
+          "preintegration"
+        ],
+        "notes": "This is the automated proof that manual JSON works before live Phalanx transport."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002",
+        "ss-json-003"
+      ],
+      "id": "ss-json-005",
+      "title": "Add manual JSON probe script",
+      "goal": "Provide a command that posts the fixture sequence to a running Semantix server and prints compact readiness/source/iteration output.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:114"
+      ],
+      "definition_of_done": [
+        "npm script exists for probe:spec-studio-json in @semantix/stx.",
+        "Script POSTs initial.json, captures packet, injects it into choice-turn.json, and POSTs the follow-up.",
+        "Script exits 0 on valid response sequence.",
+        "Script exits nonzero and prints response body on validation failure."
+      ],
+      "expected_changes": [
+        "packages/stx/package.json",
+        "packages/stx/scripts/**",
+        "packages/stx/tests/fixtures/spec-studio-manual-json/**"
+      ],
+      "allowed_paths": [
+        "packages/stx/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "probe-script",
+          "manual-json",
+          "operator-tool"
+        ],
+        "notes": "This gives the operator a direct Semantix-only smoke command."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-003",
+        "ss-json-005"
+      ],
+      "id": "ss-json-006",
+      "title": "Write manual JSON probe operator guide",
+      "goal": "Document exactly how to start Semantix, POST the fixtures, and identify a successful JSON-only discussion loop.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p2"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:159"
+      ],
+      "definition_of_done": [
+        "docs/spec-studio-manual-json-probe.md exists.",
+        "Guide includes start command, endpoint URL, initial curl, follow-up curl, and success criteria.",
+        "Guide explains that Phalanx is not required for this probe.",
+        "Guide names the handoff condition for later PHALANX_SEMANTIX_HTTP_URL wiring."
+      ],
+      "expected_changes": [
+        "docs/spec-studio-manual-json-probe.md"
+      ],
+      "allowed_paths": [
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "docs",
+          "operator-guide",
+          "manual-json"
+        ],
+        "notes": "This should be short and procedural, not architecture prose."
+      },
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "ss-json-004",
+        "ss-json-005",
+        "ss-json-006"
+      ],
+      "id": "ss-json-007",
+      "title": "Run final Semantix-only JSON discussion proof",
+      "goal": "Execute the automated and manual JSON probes and record the evidence needed before starting live Phalanx integration.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:180",
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:106"
+      ],
+      "definition_of_done": [
+        "node --test packages/stx/tests/spec-studio-manual-json-http.test.js passes.",
+        "npm test passes.",
+        "Manual probe script reaches a valid response sequence against a running Semantix server.",
+        "Tracker context records the exact commands and results."
+      ],
+      "expected_changes": [
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        ".llm-tracker/trackers/semantix.json",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "verification",
+          "manual-proof",
+          "handoff"
+        ],
+        "notes": "This is the explicit gate before setting PHALANX_SEMANTIX_HTTP_URL in Phalanx.",
+        "proof_commands": "node --test packages/stx/tests/spec-studio-manual-json-http.test.js → 10/10 pass\nnpm test --workspace packages/stx → 366/366 pass\nnode packages/stx/scripts/probe-spec-studio-json.js --url http://127.0.0.1:4402/spec-studio/evaluate → PROBE PASSED (initial→needs_user@iter0, choice→ready@iter1 alignmentPct=100)"
+      },
+      "assignee": "claude",
+      "blocker_reason": null
     }
   ]
 }

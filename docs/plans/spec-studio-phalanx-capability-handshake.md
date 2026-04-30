@@ -17,7 +17,8 @@ without a long-running Semantix service.
 - `sources` (`semantix`, `phalanx-degraded`)
 - `triggers` (initial / user_turn / reconsider / context_response /
   decide_all / skip)
-- `userTurnBodyKinds` (text / free / choice)
+- `userTurnBodyKinds` (text / free / choice / skip / delegate /
+  reconsider)
 - `contextRequestPurposes` (all 7)
 - `contextSourceKinds` (all 8)
 - `findingKinds` and `findingSeverities`
@@ -75,3 +76,6 @@ crash.
   callback or strict-mode throw
 - multi-turn smoke test driving initial → user_turn through the
   in-process adapter
+- Phalanx request-shape probe covering live initial envelopes, choice
+  turns, nested context-response episodes, and the full Phalanx
+  requirement enum surface

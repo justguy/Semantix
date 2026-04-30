@@ -39,7 +39,14 @@ export const EVALUATE_TRIGGER_VALUES = Object.freeze([
   EVALUATE_TRIGGER.SKIP,
 ]);
 
-export const USER_TURN_BODY_KIND_VALUES = Object.freeze(["text", "free", "choice"]);
+export const USER_TURN_BODY_KIND_VALUES = Object.freeze([
+  "text",
+  "free",
+  "choice",
+  "skip",
+  "delegate",
+  "reconsider",
+]);
 
 /**
  * @typedef {"initial" | "user_turn" | "reconsider" | "context_response" | "decide_all" | "skip"} EvaluateTrigger
@@ -51,7 +58,10 @@ export const USER_TURN_BODY_KIND_VALUES = Object.freeze(["text", "free", "choice
  *   body:
  *     | { kind: "text", text: string }
  *     | { kind: "free", text: string }
- *     | { kind: "choice", picked: string, label: string }
+ *     | { kind: "choice", picked: string, label: string, questionTurnId?: string }
+ *     | { kind: "skip", questionTurnId: string, reason?: string }
+ *     | { kind: "delegate", questionTurnId: string, note?: string }
+ *     | { kind: "reconsider", priorTurnId: string }
  * }} UserTurnInput
  */
 
@@ -97,6 +107,53 @@ function isNonEmptyString(value) {
 
 function pushError(errors, path, code, message) {
   errors.push({ path, code, message });
+}
+
+function normalizeContextResponse(response) {
+  if (
+    isPlainObject(response) &&
+    isPlainObject(response.response) &&
+    isNonEmptyString(response.requestId)
+  ) {
+    return {
+      ...response.response,
+      requestId:
+        isNonEmptyString(response.response.requestId)
+          ? response.response.requestId
+          : response.requestId,
+      ...(typeof response.iteration === "number" ? { iteration: response.iteration } : {}),
+    };
+  }
+  return response;
+}
+
+/**
+ * Normalize known Phalanx request envelope conveniences into the canonical
+ * Semantix evaluate request shape before validation or evaluator dispatch.
+ *
+ * @param {unknown} request
+ * @returns {unknown}
+ */
+export function normalizeSemantixEvaluateRequest(request) {
+  if (!isPlainObject(request)) return request;
+  const isInitial = request.trigger === EVALUATE_TRIGGER.INITIAL;
+  return {
+    ...request,
+    decisions:
+      request.decisions === undefined && isInitial
+        ? []
+        : request.decisions,
+    findings:
+      request.findings === undefined && isInitial
+        ? []
+        : request.findings,
+    contextResponses:
+      request.contextResponses === undefined && isInitial
+        ? []
+        : Array.isArray(request.contextResponses)
+          ? request.contextResponses.map(normalizeContextResponse)
+          : request.contextResponses,
+  };
 }
 
 function validateUserTurn(userTurn, errors) {
@@ -146,6 +203,24 @@ function validateUserTurn(userTurn, errors) {
         "userTurn body of kind choice requires a label string.",
       );
     }
+  } else if (userTurn.body.kind === "skip" || userTurn.body.kind === "delegate") {
+    if (!isNonEmptyString(userTurn.body.questionTurnId)) {
+      pushError(
+        errors,
+        "$.userTurn.body.questionTurnId",
+        "user_turn_missing_question_turn_id",
+        `userTurn body of kind ${userTurn.body.kind} requires a questionTurnId.`,
+      );
+    }
+  } else if (userTurn.body.kind === "reconsider") {
+    if (!isNonEmptyString(userTurn.body.priorTurnId)) {
+      pushError(
+        errors,
+        "$.userTurn.body.priorTurnId",
+        "user_turn_missing_prior_turn_id",
+        "userTurn body of kind reconsider requires a priorTurnId.",
+      );
+    }
   }
 }
 
@@ -193,12 +268,13 @@ export function validateSemantixEvaluateRequest(request) {
     pushError(errors, "$", "request_not_object", "Evaluate request must be an object.");
     return { ok: false, errors };
   }
+  const normalizedRequest = normalizeSemantixEvaluateRequest(request);
 
-  if (!isNonEmptyString(request.sessionId)) {
+  if (!isNonEmptyString(normalizedRequest.sessionId)) {
     pushError(errors, "$.sessionId", "missing_session_id", "sessionId is required.");
   }
 
-  if (!EVALUATE_TRIGGER_VALUES.includes(request.trigger)) {
+  if (!EVALUATE_TRIGGER_VALUES.includes(normalizedRequest.trigger)) {
     pushError(
       errors,
       "$.trigger",
@@ -207,31 +283,31 @@ export function validateSemantixEvaluateRequest(request) {
     );
   }
 
-  if (request.userTurn !== undefined) {
-    validateUserTurn(request.userTurn, errors);
+  if (normalizedRequest.userTurn !== undefined) {
+    validateUserTurn(normalizedRequest.userTurn, errors);
   } else if (
-    request.trigger === EVALUATE_TRIGGER.USER_TURN ||
-    request.trigger === EVALUATE_TRIGGER.RECONSIDER
+    normalizedRequest.trigger === EVALUATE_TRIGGER.USER_TURN ||
+    normalizedRequest.trigger === EVALUATE_TRIGGER.RECONSIDER
   ) {
     pushError(
       errors,
       "$.userTurn",
       "missing_user_turn",
-      `trigger="${request.trigger}" requires a userTurn payload.`,
+      `trigger="${normalizedRequest.trigger}" requires a userTurn payload.`,
     );
   }
 
-  if (!Array.isArray(request.decisions)) {
+  if (!Array.isArray(normalizedRequest.decisions)) {
     pushError(errors, "$.decisions", "missing_decisions_array", "decisions must be an array.");
   } else {
-    request.decisions.forEach((decision, index) => {
+    normalizedRequest.decisions.forEach((decision, index) => {
       validateDecisionEntry(decision, `$.decisions[${index}]`, errors);
     });
   }
-  if (!Array.isArray(request.findings)) {
+  if (!Array.isArray(normalizedRequest.findings)) {
     pushError(errors, "$.findings", "missing_findings_array", "findings must be an array.");
   } else {
-    request.findings.forEach((finding, index) => {
+    normalizedRequest.findings.forEach((finding, index) => {
       const findingValidation = validateFinding(finding);
       if (!findingValidation.ok) {
         for (const subError of findingValidation.errors) {
@@ -244,7 +320,7 @@ export function validateSemantixEvaluateRequest(request) {
       }
     });
   }
-  if (!Array.isArray(request.contextResponses)) {
+  if (!Array.isArray(normalizedRequest.contextResponses)) {
     pushError(
       errors,
       "$.contextResponses",
@@ -252,7 +328,7 @@ export function validateSemantixEvaluateRequest(request) {
       "contextResponses must be an array.",
     );
   } else {
-    request.contextResponses.forEach((response, index) => {
+    normalizedRequest.contextResponses.forEach((response, index) => {
       const responseValidation = validateSemantixContextResponse(response);
       if (!responseValidation.ok) {
         for (const subError of responseValidation.errors) {
@@ -266,16 +342,16 @@ export function validateSemantixEvaluateRequest(request) {
     });
   }
 
-  if (request.trigger && request.trigger !== EVALUATE_TRIGGER.INITIAL) {
-    if (!isPlainObject(request.currentPacket)) {
+  if (normalizedRequest.trigger && normalizedRequest.trigger !== EVALUATE_TRIGGER.INITIAL) {
+    if (!isPlainObject(normalizedRequest.currentPacket)) {
       pushError(
         errors,
         "$.currentPacket",
         "missing_current_packet",
-        `Non-initial trigger "${request.trigger}" requires currentPacket so stable IDs can be preserved.`,
+        `Non-initial trigger "${normalizedRequest.trigger}" requires currentPacket so stable IDs can be preserved.`,
       );
     } else {
-      const packetValidation = validateSemantixAlignmentPacket(request.currentPacket);
+      const packetValidation = validateSemantixAlignmentPacket(normalizedRequest.currentPacket);
       if (!packetValidation.ok) {
         for (const subError of packetValidation.errors) {
           errors.push({
@@ -286,7 +362,7 @@ export function validateSemantixEvaluateRequest(request) {
         }
       }
     }
-  } else if (request.currentPacket !== undefined && !isPlainObject(request.currentPacket)) {
+  } else if (normalizedRequest.currentPacket !== undefined && !isPlainObject(normalizedRequest.currentPacket)) {
     pushError(
       errors,
       "$.currentPacket",
@@ -407,8 +483,9 @@ export function createSemantixEvaluator(impl) {
   }
 
   return async function evaluate(request) {
-    assertSemantixEvaluateRequest(request);
-    const response = await impl(request);
+    const normalizedRequest = normalizeSemantixEvaluateRequest(request);
+    assertSemantixEvaluateRequest(normalizedRequest);
+    const response = await impl(normalizedRequest);
     assertSemantixEvaluateResponse(response);
     return response;
   };

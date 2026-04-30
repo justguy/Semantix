@@ -91,13 +91,31 @@ test("EVALUATE_TRIGGER exposes the six required trigger values", () => {
 });
 
 test("USER_TURN_BODY_KIND_VALUES enumerates supported bodies", () => {
-  assert.deepEqual([...USER_TURN_BODY_KIND_VALUES], ["text", "free", "choice"]);
+  assert.deepEqual(
+    [...USER_TURN_BODY_KIND_VALUES],
+    ["text", "free", "choice", "skip", "delegate", "reconsider"],
+  );
 });
 
 // ---- Request acceptance ---------------------------------------------------
 
 test("validates an initial trigger request without currentPacket", () => {
   const result = validateSemantixEvaluateRequest(buildInitialRequest());
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("validates a Phalanx live initial request without optional state arrays", () => {
+  const result = validateSemantixEvaluateRequest({
+    sessionId: "spec_session_1",
+    runId: "run_1",
+    specId: "spec_1",
+    project: "phalanx",
+    title: "H2A demo",
+    subtitle: "configured live probe",
+    originalUserRequest: "Add observation summaries to the run surface.",
+    evaluatorSource: "live:semantix",
+    trigger: EVALUATE_TRIGGER.INITIAL,
+  });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
@@ -157,12 +175,46 @@ test("validates a skip request given a current packet", () => {
   const result = validateSemantixEvaluateRequest({
     sessionId: "spec_session_1",
     trigger: EVALUATE_TRIGGER.SKIP,
+    userTurn: {
+      id: "u_skip",
+      body: { kind: "skip", questionTurnId: "turn_question_1", reason: "Later." },
+    },
     currentPacket: ambiguousNeedsUserPacket,
     decisions: [],
     findings: [],
     contextResponses: [],
   });
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("validates Phalanx delegate and reconsider user turn bodies", () => {
+  const delegate = validateSemantixEvaluateRequest({
+    sessionId: "spec_session_1",
+    trigger: EVALUATE_TRIGGER.USER_TURN,
+    userTurn: {
+      id: "u_delegate",
+      body: { kind: "delegate", questionTurnId: "turn_question_1", note: "Let Semantix decide later." },
+    },
+    currentPacket: ambiguousNeedsUserPacket,
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+  assert.equal(delegate.ok, true, JSON.stringify(delegate.errors));
+
+  const reconsider = validateSemantixEvaluateRequest({
+    sessionId: "spec_session_1",
+    trigger: EVALUATE_TRIGGER.RECONSIDER,
+    userTurn: {
+      id: "u_reconsider",
+      body: { kind: "reconsider", priorTurnId: "turn_user_choice_1" },
+    },
+    currentPacket: ambiguousNeedsUserPacket,
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+  assert.equal(reconsider.ok, true, JSON.stringify(reconsider.errors));
 });
 
 // ---- Request rejection ----------------------------------------------------
@@ -214,7 +266,7 @@ test("rejects requests whose decisions/findings/contextResponses are not arrays"
   const request = buildInitialRequest();
   request.decisions = null;
   request.findings = "[]";
-  request.contextResponses = undefined;
+  request.contextResponses = {};
   const result = validateSemantixEvaluateRequest(request);
   expectErrorCode(result, "missing_decisions_array");
   expectErrorCode(result, "missing_findings_array");
@@ -271,6 +323,12 @@ test("rejects choice user_turn that omits picked", () => {
   const request = buildUserTurnRequest();
   request.userTurn.body = { kind: "choice", label: "Yes" };
   expectErrorCode(validateSemantixEvaluateRequest(request), "user_turn_missing_picked");
+});
+
+test("rejects skip user_turn that omits questionTurnId", () => {
+  const request = buildUserTurnRequest();
+  request.userTurn.body = { kind: "skip", reason: "Later." };
+  expectErrorCode(validateSemantixEvaluateRequest(request), "user_turn_missing_question_turn_id");
 });
 
 test("rejects requests whose currentPacket is malformed", () => {
@@ -367,6 +425,43 @@ test("createSemantixEvaluator awaits async impl results", async () => {
   const evaluate = createSemantixEvaluator(impl);
   const response = await evaluate(buildInitialRequest());
   assert.equal(response.packet.contractVersion, greenfieldReadyPacket.contractVersion);
+});
+
+test("createSemantixEvaluator passes a normalized Phalanx context episode to impl", async () => {
+  const evaluate = createSemantixEvaluator((request) => {
+    assert.deepEqual(request.contextResponses, [
+      {
+        requestId: "CTX-001",
+        iteration: 3,
+        status: "empty",
+        facts: [],
+        artifacts: [],
+        summary: "No result.",
+      },
+    ]);
+    return buildEvaluateResponse(greenfieldReadyPacket);
+  });
+
+  const response = await evaluate({
+    sessionId: "spec_session_1",
+    trigger: EVALUATE_TRIGGER.CONTEXT_RESPONSE,
+    currentPacket: ambiguousNeedsUserPacket,
+    decisions: [],
+    findings: [],
+    contextResponses: [
+      {
+        requestId: "CTX-001",
+        iteration: 3,
+        response: {
+          status: "empty",
+          facts: [],
+          artifacts: [],
+          summary: "No result.",
+        },
+      },
+    ],
+  });
+  assert.equal(response.packet.readiness, "ready");
 });
 
 test("createSemantixEvaluator rejects an invalid request before calling impl", async () => {

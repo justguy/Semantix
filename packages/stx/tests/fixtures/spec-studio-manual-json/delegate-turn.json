@@ -1,0 +1,31 @@
+{
+  "sessionId": "sess_manual_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_user_delegate_001",
+    "body": {
+      "kind": "delegate",
+      "questionTurnId": "T-PROBE-Q1"
+    }
+  },
+  "currentPacket": {
+    "contractVersion": "semantix.phalanx.spec-studio.v1",
+    "source": "semantix",
+    "sessionId": "sess_manual_probe_001",
+    "iteration": 0,
+    "readiness": "needs_user",
+    "readinessReason": "Clarification needed.",
+    "originalUserRequest": "Manual JSON probe",
+    "alignedRequirement": "",
+    "requirements": [],
+    "existingSystemContext": { "mode": "unknown" },
+    "findings": [],
+    "coverage": { "alignmentPct": 40, "sections": [] },
+    "contextSources": [],
+    "groundedFacts": [],
+    "nextTurn": null
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

@@ -4,6 +4,9 @@ import { extname, relative, resolve } from "node:path";
 import http from "node:http";
 import { URL } from "node:url";
 
+import { createSemantixHandshakeAdapter } from "../spec-studio-handshake.js";
+import { createSpecStudioJsonProbeEvaluator } from "../spec-studio-json-probe-evaluator.js";
+
 const MAIN_UI_ROUTE = "/index.html";
 const LEGACY_UI_ROUTES = new Set([
   "/chat",
@@ -132,6 +135,10 @@ function routeMatch(pathname, method) {
 
   if (method === "POST" && pathname === "/runs") {
     return { name: "runs.bootstrap" };
+  }
+
+  if (method === "POST" && pathname === "/spec-studio/evaluate") {
+    return { name: "spec-studio.evaluate" };
   }
 
   if (runs !== "runs" || !runId) {
@@ -358,10 +365,10 @@ function handleError(response, error) {
   });
 }
 
-export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd }) {
-  if (!service) {
-    throw new Error("createControlPlaneServer requires a ControlPlaneService instance.");
-  }
+export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd, specStudioAdapter } = {}) {
+  const adapter = specStudioAdapter ?? createSemantixHandshakeAdapter({
+    evaluator: createSpecStudioJsonProbeEvaluator(),
+  });
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -430,6 +437,21 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         });
 
         return undefined;
+      }
+
+      if (match.name === "spec-studio.evaluate") {
+        let body;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          return json(response, 400, {
+            error: "VALIDATION_ERROR",
+            message: "Request body is not valid JSON.",
+            details: [],
+          });
+        }
+        const result = await adapter.evaluate(body);
+        return json(response, 200, result);
       }
 
       const body =

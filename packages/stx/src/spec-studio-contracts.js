@@ -102,8 +102,11 @@ export const SECTION_ID_VALUES = Object.freeze([
 
 export const REQUIREMENT_TYPE_VALUES = Object.freeze([
   "functional",
+  "nonfunctional",
   "negative",
   "constraint",
+  "acceptance",
+  "integration",
 ]);
 
 export const REQUIREMENT_PRIORITY_VALUES = Object.freeze([
@@ -115,6 +118,7 @@ export const REQUIREMENT_PRIORITY_VALUES = Object.freeze([
 export const REQUIREMENT_STATUS_VALUES = Object.freeze([
   "proposed",
   "confirmed",
+  "contested",
   "superseded",
 ]);
 

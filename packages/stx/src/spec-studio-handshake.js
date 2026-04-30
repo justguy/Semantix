@@ -33,6 +33,7 @@ import {
   EVALUATE_TRIGGER,
   EVALUATE_TRIGGER_VALUES,
   USER_TURN_BODY_KIND_VALUES,
+  normalizeSemantixEvaluateRequest,
   validateSemantixEvaluateRequest,
   validateSemantixEvaluateResponse,
 } from "./spec-studio-evaluator.js";
@@ -201,14 +202,15 @@ export function createSemantixHandshakeAdapter(options = {}) {
   });
 
   async function evaluate(request) {
-    const requestValidation = validateSemantixEvaluateRequest(request);
+    const normalizedRequest = normalizeSemantixEvaluateRequest(request);
+    const requestValidation = validateSemantixEvaluateRequest(normalizedRequest);
     if (!requestValidation.ok) {
       throw new ValidationError("Invalid SemantixEvaluateRequest at handshake adapter.", {
         errors: requestValidation.errors,
       });
     }
 
-    const response = await wrappedEvaluator(request);
+    const response = await wrappedEvaluator(normalizedRequest);
 
     const responseValidation = validateSemantixEvaluateResponse(response);
     if (!responseValidation.ok) {
@@ -222,11 +224,11 @@ export function createSemantixHandshakeAdapter(options = {}) {
 
     if (
       isPlainObject(request) &&
-      isPlainObject(request.currentPacket) &&
+      isPlainObject(normalizedRequest.currentPacket) &&
       isPlainObject(response.packet)
     ) {
       const continuity = checkIdContinuity({
-        priorPacket: request.currentPacket,
+        priorPacket: normalizedRequest.currentPacket,
         nextPacket: response.packet,
       });
       if (!continuity.ok) {
@@ -247,8 +249,8 @@ export function createSemantixHandshakeAdapter(options = {}) {
     }
 
     if (isPlainObject(response) && Array.isArray(response.contextRequests)) {
-      const priorContextRequests = Array.isArray(request.contextResponses)
-        ? request.contextResponses
+      const priorContextRequests = Array.isArray(normalizedRequest.contextResponses)
+        ? normalizedRequest.contextResponses
             .filter((contextResponse) => isPlainObject(contextResponse) && isNonEmptyString(contextResponse.requestId))
             .map((contextResponse) => ({ id: contextResponse.requestId }))
         : [];
