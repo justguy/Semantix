@@ -100,6 +100,32 @@ export const SECTION_ID_VALUES = Object.freeze([
   "nfr",
 ]);
 
+export const REQUIREMENT_TYPE_VALUES = Object.freeze([
+  "functional",
+  "negative",
+  "constraint",
+]);
+
+export const REQUIREMENT_PRIORITY_VALUES = Object.freeze([
+  "must",
+  "should",
+  "could",
+]);
+
+export const REQUIREMENT_STATUS_VALUES = Object.freeze([
+  "proposed",
+  "confirmed",
+  "superseded",
+]);
+
+export const FINDING_RAISED_BY_VALUES = Object.freeze([
+  "semantix",
+  "user",
+  "lint",
+  "phalanx",
+  "hoplon",
+]);
+
 export const CONTEXT_REQUEST_PURPOSE_VALUES = Object.freeze([
   "identify_target_surface",
   "summarize_current_behavior",
@@ -319,6 +345,23 @@ function pushError(errors, path, code, message) {
   errors.push({ path, code, message });
 }
 
+function validateUniqueIds(items, path, errors, code) {
+  const seen = new Set();
+  items.forEach((item, index) => {
+    if (!isPlainObject(item) || !isNonEmptyString(item.id)) return;
+    if (seen.has(item.id)) {
+      pushError(
+        errors,
+        `${path}[${index}].id`,
+        code,
+        `Duplicate id "${item.id}" is not allowed in ${path}.`,
+      );
+      return;
+    }
+    seen.add(item.id);
+  });
+}
+
 function isAcceptedContractVersion(value) {
   if (typeof value === "number" && value === 1) return true;
   if (typeof value === "string") {
@@ -360,6 +403,60 @@ function validateGroundedFactInternal(fact, path, errors) {
       `${path}.evidenceRef`,
       "grounded_fact_missing_evidence_ref",
       "Grounded fact requires a non-empty evidenceRef.",
+    );
+  }
+}
+
+function validateRequirementInternal(requirement, path, errors) {
+  if (!isPlainObject(requirement)) {
+    pushError(errors, path, "requirement_not_object", "Requirement must be an object.");
+    return;
+  }
+  if (!isNonEmptyString(requirement.id)) {
+    pushError(errors, `${path}.id`, "requirement_missing_id", "Requirement requires a stable id.");
+  }
+  if (!REQUIREMENT_TYPE_VALUES.includes(requirement.type)) {
+    pushError(
+      errors,
+      `${path}.type`,
+      "requirement_invalid_type",
+      `Requirement type must be one of ${REQUIREMENT_TYPE_VALUES.join(", ")}.`,
+    );
+  }
+  if (!isNonEmptyString(requirement.text)) {
+    pushError(errors, `${path}.text`, "requirement_missing_text", "Requirement requires text.");
+  }
+  if (!REQUIREMENT_PRIORITY_VALUES.includes(requirement.priority)) {
+    pushError(
+      errors,
+      `${path}.priority`,
+      "requirement_invalid_priority",
+      `Requirement priority must be one of ${REQUIREMENT_PRIORITY_VALUES.join(", ")}.`,
+    );
+  }
+  if (!isNonEmptyString(requirement.sourceRef)) {
+    pushError(errors, `${path}.sourceRef`, "requirement_missing_source_ref", "Requirement requires sourceRef.");
+  }
+  if (!isNonEmptyString(requirement.acceptance)) {
+    pushError(errors, `${path}.acceptance`, "requirement_missing_acceptance", "Requirement requires acceptance.");
+  }
+  if (!REQUIREMENT_STATUS_VALUES.includes(requirement.status)) {
+    pushError(
+      errors,
+      `${path}.status`,
+      "requirement_invalid_status",
+      `Requirement status must be one of ${REQUIREMENT_STATUS_VALUES.join(", ")}.`,
+    );
+  }
+  if (
+    requirement.status === "superseded" &&
+    !isNonEmptyString(requirement.supersededBy)
+  ) {
+    pushError(
+      errors,
+      `${path}.supersededBy`,
+      "requirement_missing_superseded_by",
+      "Superseded requirements must name supersededBy.",
     );
   }
 }
@@ -430,6 +527,17 @@ function validateFindingInternal(finding, path, errors) {
       `Finding severity must be one of ${FINDING_SEVERITY_VALUES.join(", ")}.`,
     );
   }
+  if (!SECTION_ID_VALUES.includes(finding.section)) {
+    pushError(
+      errors,
+      `${path}.section`,
+      "finding_invalid_section",
+      `Finding section must be one of ${SECTION_ID_VALUES.join(", ")}.`,
+    );
+  }
+  if (!isNonEmptyString(finding.ref)) {
+    pushError(errors, `${path}.ref`, "finding_missing_ref", "Finding requires a ref.");
+  }
   if (!isString(finding.text)) {
     pushError(errors, `${path}.text`, "finding_missing_text", "Finding requires a text body.");
   }
@@ -439,6 +547,14 @@ function validateFindingInternal(finding, path, errors) {
       `${path}.resolved`,
       "finding_invalid_resolved",
       "Finding.resolved must be a boolean.",
+    );
+  }
+  if (!FINDING_RAISED_BY_VALUES.includes(finding.raisedBy)) {
+    pushError(
+      errors,
+      `${path}.raisedBy`,
+      "finding_invalid_raised_by",
+      `Finding raisedBy must be one of ${FINDING_RAISED_BY_VALUES.join(", ")}.`,
     );
   }
 }
@@ -468,6 +584,12 @@ function validateSemantixTurnInternal(turn, path, errors) {
       `nextTurn.phase must be one of ${TURN_PHASE_VALUES.join(", ")}.`,
     );
   }
+  if (!isNonEmptyString(turn.at)) {
+    pushError(errors, `${path}.at`, "next_turn_missing_at", "nextTurn requires an ISO timestamp string.");
+  }
+  if (!isNonEmptyString(turn.target)) {
+    pushError(errors, `${path}.target`, "next_turn_missing_target", "nextTurn requires a target.");
+  }
   if (turn.body === undefined || turn.body === null) {
     pushError(errors, `${path}.body`, "next_turn_missing_body", "nextTurn requires a body.");
   } else if (!isPlainObject(turn.body)) {
@@ -478,6 +600,20 @@ function validateSemantixTurnInternal(turn, path, errors) {
       `${path}.body.kind`,
       "next_turn_invalid_body_kind",
       "nextTurn.body.kind must be \"question\" or \"finding\".",
+    );
+  } else if (turn.body.kind === "question" && !isNonEmptyString(turn.body.q)) {
+    pushError(
+      errors,
+      `${path}.body.q`,
+      "next_turn_question_missing_text",
+      "nextTurn question bodies require q.",
+    );
+  } else if (turn.body.kind === "finding" && !isNonEmptyString(turn.findingRef)) {
+    pushError(
+      errors,
+      `${path}.findingRef`,
+      "next_turn_finding_missing_ref",
+      "nextTurn finding bodies require findingRef.",
     );
   }
 }
@@ -602,6 +738,15 @@ export function validateSemantixAlignmentPacket(packet) {
     );
   }
 
+  if (packet.source === SOURCE_PHALANX_DEGRADED && packet.readiness === READINESS.READY) {
+    pushError(
+      errors,
+      "$.readiness",
+      "phalanx_degraded_cannot_be_ready",
+      "source=\"phalanx-degraded\" packets cannot be readiness=\"ready\".",
+    );
+  }
+
   if (typeof packet.originalUserRequest !== "string") {
     pushError(
       errors,
@@ -627,6 +772,11 @@ export function validateSemantixAlignmentPacket(packet) {
       "missing_requirements_array",
       "requirements must be an array.",
     );
+  } else {
+    validateUniqueIds(packet.requirements, "$.requirements", errors, "duplicate_requirement_id");
+    packet.requirements.forEach((requirement, index) => {
+      validateRequirementInternal(requirement, `$.requirements[${index}]`, errors);
+    });
   }
 
   validateExistingSystemContextInternal(
@@ -641,41 +791,61 @@ export function validateSemantixAlignmentPacket(packet) {
   }
 
   if (Array.isArray(packet.contextSources)) {
+    validateUniqueIds(packet.contextSources, "$.contextSources", errors, "duplicate_context_source_id");
     packet.contextSources.forEach((source, index) => {
       validateContextSourceInternal(source, `$.contextSources[${index}]`, errors);
     });
-  } else if (packet.contextSources !== undefined) {
+  } else if (packet.contextSources !== undefined || packet.readiness === READINESS.READY) {
     pushError(
       errors,
       "$.contextSources",
       "invalid_context_sources",
-      "contextSources must be an array when present.",
+      "contextSources must be an array.",
     );
   }
 
   if (Array.isArray(packet.groundedFacts)) {
+    validateUniqueIds(packet.groundedFacts, "$.groundedFacts", errors, "duplicate_grounded_fact_id");
     packet.groundedFacts.forEach((fact, index) => {
       validateGroundedFactInternal(fact, `$.groundedFacts[${index}]`, errors);
     });
-  } else if (packet.groundedFacts !== undefined) {
+  } else if (packet.groundedFacts !== undefined || packet.readiness === READINESS.READY) {
     pushError(
       errors,
       "$.groundedFacts",
       "invalid_grounded_facts",
-      "groundedFacts must be an array when present.",
+      "groundedFacts must be an array.",
     );
   }
 
   if (Array.isArray(packet.findings)) {
+    validateUniqueIds(packet.findings, "$.findings", errors, "duplicate_finding_id");
     packet.findings.forEach((finding, index) => {
       validateFindingInternal(finding, `$.findings[${index}]`, errors);
     });
-  } else if (packet.findings !== undefined) {
+  } else {
     pushError(errors, "$.findings", "invalid_findings", "findings must be an array.");
   }
 
-  if (packet.coverage !== undefined && !isPlainObject(packet.coverage)) {
-    pushError(errors, "$.coverage", "invalid_coverage", "coverage must be an object when present.");
+  if (!isPlainObject(packet.coverage)) {
+    pushError(errors, "$.coverage", "invalid_coverage", "coverage must be an object.");
+  } else {
+    if (typeof packet.coverage.alignmentPct !== "number") {
+      pushError(
+        errors,
+        "$.coverage.alignmentPct",
+        "invalid_coverage_alignment_pct",
+        "coverage.alignmentPct must be a number.",
+      );
+    }
+    if (!Array.isArray(packet.coverage.sections)) {
+      pushError(
+        errors,
+        "$.coverage.sections",
+        "invalid_coverage_sections",
+        "coverage.sections must be an array.",
+      );
+    }
   }
 
   if (!Object.prototype.hasOwnProperty.call(packet, "nextTurn")) {

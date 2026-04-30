@@ -221,6 +221,27 @@ test("rejects requests whose decisions/findings/contextResponses are not arrays"
   expectErrorCode(result, "missing_context_responses_array");
 });
 
+test("rejects malformed decision and finding entries", () => {
+  const request = buildInitialRequest();
+  request.decisions = [{ id: "", answer: "yes" }];
+  request.findings = [
+    {
+      id: "F-BAD",
+      kind: "gap",
+      sev: "blocker",
+      text: "missing section/ref/raisedBy",
+      resolved: false,
+    },
+  ];
+  const result = validateSemantixEvaluateRequest(request);
+  expectErrorCode(result, "decision_missing_id");
+  expectErrorCode(result, "decision_missing_kind");
+  expectErrorCode(result, "decision_invalid_answer");
+  expectErrorCode(result, "finding_invalid_section");
+  expectErrorCode(result, "finding_missing_ref");
+  expectErrorCode(result, "finding_invalid_raised_by");
+});
+
 test("rejects context_response requests carrying malformed contextResponses entries", () => {
   const result = validateSemantixEvaluateRequest({
     sessionId: "spec_session_1",

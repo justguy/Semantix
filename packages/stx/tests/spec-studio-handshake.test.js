@@ -111,6 +111,16 @@ test("malformed evaluator response is degraded honestly", async () => {
   assert.equal(isHandshakePacketLockable(response.packet), false);
 });
 
+test("invalid non-null evaluator packet is degraded honestly", async () => {
+  const invalidPacket = { ...greenfieldReadyPacket, readiness: "almost_ready" };
+  const adapter = createSemantixHandshakeAdapter({
+    evaluator: () => ({ packet: invalidPacket, events: [], contextRequests: [] }),
+  });
+  const response = await adapter.evaluate(buildInitialRequest());
+  assert.equal(response.packet.readiness, READINESS.NEEDS_USER);
+  assert.equal(isHandshakePacketLockable(response.packet), false);
+});
+
 test("evaluator that throws does not surface as opaque failure", async () => {
   const adapter = createSemantixHandshakeAdapter({
     evaluator: () => {
@@ -120,6 +130,46 @@ test("evaluator that throws does not surface as opaque failure", async () => {
   const response = await adapter.evaluate(buildInitialRequest());
   assert.equal(response.packet.readiness, READINESS.NEEDS_USER);
   assert.ok(response.events.some((event) => event.kind.startsWith("evaluator.degraded") || event.kind === "semantix.degraded"));
+});
+
+test("strict continuity rejects reissued context request ids from prior responses", async () => {
+  const adapter = createSemantixHandshakeAdapter({
+    strictContinuity: true,
+    evaluator: () => ({
+      packet: hoplonGroundedPacket,
+      events: [],
+      contextRequests: [
+        {
+          id: "CTX-001",
+          sessionId: hoplonGroundedPacket.sessionId,
+          iteration: hoplonGroundedPacket.iteration,
+          purpose: "identify_target_surface",
+          query: "again",
+          requestedFrom: ["phalanx"],
+          constraints: {},
+          reason: "test",
+        },
+      ],
+    }),
+  });
+  await assert.rejects(
+    () =>
+      adapter.evaluate({
+        ...buildFollowUpRequest(hoplonGroundedPacket, HANDSHAKE_TRIGGERS.CONTEXT_RESPONSE),
+        contextResponses: [
+          {
+            requestId: "CTX-001",
+            status: "empty",
+            facts: [],
+            artifacts: [],
+            summary: "No result.",
+          },
+        ],
+      }),
+    (error) =>
+      error.name === "ValidationError" &&
+      /context-request ID continuity/i.test(error.message),
+  );
 });
 
 // ---- Unavailable adapter -------------------------------------------------

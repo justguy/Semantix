@@ -15,6 +15,7 @@
 import { ValidationError } from "@semantix/core/contracts";
 
 import {
+  validateFinding,
   validateSemantixAlignmentPacket,
   validateSemantixContextRequest,
   validateSemantixContextResponse,
@@ -161,6 +162,22 @@ function validateSpecEvent(event, path, errors) {
   }
 }
 
+function validateDecisionEntry(decision, path, errors) {
+  if (!isPlainObject(decision)) {
+    pushError(errors, path, "decision_not_object", "Decision entries must be objects.");
+    return;
+  }
+  if (!isNonEmptyString(decision.id)) {
+    pushError(errors, `${path}.id`, "decision_missing_id", "Decision entries require an id.");
+  }
+  if (!isNonEmptyString(decision.kind)) {
+    pushError(errors, `${path}.kind`, "decision_missing_kind", "Decision entries require a kind.");
+  }
+  if (decision.answer !== undefined && !isPlainObject(decision.answer)) {
+    pushError(errors, `${path}.answer`, "decision_invalid_answer", "Decision answer must be an object when present.");
+  }
+}
+
 // ---- Public validators -----------------------------------------------------
 
 /**
@@ -206,9 +223,26 @@ export function validateSemantixEvaluateRequest(request) {
 
   if (!Array.isArray(request.decisions)) {
     pushError(errors, "$.decisions", "missing_decisions_array", "decisions must be an array.");
+  } else {
+    request.decisions.forEach((decision, index) => {
+      validateDecisionEntry(decision, `$.decisions[${index}]`, errors);
+    });
   }
   if (!Array.isArray(request.findings)) {
     pushError(errors, "$.findings", "missing_findings_array", "findings must be an array.");
+  } else {
+    request.findings.forEach((finding, index) => {
+      const findingValidation = validateFinding(finding);
+      if (!findingValidation.ok) {
+        for (const subError of findingValidation.errors) {
+          errors.push({
+            path: `$.findings[${index}]${subError.path === "$" ? "" : subError.path.slice(1)}`,
+            code: subError.code,
+            message: subError.message,
+          });
+        }
+      }
+    });
   }
   if (!Array.isArray(request.contextResponses)) {
     pushError(

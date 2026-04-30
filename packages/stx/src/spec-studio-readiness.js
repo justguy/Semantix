@@ -308,6 +308,23 @@ function classify(packet) {
   const requirements = pickArray(packet.requirements);
   const scope = isPlainObject(packet.scope) ? packet.scope : {};
 
+  if (esc.mode === EXISTING_SYSTEM_MODE.UPDATE) {
+    const missingBoundary = missingBoundaryRequirement(esc, requirements, scope);
+    if (missingBoundary) {
+      findings.push(
+        findingFor({
+          id: "F-UPD-003",
+          kind: "gap",
+          sev: "blocker",
+          section: "boundaries",
+          ref: "BOUNDARY_REQUIREMENTS",
+          text: missingBoundary.text,
+        }),
+      );
+      reasons.push(`update_missing_${missingBoundary.kind}_requirement`);
+    }
+  }
+
   if (!isNonEmptyString(packet.alignedRequirement)) {
     findings.push(
       findingFor({
@@ -487,17 +504,104 @@ export function applyReadinessVerdict(packet) {
     if (!isPlainObject(q)) return false;
     return !/^Q-(MODE|UPD|REP|ALIGN|SCOPE)/.test(String(q.id ?? ""));
   });
+  const mergedFindings = [...existingFindings, ...verdict.findings];
+  const unresolvedBlockers = mergedFindings.filter(
+    (finding) =>
+      isPlainObject(finding) &&
+      finding.sev === "blocker" &&
+      finding.resolved !== true,
+  );
+  const readiness =
+    verdict.readiness === READINESS.READY && unresolvedBlockers.length > 0
+      ? READINESS.NEEDS_USER
+      : verdict.readiness;
+  const blockingReasons =
+    readiness === READINESS.NEEDS_USER && unresolvedBlockers.length > 0
+      ? [
+          ...verdict.blockingReasons,
+          ...unresolvedBlockers
+            .filter(
+              (finding) =>
+                !verdict.blockingReasons.some((reason) => reason.id === `BR-${finding.id}`),
+            )
+            .map((finding) => ({
+              id: `BR-${finding.id}`,
+              text: finding.text,
+            })),
+        ]
+      : verdict.blockingReasons;
   return {
     ...packet,
-    readiness: verdict.readiness,
-    blockingReasons: verdict.blockingReasons,
-    findings: [...existingFindings, ...verdict.findings],
+    readiness,
+    blockingReasons,
+    findings: mergedFindings,
     openQuestions: [...existingOpenQuestions, ...verdict.openQuestions],
   };
 }
 
 function normalizeText(text) {
   return String(text).trim().toLowerCase();
+}
+
+function requirementMentionsBoundary(requirements, boundaryText, allowedTypes) {
+  const normalized = normalizeText(boundaryText).replace(/^do not change\s+/, "");
+  if (!normalized) return true;
+  return requirements.some((req) => {
+    if (!isPlainObject(req)) return false;
+    if (allowedTypes && !allowedTypes.includes(req.type)) return false;
+    const haystack = normalizeText(`${req.text ?? ""} ${req.acceptance ?? ""}`);
+    if (haystack.includes(normalized)) return true;
+    const tokens = normalized
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(" ")
+      .filter((token) => token.length > 2 && token !== "the");
+    return tokens.length > 0 && tokens.every((token) => haystack.includes(token));
+  });
+}
+
+function boundaryTextMentions(value, boundaryText) {
+  const normalized = normalizeText(boundaryText).replace(/^do not change\s+/, "");
+  const haystack = normalizeText(value);
+  if (haystack.includes(normalized)) return true;
+  const tokens = normalized
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .filter((token) => token.length > 2 && token !== "the");
+  return tokens.length > 0 && tokens.every((token) => haystack.includes(token));
+}
+
+function missingBoundaryRequirement(esc, requirements, scope = {}) {
+  for (const item of pickArray(esc.doNotChange)) {
+    const coveredByScope = pickArray(scope.negativeRequirements).some((text) =>
+      boundaryTextMentions(text, item),
+    );
+    if (!coveredByScope && !requirementMentionsBoundary(requirements, item, ["negative"])) {
+      return {
+        kind: "do_not_change",
+        text:
+          `Update boundary "${item}" is present in existingSystemContext.doNotChange but not promoted to a negative requirement fact.`,
+      };
+    }
+  }
+  for (const item of pickArray(esc.reuseRequirements)) {
+    if (!requirementMentionsBoundary(requirements, item, ["constraint", "functional"])) {
+      return {
+        kind: "reuse",
+        text:
+          `Reuse boundary "${item}" is present in existingSystemContext.reuseRequirements but not preserved as a requirement fact.`,
+      };
+    }
+  }
+  for (const item of pickArray(esc.compatibilityRequirements)) {
+    if (!requirementMentionsBoundary(requirements, item, ["constraint", "negative"])) {
+      return {
+        kind: "compatibility",
+        text:
+          `Compatibility boundary "${item}" is present in existingSystemContext.compatibilityRequirements but not preserved as a constraint requirement fact.`,
+      };
+    }
+  }
+  return null;
 }
 
 /**
@@ -532,8 +636,13 @@ export function promoteNegativeRequirements({
       .map((req) => normalizeText(req.text)),
   );
   let counter =
-    out.filter((req) => req && typeof req.id === "string" && req.id.startsWith(idPrefix))
-      .length + 1;
+    out.reduce((max, req) => {
+      if (!req || typeof req.id !== "string" || !req.id.startsWith(idPrefix)) {
+        return max;
+      }
+      const suffix = Number.parseInt(req.id.slice(idPrefix.length), 10);
+      return Number.isFinite(suffix) ? Math.max(max, suffix) : max;
+    }, 0) + 1;
 
   const candidates = [
     ...pickArray(scope.negativeRequirements).map((text) => ({

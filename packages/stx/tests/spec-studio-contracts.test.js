@@ -300,6 +300,15 @@ test("accepts phalanx-degraded source", () => {
   assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
+test("rejects phalanx-degraded packets that claim ready", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.source = SOURCE_PHALANX_DEGRADED;
+  expectErrorCode(
+    validateSemantixAlignmentPacket(packet),
+    "phalanx_degraded_cannot_be_ready",
+  );
+});
+
 test("rejects packets with unknown source", () => {
   const packet = deepClone(greenfieldReadyPacket);
   packet.source = "third-party";
@@ -317,6 +326,35 @@ test("accepts contractVersion=1 numeric form for backwards compatibility", () =>
   packet.contractVersion = 1;
   const result = validateSemantixAlignmentPacket(packet);
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("rejects packets missing required structural arrays and objects", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  delete packet.contextSources;
+  delete packet.groundedFacts;
+  delete packet.findings;
+  delete packet.coverage;
+  const result = validateSemantixAlignmentPacket(packet);
+  expectErrorCode(result, "invalid_context_sources");
+  expectErrorCode(result, "invalid_grounded_facts");
+  expectErrorCode(result, "invalid_findings");
+  expectErrorCode(result, "invalid_coverage");
+});
+
+test("rejects malformed and duplicate requirement facts", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.requirements = [
+    { id: "REQ-001" },
+    { ...greenfieldReadyPacket.requirements[0] },
+  ];
+  const result = validateSemantixAlignmentPacket(packet);
+  expectErrorCode(result, "requirement_invalid_type");
+  expectErrorCode(result, "requirement_missing_text");
+  expectErrorCode(result, "requirement_invalid_priority");
+  expectErrorCode(result, "requirement_missing_source_ref");
+  expectErrorCode(result, "requirement_missing_acceptance");
+  expectErrorCode(result, "requirement_invalid_status");
+  expectErrorCode(result, "duplicate_requirement_id");
 });
 
 // ---- Throwing assertion variant -------------------------------------------
@@ -477,6 +515,19 @@ test("validateFinding rejects unknown kind", () => {
   expectErrorCode(result, "finding_invalid_kind");
 });
 
+test("validateFinding rejects missing contract-critical fields", () => {
+  const result = validateFinding({
+    id: "F-1",
+    kind: "gap",
+    sev: "blocker",
+    text: "x",
+    resolved: false,
+  });
+  expectErrorCode(result, "finding_invalid_section");
+  expectErrorCode(result, "finding_missing_ref");
+  expectErrorCode(result, "finding_invalid_raised_by");
+});
+
 test("validateSemantixTurn accepts null", () => {
   const result = validateSemantixTurn(null);
   assert.equal(result.ok, true);
@@ -485,6 +536,15 @@ test("validateSemantixTurn accepts null", () => {
 test("validateSemantixTurn accepts the ambiguous sample turn", () => {
   const result = validateSemantixTurn(ambiguousNeedsUserPacket.nextTurn);
   assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("validateSemantixTurn rejects missing at and target", () => {
+  const turn = deepClone(ambiguousNeedsUserPacket.nextTurn);
+  delete turn.at;
+  delete turn.target;
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_missing_at");
+  expectErrorCode(result, "next_turn_missing_target");
 });
 
 test("validateSemantixTurn rejects malformed turn", () => {

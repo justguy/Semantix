@@ -91,6 +91,23 @@ test("applyUserChoiceTurn accepts an externally-minted decisionId", () => {
   assert.equal(next.userDecisions[0].id, "dec_phalanx_001");
 });
 
+test("generated provisional decision ids skip gaps instead of reusing them", () => {
+  const packet = basePacketWithQuestion();
+  packet.userDecisions = [
+    { id: "sem_dec_001", kind: "choice" },
+    { id: "sem_dec_003", kind: "choice" },
+  ];
+  const { decisionId } = applyUserChoiceTurn({
+    packet,
+    userTurn: { id: "u_gap", body: { kind: "choice", picked: "opt_existing", label: "Update existing Run View" } },
+    questionRef: "Q-001",
+    pickedOptionId: "opt_existing",
+    pickedLabel: "Update existing Run View",
+    now: FIXED_NOW,
+  });
+  assert.equal(decisionId, "sem_dec_004");
+});
+
 test("applyUserChoiceTurn rejects malformed inputs", () => {
   const packet = basePacketWithQuestion();
   assert.throws(

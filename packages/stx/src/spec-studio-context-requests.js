@@ -207,7 +207,7 @@ export function createContextRequestSequencer({
 function buildHelper(purpose) {
   return function helper({
     sessionId,
-    iteration = 0,
+    iteration,
     id,
     sequencer,
     query,

@@ -110,6 +110,35 @@ test("ingested packet still validates against the contract", () => {
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
+test("contextSource kind follows returned fact source over requestedFrom ordering", () => {
+  const request = ctxRequest({
+    purpose: "find_constraints",
+    requestedFrom: ["phalanx", "repo", "hoplon"],
+  });
+  const result = ingestContextResponses({
+    packet: basePacket(),
+    requests: [request],
+    responses: [
+      {
+        requestId: request.id,
+        status: "ok",
+        facts: [
+          {
+            id: "FACT-HOPLON-ORDER",
+            source: "hoplon",
+            text: "Hoplon observed the constraint.",
+            confidence: "high",
+            evidenceRef: "hoplon://trace/constraint",
+          },
+        ],
+        artifacts: [],
+        summary: "Hoplon returned the evidence.",
+      },
+    ],
+  });
+  assert.equal(result.packet.contextSources[0].kind, "hoplon");
+});
+
 // ---- Empty response -------------------------------------------------------
 
 test("an empty response produces a contextSource but no groundedFacts", () => {

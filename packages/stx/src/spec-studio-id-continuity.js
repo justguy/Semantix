@@ -29,6 +29,7 @@ export const ID_CONTINUITY_VIOLATION = Object.freeze({
   GROUNDED_FACT_DROPPED: "grounded_fact_dropped",
   GROUNDED_FACT_MUTATED: "grounded_fact_mutated",
   CONTEXT_REQUEST_REISSUED: "context_request_reissued",
+  DUPLICATE_ID: "duplicate_id",
 });
 
 const REQUIREMENT_IDENTITY_FIELDS = ["text", "type", "priority", "acceptance"];
@@ -55,6 +56,25 @@ function fieldsEqual(a, b, fields) {
 
 function pushViolation(violations, kind, id, message, extra = {}) {
   violations.push({ kind, id, message, ...extra });
+}
+
+function detectDuplicateIds(items, label, violations) {
+  if (!Array.isArray(items)) return;
+  const seen = new Set();
+  for (const item of items) {
+    if (!item || typeof item.id !== "string" || item.id.length === 0) continue;
+    if (seen.has(item.id)) {
+      pushViolation(
+        violations,
+        ID_CONTINUITY_VIOLATION.DUPLICATE_ID,
+        item.id,
+        `Duplicate ${label} id "${item.id}" masks stable-ID continuity.`,
+        { collection: label },
+      );
+      continue;
+    }
+    seen.add(item.id);
+  }
 }
 
 function compareRequirements(priorList, nextList, violations, summary) {
@@ -101,6 +121,14 @@ function compareRequirements(priorList, nextList, violations, summary) {
           ID_CONTINUITY_VIOLATION.REQUIREMENT_SUPERSEDED_WITHOUT_REPLACEMENT,
           id,
           `Requirement "${id}" became superseded but does not name a supersededBy replacement.`,
+        );
+      } else if (nextReq.supersededBy === id) {
+        pushViolation(
+          violations,
+          ID_CONTINUITY_VIOLATION.REQUIREMENT_SUPERSEDED_WITHOUT_REPLACEMENT,
+          id,
+          `Requirement "${id}" cannot supersede itself; supersededBy must name a new replacement id.`,
+          { supersededBy: nextReq.supersededBy },
         );
       } else if (!next.has(nextReq.supersededBy)) {
         pushViolation(
@@ -290,11 +318,19 @@ export function checkIdContinuity({
   };
 
   if (priorPacket && typeof priorPacket === "object" && nextPacket && typeof nextPacket === "object") {
+    detectDuplicateIds(priorPacket.requirements, "prior requirements", violations);
+    detectDuplicateIds(nextPacket.requirements, "next requirements", violations);
+    detectDuplicateIds(priorPacket.findings, "prior findings", violations);
+    detectDuplicateIds(nextPacket.findings, "next findings", violations);
+    detectDuplicateIds(priorPacket.groundedFacts, "prior groundedFacts", violations);
+    detectDuplicateIds(nextPacket.groundedFacts, "next groundedFacts", violations);
     compareRequirements(priorPacket.requirements, nextPacket.requirements, violations, summary);
     compareFindings(priorPacket.findings, nextPacket.findings, violations, summary);
     compareGroundedFacts(priorPacket.groundedFacts, nextPacket.groundedFacts, violations, summary);
   }
 
+  detectDuplicateIds(priorContextRequests, "prior contextRequests", violations);
+  detectDuplicateIds(nextContextRequests, "next contextRequests", violations);
   compareContextRequests(priorContextRequests, nextContextRequests, violations, summary);
 
   return { ok: violations.length === 0, violations, summary };

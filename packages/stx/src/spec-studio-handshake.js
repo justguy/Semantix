@@ -246,6 +246,35 @@ export function createSemantixHandshakeAdapter(options = {}) {
       }
     }
 
+    if (isPlainObject(response) && Array.isArray(response.contextRequests)) {
+      const priorContextRequests = Array.isArray(request.contextResponses)
+        ? request.contextResponses
+            .filter((contextResponse) => isPlainObject(contextResponse) && isNonEmptyString(contextResponse.requestId))
+            .map((contextResponse) => ({ id: contextResponse.requestId }))
+        : [];
+      const continuity = checkIdContinuity({
+        priorPacket: null,
+        nextPacket: null,
+        priorContextRequests,
+        nextContextRequests: response.contextRequests,
+      });
+      if (!continuity.ok) {
+        if (typeof onContinuityViolation === "function") {
+          try {
+            onContinuityViolation(continuity.violations);
+          } catch {
+            // intentional swallow - the callback is observational only
+          }
+        }
+        if (strictContinuity) {
+          throw new ValidationError(
+            "Handshake adapter detected context-request ID continuity violations.",
+            { violations: continuity.violations },
+          );
+        }
+      }
+    }
+
     return response;
   }
 

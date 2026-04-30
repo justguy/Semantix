@@ -145,6 +145,16 @@ test("requestIdentifyTargetSurface produces a validated request", () => {
   assert.match(req.id, /^CTX-001$/);
 });
 
+test("helpers inherit iteration from the sequencer when not explicitly passed", () => {
+  const sequencer = createContextRequestSequencer({ sessionId: "spec_a", iteration: 7 });
+  const req = requestIdentifyTargetSurface({
+    sequencer,
+    query: "identify",
+    reason: "test",
+  });
+  assert.equal(req.iteration, 7);
+});
+
 test("requestSummarizeCurrentBehavior includes evidence requirement by default", () => {
   const req = requestSummarizeCurrentBehavior({
     id: "CTX-200",

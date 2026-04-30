@@ -33,6 +33,7 @@ import {
   READINESS,
   SOURCE_PHALANX_DEGRADED,
   SOURCE_SEMANTIX,
+  validateSemantixAlignmentPacket,
 } from "./spec-studio-contracts.js";
 
 const DEFAULT_BLOCKER = Object.freeze({
@@ -272,6 +273,14 @@ export function withDegradationFallback(evaluator, options = {}) {
       raisedError = new Error(
         "Evaluator returned a malformed response (missing packet); degrading honestly.",
       );
+    }
+    if (!raisedError) {
+      const packetValidation = validateSemantixAlignmentPacket(response.packet);
+      if (!packetValidation.ok) {
+        raisedError = new Error(
+          `Evaluator returned an invalid packet; degrading honestly: ${packetValidation.errors.map((error) => error.code).join(", ")}`,
+        );
+      }
     }
 
     if (raisedError) {

@@ -68,10 +68,13 @@ function ensureArrays(packet) {
 }
 
 function nextSemDecisionId(packet, prefix = SEM_DECISION_ID_PREFIX) {
-  const existing = pickArray(packet.userDecisions)
-    .map((d) => (isPlainObject(d) && typeof d.id === "string" ? d.id : ""))
-    .filter((id) => id.startsWith(prefix));
-  return `${prefix}${String(existing.length + 1).padStart(3, "0")}`;
+  const maxSuffix = pickArray(packet.userDecisions).reduce((max, decision) => {
+    if (!isPlainObject(decision) || typeof decision.id !== "string") return max;
+    if (!decision.id.startsWith(prefix)) return max;
+    const suffix = Number.parseInt(decision.id.slice(prefix.length), 10);
+    return Number.isFinite(suffix) ? Math.max(max, suffix) : max;
+  }, 0);
+  return `${prefix}${String(maxSuffix + 1).padStart(3, "0")}`;
 }
 
 function findOpenQuestion(packet, questionRef) {

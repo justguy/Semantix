@@ -153,6 +153,39 @@ test("rejects supersededBy pointing to an id that is not in the next packet", ()
   );
 });
 
+test("rejects requirement self-supersession", () => {
+  const prior = basePacket();
+  const next = deepClone(prior);
+  next.requirements[0] = {
+    ...next.requirements[0],
+    status: "superseded",
+    supersededBy: "REQ-001",
+  };
+  expectViolation(
+    checkIdContinuity({ priorPacket: prior, nextPacket: next }),
+    ID_CONTINUITY_VIOLATION.REQUIREMENT_SUPERSEDED_WITHOUT_REPLACEMENT,
+    "REQ-001",
+  );
+});
+
+test("reports duplicate ids before map-based continuity comparison masks them", () => {
+  const prior = basePacket();
+  const next = deepClone(prior);
+  next.requirements.push({ ...next.requirements[0] });
+  next.findings.push({ ...next.findings[0] });
+  next.groundedFacts.push({ ...next.groundedFacts[0] });
+  const result = checkIdContinuity({
+    priorPacket: prior,
+    nextPacket: next,
+    priorContextRequests: [{ id: "CTX-001" }],
+    nextContextRequests: [{ id: "CTX-002" }, { id: "CTX-002" }],
+  });
+  expectViolation(result, ID_CONTINUITY_VIOLATION.DUPLICATE_ID, "REQ-001");
+  expectViolation(result, ID_CONTINUITY_VIOLATION.DUPLICATE_ID, "F-001");
+  expectViolation(result, ID_CONTINUITY_VIOLATION.DUPLICATE_ID, "FACT-001");
+  expectViolation(result, ID_CONTINUITY_VIOLATION.DUPLICATE_ID, "CTX-002");
+});
+
 test("rejects reuse of a previously superseded requirement id", () => {
   const prior = basePacket();
   prior.requirements[0].status = "superseded";

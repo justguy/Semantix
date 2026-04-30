@@ -107,8 +107,31 @@ test("update mode with only compatibilityRequirements is sufficient", () => {
   delete packet.existingSystemContext.doNotChange;
   delete packet.existingSystemContext.reuseRequirements;
   packet.existingSystemContext.compatibilityRequirements = ["Maintain v1 API contract."];
+  packet.requirements = [
+    {
+      id: "REQ-COMPAT-001",
+      type: "constraint",
+      text: "Maintain v1 API contract.",
+      priority: "must",
+      sourceRef: "dec_compat",
+      acceptance: "Existing v1 API contract tests continue to pass.",
+      status: "confirmed",
+    },
+  ];
   const verdict = classifyReadiness(packet);
   assert.equal(verdict.readiness, READINESS.READY);
+});
+
+test("update mode requires doNotChange boundaries to be promoted into requirement facts", () => {
+  const packet = deepClone(updateReadyPacket);
+  packet.existingSystemContext.doNotChange = ["billing code"];
+  packet.existingSystemContext.reuseRequirements = [];
+  packet.scope.negativeRequirements = [];
+  packet.requirements = packet.requirements.filter((req) => req.type !== "negative");
+  const verdict = classifyReadiness(packet);
+  assert.equal(verdict.readiness, READINESS.NEEDS_USER);
+  assert.ok(verdict.reasons.includes("update_missing_do_not_change_requirement"));
+  assert.ok(verdict.findings.some((finding) => finding.id === "F-UPD-003"));
 });
 
 test("update mode missing target surface short-circuits before clarity checks", () => {
@@ -206,6 +229,25 @@ test("applyReadinessVerdict preserves user-issued findings while replacing class
   assert.ok(next.findings.some((f) => f.id === "F-USER-001"));
 });
 
+test("applyReadinessVerdict does not mark ready while preserving unresolved blockers", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.findings = [
+    {
+      id: "F-USER-BLOCKER",
+      kind: "risk",
+      sev: "blocker",
+      section: "risks",
+      ref: "user",
+      text: "User says this is still blocked.",
+      resolved: false,
+      raisedBy: "user",
+    },
+  ];
+  const next = applyReadinessVerdict(packet);
+  assert.equal(next.readiness, READINESS.NEEDS_USER);
+  assert.ok(next.blockingReasons.some((reason) => reason.id === "BR-F-USER-BLOCKER"));
+});
+
 test("applyReadinessVerdict refreshes findings when classifier disagrees", () => {
   const packet = deepClone(updateReadyPacket);
   packet.existingSystemContext.targetSurfaces = [];
@@ -295,6 +337,26 @@ test("promoteNegativeRequirements does not duplicate existing negatives", () => 
   });
   const negatives = out.filter((req) => req.type === "negative");
   assert.equal(negatives.length, 2);
+});
+
+test("promoteNegativeRequirements allocates after the max existing numeric suffix", () => {
+  const out = promoteNegativeRequirements({
+    requirements: [
+      {
+        id: "REQ-NEG-002",
+        type: "negative",
+        text: "Do not modify billing code.",
+        priority: "must",
+        sourceRef: "boundaries:scope",
+        acceptance: "x",
+        status: "confirmed",
+      },
+    ],
+    scope: {
+      negativeRequirements: ["Do not alter OAuth signup."],
+    },
+  });
+  assert.ok(out.some((req) => req.id === "REQ-NEG-003"));
 });
 
 // ---- Validate post-classifier packet remains contract-valid ----------

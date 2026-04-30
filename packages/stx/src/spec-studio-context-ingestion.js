@@ -74,6 +74,19 @@ function defaultSourceKindFor(request) {
   return "phalanx";
 }
 
+function sourceKindForResponse({ request, response }) {
+  if (Array.isArray(response?.facts) && response.facts.length > 0) {
+    const factSources = response.facts
+      .filter((fact) => isPlainObject(fact) && isNonEmptyString(fact.source))
+      .map((fact) => fact.source);
+    const unique = [...new Set(factSources)];
+    if (unique.length === 1) {
+      return unique[0];
+    }
+  }
+  return defaultSourceKindFor(request);
+}
+
 function buildContextSource({ request, response, sourceIdPrefix }) {
   const fallbackId = `${sourceIdPrefix}${request?.id ?? response.requestId}`;
   const evidenceRefs = Array.isArray(response.facts)
@@ -83,7 +96,7 @@ function buildContextSource({ request, response, sourceIdPrefix }) {
     : [];
   return {
     id: fallbackId,
-    kind: defaultSourceKindFor(request),
+    kind: sourceKindForResponse({ request, response }),
     status: RESPONSE_TO_SOURCE_STATUS[response.status] ?? "unavailable",
     query: isPlainObject(request) ? request.query : undefined,
     summary: typeof response.summary === "string" ? response.summary : "",
