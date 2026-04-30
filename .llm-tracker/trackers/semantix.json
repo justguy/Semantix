@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 4,
-    "updatedAt": "2026-04-30T03:56:54.707Z"
+    "rev": 6,
+    "updatedAt": "2026-04-30T04:00:42.175Z"
   },
   "tasks": [
     {
@@ -105,7 +105,7 @@
       "id": "stx-spec-evaluator-interface",
       "title": "Define Semantix evaluation request and response interface",
       "goal": "Create the Semantix-side evaluation seam Phalanx can call or simulate: raw directive plus prior packet/session state in, alignment packet plus events/contextRequests out.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "evaluator",
         "priorityId": "p0"
@@ -145,11 +145,12 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "This is the call boundary Phalanx capability-handshake work will rely on.",
+      "comment": "Landed packages/stx/src/spec-studio-evaluator.js: EVALUATE_TRIGGER constants for initial/user_turn/reconsider/context_response/decide_all/skip, validateSemantixEvaluateRequest enforcing currentPacket on non-initial triggers and array shape of decisions/findings/contextResponses, validateSemantixEvaluateResponse covering packet+events+contextRequests, and createSemantixEvaluator(impl) seam runnable in tests without a server. 35 targeted tests pass; full repo 123 + 27 green.",
       "context": {
         "claude_brief": "Implement the evaluator interface as a dormant adapter/helper with tests. Do not start services or wire runtime launch paths.",
         "blocked_until": "stx-spec-packet-contract-module"
-      }
+      },
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-stable-id-continuity",

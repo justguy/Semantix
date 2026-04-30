@@ -5,3 +5,4 @@ export * from "./http/server.js";
 export * from "./cli.js";
 export * from "./storage/file-run-store.js";
 export * from "./spec-studio-contracts.js";
+export * from "./spec-studio-evaluator.js";
