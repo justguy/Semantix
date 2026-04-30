@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 18,
-    "updatedAt": "2026-04-30T04:54:11.230Z"
+    "rev": 20,
+    "updatedAt": "2026-04-30T04:57:10.459Z"
   },
   "tasks": [
     {
@@ -490,7 +490,7 @@
       "id": "stx-spec-sample-fixture-matrix",
       "title": "Build upstream sample fixture and regression matrix",
       "goal": "Create compact Semantix-side fixtures and targeted tests for all sample packet flows and evaluator transitions required by the contract.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "proof",
         "priorityId": "p1"
@@ -535,7 +535,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "This gives Codex a compact review harness for each future Claude slice."
+      "comment": "Extended packages/stx/tests/fixtures/spec-studio-samples.js with malformedContextResponseSample, factWithoutEvidenceContextResponseSample, staffOwnedBleedPacket, and 3 evaluateResponseFixtures. Added spec-studio-fixture-matrix.test.js: 38 tests cross-checking validator + classifier + lockability + degraded + staff-guard verdicts per fixture. docs/plans report enumerates in-scope fixtures and out-of-scope concerns. No live services.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-phalanx-capability-handshake",

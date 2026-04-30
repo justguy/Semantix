@@ -460,3 +460,144 @@ export const upstreamSamplePackets = Object.freeze({
   hoplonGrounded: hoplonGroundedPacket,
   degraded: degradedPacket,
 });
+
+/**
+ * A malformed SemantixContextResponse used for negative regression
+ * testing. Status is "error" but the error detail is missing, which
+ * the response validator must reject.
+ */
+export const malformedContextResponseSample = Object.freeze({
+  requestId: "CTX-MALFORMED-001",
+  status: "error",
+  facts: [],
+  artifacts: [],
+  summary: "",
+});
+
+/**
+ * A SemantixContextResponse with a fact that lacks evidenceRef. The
+ * grounded-fact rule rejects this so degraded ingestion stays honest.
+ */
+export const factWithoutEvidenceContextResponseSample = Object.freeze({
+  requestId: "CTX-NOEV-001",
+  status: "ok",
+  facts: [
+    {
+      id: "FACT-NOEV-001",
+      source: "hoplon",
+      text: "Surface exists",
+      confidence: "high",
+    },
+  ],
+  artifacts: [],
+  summary: "Hoplon returned a fact without an evidenceRef.",
+});
+
+/**
+ * A packet that smuggles Staff-owned planning content into nested
+ * positions. Used to regression-test the deep Staff-authority guard.
+ */
+export const staffOwnedBleedPacket = Object.freeze({
+  contractVersion: "semantix.phalanx.spec-studio.v1",
+  source: "semantix",
+  sessionId: "spec_staff_bleed",
+  iteration: 1,
+  readiness: "needs_user",
+  blockingReasons: [],
+  approvalRequired: true,
+  originalUserRequest: "Add observation summaries.",
+  alignedRequirement: "",
+  requirements: [
+    {
+      id: "REQ-001",
+      type: "functional",
+      text: "Show observation summaries.",
+      priority: "must",
+      sourceRef: "dec_001",
+      acceptance: "Renders in the right panel.",
+      status: "proposed",
+      // Buried Staff-owned field that the deep guard must catch:
+      implementationPlan: { steps: ["edit RunView.tsx", "deploy"] },
+    },
+  ],
+  flow: { pages: [], states: [], transitions: [], dataNeeded: [] },
+  scope: { inScope: [], outOfScope: [], negativeRequirements: [] },
+  existingSystemContext: { mode: "update", targetSurfaces: [{ id: "surf", kind: "ui-panel", name: "Right panel" }] },
+  contextSources: [],
+  groundedFacts: [],
+  findings: [
+    {
+      id: "F-001",
+      kind: "gap",
+      sev: "concern",
+      section: "scope",
+      ref: "REQ-001",
+      text: "Acceptance is shallow.",
+      resolved: false,
+      raisedBy: "semantix",
+      // Buried Staff-owned field that the deep guard must catch:
+      verifyCommand: "npm test",
+    },
+  ],
+  coverage: { alignmentPct: 50, sections: [], openBlockers: 0, openConcerns: 1, openFYI: 0 },
+  nextTurn: {
+    id: "t_sem_001",
+    side: "semantix",
+    at: "2026-04-30T00:00:00.000Z",
+    phase: "crisp",
+    target: "scope",
+    body: {
+      kind: "question",
+      q: "Reuse the existing right panel?",
+      options: [
+        { id: "opt_yes", label: "Yes" },
+        // Buried Staff-owned field inside the option blob:
+        { id: "opt_no", label: "No", featurePuzzle: { id: "fp_x" } },
+      ],
+    },
+  },
+});
+
+/**
+ * Compact SemantixEvaluateResponse fixtures keyed by trigger so
+ * downstream tests can run the evaluator seam without instantiating
+ * an LLM-backed adapter.
+ */
+export const evaluateResponseFixtures = Object.freeze({
+  initialReady: {
+    packet: greenfieldReadyPacket,
+    events: [
+      {
+        id: "evt_initial_001",
+        kind: "packet.evaluated",
+        sessionId: greenfieldReadyPacket.sessionId,
+        at: "2026-04-30T00:00:00.000Z",
+      },
+    ],
+    contextRequests: [],
+  },
+  ambiguousFollowUp: {
+    packet: ambiguousNeedsUserPacket,
+    events: [
+      {
+        id: "evt_initial_002",
+        kind: "packet.evaluated",
+        sessionId: ambiguousNeedsUserPacket.sessionId,
+        at: "2026-04-30T00:00:00.000Z",
+      },
+    ],
+    contextRequests: [],
+  },
+  hoplonGroundedFollowUp: {
+    packet: hoplonGroundedPacket,
+    events: [
+      {
+        id: "evt_grounded_001",
+        kind: "packet.evaluated",
+        sessionId: hoplonGroundedPacket.sessionId,
+        at: "2026-04-30T00:00:00.000Z",
+      },
+    ],
+    contextRequests: [],
+  },
+});
