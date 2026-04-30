@@ -10,5 +10,11 @@ control-plane/dist/
 packages/stx/data/
 packages/stx/dist/
 
+# Local tool/runtime artifacts.
+.mcp.json
+.hoplon/
+.semantix/
+review-artifacts/
+
 # Local design archive; keep the extracted design source instead.
 Design.zip
