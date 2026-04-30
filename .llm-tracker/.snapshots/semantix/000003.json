@@ -43,15 +43,15 @@
         "label": "P3"
       }
     ],
-    "rev": 4,
-    "updatedAt": "2026-04-30T03:56:54.707Z"
+    "rev": 3,
+    "updatedAt": "2026-04-30T03:46:32.087Z"
   },
   "tasks": [
     {
       "id": "stx-spec-packet-contract-module",
       "title": "Implement Semantix Spec Studio packet contract module",
       "goal": "Add Semantix-side typed contract definitions and validation helpers for the Phalanx Spec Studio alignment packet, context request, context response, and degraded packet shapes.",
-      "status": "complete",
+      "status": "not_started",
       "placement": {
         "swimlaneId": "contract",
         "priorityId": "p0"
@@ -92,14 +92,13 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Landed packages/stx/src/spec-studio-contracts.js: validators + asserters for SemantixAlignmentPacket / SemantixContextRequest / SemantixContextResponse / contextSources / groundedFacts / findings / nextTurn, plus READINESS, EXISTING_SYSTEM_MODE, FINDING_*, CONTEXT_SOURCE_*, CONTEXT_REQUEST enums, STAFF_OWNED_FIELDS. 6 upstream samples transcribed in tests/fixtures/spec-studio-samples.js. 63 tests pass; full repo green.",
+      "comment": "First Semantix-side slice. Mirror the agreed Phalanx contract without wiring runtime launch behavior.",
       "context": {
         "claude_brief": "Read docs/phalanx-spec-studio-integration-contract.md and implement only the Semantix-owned packet contract surface. Keep exports named and add narrow tests.",
         "suggested_tests": [
           "npm run test --workspace @semantix/stx -- --runInBand or an equivalent targeted package test command if available"
         ]
-      },
-      "assignee": "claude-opus"
+      }
     },
     {
       "id": "stx-spec-evaluator-interface",
