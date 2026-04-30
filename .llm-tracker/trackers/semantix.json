@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 10,
-    "updatedAt": "2026-04-30T04:34:11.140Z"
+    "rev": 12,
+    "updatedAt": "2026-04-30T04:39:37.179Z"
   },
   "tasks": [
     {
@@ -391,7 +391,7 @@
       "id": "stx-spec-degraded-behavior",
       "title": "Produce honest degraded/unavailable Semantix packet behavior",
       "goal": "Ensure Semantix partial failure returns needs_user with blocker findings and never silently passes a degraded state into lock or Staff planning.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "integration",
         "priorityId": "p1"
@@ -432,7 +432,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Critical trust behavior: failure must be visible and non-lockable."
+      "comment": "Landed packages/stx/src/spec-studio-degraded.js: createDegradedPacket (source=semantix, readiness=needs_user, blocker, alignmentPct=0 unless staleSafe carries prior coverage, no invented facts), isPacketLockable / isDegradedPacket predicates, withDegradationFallback wrapper that catches throws and malformed responses + demotes dishonest ready packets. docs/plans degraded-behavior boundary report added. 20 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-no-staff-authority-guard",
