@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 14,
-    "updatedAt": "2026-04-30T04:46:10.350Z"
+    "rev": 16,
+    "updatedAt": "2026-04-30T04:50:40.205Z"
   },
   "tasks": [
     {
@@ -252,7 +252,7 @@
       "id": "stx-spec-context-request-generator",
       "title": "Generate Phalanx-brokered context requests",
       "goal": "Emit focused SemantixContextRequest objects when existing-system facts materially affect readiness, instead of inventing facts or querying Hoplon directly.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "integration",
         "priorityId": "p1"
@@ -293,7 +293,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "This is the Semantix half of the Phalanx-owned context broker boundary."
+      "comment": "Landed packages/stx/src/spec-studio-context-requests.js: createContextRequest factory + 7 per-purpose helpers (identify_target_surface, summarize_current_behavior, find_existing_flow, find_reusable_component, find_constraints, collect_hoplon_evidence, inspect_reference_artifact). createContextRequestSequencer mints stable ids. planContextRequests gap-driven planner. Structural tests assert no Hoplon import in stx source or package manifest. 26 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-grounded-context-ingestion",
