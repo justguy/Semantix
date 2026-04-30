@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 16,
-    "updatedAt": "2026-04-30T04:50:40.205Z"
+    "rev": 18,
+    "updatedAt": "2026-04-30T04:54:11.230Z"
   },
   "tasks": [
     {
@@ -300,7 +300,7 @@
       "id": "stx-spec-grounded-context-ingestion",
       "title": "Ingest Phalanx context responses without mixing interpretation into facts",
       "goal": "Consume SemantixContextResponse facts/artifacts from Phalanx and update packets while preserving evidence refs and separating grounded facts from Semantix interpretation.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "integration",
         "priorityId": "p1"
@@ -340,7 +340,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Pairs with the context-request generator; closes the evidence-ref and separation guarantees."
+      "comment": "Landed packages/stx/src/spec-studio-context-ingestion.js: ingestContextResponses maps response status (ok/empty -> used, error -> unavailable, skipped -> skipped), promotes only facts with evidenceRef into groundedFacts, never fabricates facts. recordInterpretationsFromFacts records assumptions/risks/findings/recommendations/requirements with required sourceFactRef and refuses to touch groundedFacts. 17 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-user-turn-loop",
