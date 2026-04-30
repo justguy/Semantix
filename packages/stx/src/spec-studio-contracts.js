@@ -13,6 +13,13 @@
 
 import { ValidationError } from "@semantix/core/contracts";
 
+import {
+  STAFF_OWNED_FIELDS,
+  findStaffAuthorityBleed,
+} from "./spec-studio-no-staff-authority.js";
+
+export { STAFF_OWNED_FIELDS } from "./spec-studio-no-staff-authority.js";
+
 export const CONTRACT_VERSION = "semantix.phalanx.spec-studio.v1";
 
 export const SOURCE_SEMANTIX = "semantix";
@@ -117,29 +124,10 @@ export const CONTEXT_RESPONSE_STATUS_VALUES = Object.freeze([
   "error",
 ]);
 
-/**
- * Field names that Semantix must never emit because they are Staff-owned
- * planning artifacts. The packet validator rejects packets that include
- * any of these top-level keys.
- */
-export const STAFF_OWNED_FIELDS = Object.freeze([
-  "featurePuzzle",
-  "featurePuzzles",
-  "designDoc",
-  "designDocs",
-  "designDocument",
-  "verifyCommand",
-  "verifyCommands",
-  "implementationPlan",
-  "implementationPlans",
-  "fileChange",
-  "fileChanges",
-  "fileChangeInstructions",
-  "staffPlan",
-  "architectureDoc",
-  "decompositionPlan",
-  "executionPlan",
-]);
+// Top-level Staff-owned field names live in spec-studio-no-staff-authority.js
+// so the deep-walking guard and the packet validator share a single source
+// of truth. STAFF_OWNED_FIELDS is re-exported above for backwards
+// compatibility with tests and external consumers.
 
 /**
  * @typedef {"ready" | "needs_user" | "blocked"} Readiness
@@ -572,15 +560,8 @@ export function validateSemantixAlignmentPacket(packet) {
     return { ok: false, errors };
   }
 
-  for (const field of STAFF_OWNED_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(packet, field)) {
-      pushError(
-        errors,
-        `$.${field}`,
-        "staff_owned_field_present",
-        `Semantix packet must not include Staff-owned field "${field}".`,
-      );
-    }
+  for (const bleed of findStaffAuthorityBleed(packet)) {
+    pushError(errors, bleed.path, "staff_owned_field_present", bleed.message);
   }
 
   if (!isAcceptedContractVersion(packet.contractVersion)) {

@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 8,
-    "updatedAt": "2026-04-30T04:05:53.550Z"
+    "rev": 10,
+    "updatedAt": "2026-04-30T04:34:11.140Z"
   },
   "tasks": [
     {
@@ -438,7 +438,7 @@
       "id": "stx-spec-no-staff-authority-guard",
       "title": "Guard against Semantix emitting Staff-owned planning content",
       "goal": "Prevent Semantix output from carrying Staff design docs, feature puzzles, verify commands, implementation plans, or file-change authority inside packets or next-turn bodies.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "contract",
         "priorityId": "p1"
@@ -479,7 +479,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Mirrors the Phalanx-side guard Codex added during review; Semantix should enforce the same boundary before packets leave the repo."
+      "comment": "Landed packages/stx/src/spec-studio-no-staff-authority.js: deep-walking guard catches Staff-owned keys at any depth (requirements, findings, contextSources, groundedFacts, nextTurn.body, options). Case-insensitive fragment match handles mixed_case / snake_case. Free-text fields still allowed. STAFF_OWNED_FIELDS centralized; validateSemantixAlignmentPacket delegates. docs/plans authority-boundary report added. 23 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-sample-fixture-matrix",
