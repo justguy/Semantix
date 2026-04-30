@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 20,
-    "updatedAt": "2026-04-30T04:57:10.459Z"
+    "rev": 22,
+    "updatedAt": "2026-04-30T05:00:47.565Z"
   },
   "tasks": [
     {
@@ -542,7 +542,7 @@
       "id": "stx-spec-phalanx-capability-handshake",
       "title": "Expose a Phalanx capability-handshake adapter",
       "goal": "Provide a small callable Semantix adapter that Phalanx can use to verify Semantix packet generation, malformed-output handling, unavailable behavior, and prior-state preservation.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "integration",
         "priorityId": "p1"
@@ -583,7 +583,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "This is the Semantix-side counterpart to Phalanx task rm-semantix-capability-handshake."
+      "comment": "Landed packages/stx/src/spec-studio-handshake.js: describeSemantixCapabilities() returns the static handshake summary (contract version, supported triggers/purposes/sources, authority boundaries). createSemantixHandshakeAdapter(options) wraps the evaluator seam with degradation fallback + continuity guard, supports fixture object/function modes, evaluator mode, and unavailable mode (no opaque throws). isHandshakePacketLockable mirrors Phalanx lock criteria. 14 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-end-to-end-flow-proof",

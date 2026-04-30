@@ -12,3 +12,4 @@ export * from "./spec-studio-degraded.js";
 export * from "./spec-studio-readiness.js";
 export * from "./spec-studio-context-requests.js";
 export * from "./spec-studio-context-ingestion.js";
+export * from "./spec-studio-handshake.js";
