@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 22,
-    "updatedAt": "2026-04-30T05:00:47.565Z"
+    "rev": 24,
+    "updatedAt": "2026-04-30T05:05:10.683Z"
   },
   "tasks": [
     {
@@ -347,7 +347,7 @@
       "id": "stx-spec-user-turn-loop",
       "title": "Implement user-turn, reconsider, skip, and decide-all semantics",
       "goal": "Support the interactive Spec Studio loop where user answers, free text, reconsiderations, skipped gaps, and delegated Semantix decisions trigger packet re-evaluation.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "evaluator",
         "priorityId": "p1"
@@ -388,7 +388,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Makes the packet evolve across the actual Spec Studio conversation, not just initial prompt evaluation."
+      "comment": "Landed packages/stx/src/spec-studio-user-turn-loop.js: applyUserChoiceTurn / applyUserFreeTurn / applyReconsiderTurn / applySkipTurn / applyDecideAllTurn. Choice/free/decide-all resolve linked findings + open questions, reconsider supersedes prior decision and reopens findings with reopenReason, skip raises concern (never dismisses blockers), decided-by-semantix entries flagged for human review. sem_dec_ ids stay provisional. Continuity guard now allows reopen with audit reason. 21 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-degraded-behavior",

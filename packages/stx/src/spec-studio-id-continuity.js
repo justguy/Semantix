@@ -155,12 +155,17 @@ function compareFindings(priorList, nextList, violations, summary) {
     }
 
     if (priorFinding.resolved === true && nextFinding.resolved !== true) {
-      pushViolation(
-        violations,
-        ID_CONTINUITY_VIOLATION.FINDING_RESOLVED_REGRESSED,
-        id,
-        `Finding "${id}" was resolved in the prior packet but is unresolved in the next packet without an audit reason.`,
-      );
+      const hasAuditReason =
+        typeof nextFinding.reopenReason === "string" &&
+        nextFinding.reopenReason.length > 0;
+      if (!hasAuditReason) {
+        pushViolation(
+          violations,
+          ID_CONTINUITY_VIOLATION.FINDING_RESOLVED_REGRESSED,
+          id,
+          `Finding "${id}" was resolved in the prior packet but is unresolved in the next packet without an audit reason.`,
+        );
+      }
     }
 
     if (!fieldsEqual(priorFinding, nextFinding, FINDING_IDENTITY_FIELDS)) {
