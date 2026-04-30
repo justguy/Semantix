@@ -1,0 +1,626 @@
+{
+  "meta": {
+    "name": "Semantix",
+    "slug": "semantix",
+    "scratchpad": "Semantix Spec Studio tracker initialized. Claude should execute one bounded task at a time in dependency order and Codex will review with targeted tests.",
+    "swimlanes": [
+      {
+        "id": "contract",
+        "label": "Contract",
+        "description": "Semantix-side packet contracts, fixtures, and validator parity."
+      },
+      {
+        "id": "evaluator",
+        "label": "Evaluator",
+        "description": "Alignment evaluation, readiness, stable IDs, and user-turn semantics."
+      },
+      {
+        "id": "integration",
+        "label": "Integration",
+        "description": "Phalanx-facing handshake, context requests, and degraded behavior."
+      },
+      {
+        "id": "proof",
+        "label": "Proof",
+        "description": "End-to-end fixtures, reports, and review handoff evidence."
+      }
+    ],
+    "priorities": [
+      {
+        "id": "p0",
+        "label": "P0"
+      },
+      {
+        "id": "p1",
+        "label": "P1"
+      },
+      {
+        "id": "p2",
+        "label": "P2"
+      },
+      {
+        "id": "p3",
+        "label": "P3"
+      }
+    ],
+    "rev": 2,
+    "updatedAt": "2026-04-30T03:34:37.674Z"
+  },
+  "tasks": [
+    {
+      "id": "stx-spec-packet-contract-module",
+      "title": "Implement Semantix Spec Studio packet contract module",
+      "goal": "Add Semantix-side typed contract definitions and validation helpers for the Phalanx Spec Studio alignment packet, context request, context response, and degraded packet shapes.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "contract",
+        "priorityId": "p0"
+      },
+      "dependencies": [],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:85",
+        "docs/phalanx-spec-studio-integration-contract.md:101",
+        "docs/phalanx-spec-studio-integration-contract.md:246",
+        "docs/phalanx-spec-studio-integration-contract.md:255",
+        "docs/phalanx-spec-studio-integration-contract.md:269",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:64"
+      ],
+      "definition_of_done": [
+        "Repo-native named exports exist for SemantixAlignmentPacket, SemantixContextRequest, SemantixContextResponse, readiness values ready/needs_user/blocked, existingSystemContext modes new/update/unknown, contextSources, groundedFacts, findings, and nextTurn.",
+        "Validation rejects malformed readiness, missing existingSystemContext, ready+unknown mode, ready update without targetSurfaces, ready update without non-change/reuse/compatibility boundaries, grounded facts without evidenceRef, and Staff-owned output fields.",
+        "Validation accepts the upstream sample packet semantics for greenfield ready, update ready, ambiguous needs_user, duplicate/replacement blocked, Hoplon-grounded update, and degraded packets.",
+        "No Phalanx runtime code is modified from the Semantix repo."
+      ],
+      "constraints": [
+        "Do not treat Semantix as Staff or planner authority.",
+        "Do not emit Staff design docs, feature puzzles, verify commands, implementation plans, or file-change instructions from the packet.",
+        "Keep groundedFacts evidence-backed and separate from assumptions, risks, recommendations, findings, and requirements.",
+        "Use targeted tests only."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "First Semantix-side slice. Mirror the agreed Phalanx contract without wiring runtime launch behavior.",
+      "context": {
+        "claude_brief": "Read docs/phalanx-spec-studio-integration-contract.md and implement only the Semantix-owned packet contract surface. Keep exports named and add narrow tests.",
+        "suggested_tests": [
+          "npm run test --workspace @semantix/stx -- --runInBand or an equivalent targeted package test command if available"
+        ]
+      }
+    },
+    {
+      "id": "stx-spec-evaluator-interface",
+      "title": "Define Semantix evaluation request and response interface",
+      "goal": "Create the Semantix-side evaluation seam Phalanx can call or simulate: raw directive plus prior packet/session state in, alignment packet plus events/contextRequests out.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:56",
+        "docs/phalanx-spec-studio-integration-contract.md:600",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:150",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:90"
+      ],
+      "definition_of_done": [
+        "SemantixEvaluateRequest supports trigger initial/user_turn/reconsider/context_response/decide_all/skip.",
+        "Every non-initial request requires currentPacket, decisions, findings, and contextResponses arrays so stable IDs can be preserved.",
+        "SemantixEvaluateResponse returns packet, events, and contextRequests.",
+        "The seam can be called in tests without starting a long-running Semantix service."
+      ],
+      "constraints": [
+        "Do not hardcode a Project-Phalanx repo path as the only integration mode.",
+        "Do not query Hoplon directly from Semantix code.",
+        "Do not create a live server in this slice unless explicitly approved."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "This is the call boundary Phalanx capability-handshake work will rely on.",
+      "context": {
+        "claude_brief": "Implement the evaluator interface as a dormant adapter/helper with tests. Do not start services or wire runtime launch paths.",
+        "blocked_until": "stx-spec-packet-contract-module"
+      }
+    },
+    {
+      "id": "stx-spec-stable-id-continuity",
+      "title": "Preserve stable IDs across Spec Studio turns",
+      "goal": "Make Semantix preserve requirement, finding, decision, grounded-fact, and context-request IDs across multi-turn evaluation when Phalanx passes prior session state.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:36",
+        "docs/phalanx-spec-studio-integration-contract.md:135",
+        "docs/phalanx-spec-studio-integration-contract.md:1098",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:54"
+      ],
+      "definition_of_done": [
+        "A follow-up evaluation carries forward unchanged requirement and finding IDs.",
+        "Changed requirements/findings are represented through supersession rather than silent same-ID mutation.",
+        "Resolved findings remain auditable and are not silently removed.",
+        "Tests cover preserved IDs, superseded IDs, dropped IDs rejected/reported, and same-ID mutation rejected/reported."
+      ],
+      "constraints": [
+        "Do not rely on stateless one-shot Semantix calls for production Spec Studio sessions.",
+        "Decision IDs remain Phalanx-owned; Semantix may preserve or reference them but must not mint canonical audit decision IDs."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "This closes the most important Semantix-side prerequisite called out in the contract gaps."
+    },
+    {
+      "id": "stx-spec-readiness-and-update-safety",
+      "title": "Implement readiness classifier and update-safety rules",
+      "goal": "Teach Semantix to classify ready, needs_user, and blocked for greenfield, update, unknown, duplicate, replacement, and degraded cases using the Spec Studio contract rules.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-stable-id-continuity"
+      ],
+      "effort": "l",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:75",
+        "docs/phalanx-spec-studio-integration-contract.md:220",
+        "docs/phalanx-spec-studio-integration-contract.md:790",
+        "docs/phalanx-spec-studio-integration-contract.md:878",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:94"
+      ],
+      "definition_of_done": [
+        "Greenfield requests can be ready only when alignedRequirement, scope, must-level acceptance, and obvious exclusions are clear.",
+        "Update requests can be ready only with targetSurfaces plus doNotChange/reuse/compatibility boundaries.",
+        "Unknown new-vs-update classification returns needs_user with an open question and blocker finding.",
+        "Duplicate or replacement of an existing surface without explicit approval returns blocked or needs_user, never ready.",
+        "Negative requirements and do-not-change boundaries are first-class requirement facts."
+      ],
+      "constraints": [
+        "Missing update target surface means needs_user, not ready.",
+        "Do not treat update requests as greenfield when current-system context is missing.",
+        "Semantix readiness is advisory; Phalanx remains lock authority."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Core Semantix behavior: prevent the blank-slate-update failure mode before Staff receives context."
+    },
+    {
+      "id": "stx-spec-context-request-generator",
+      "title": "Generate Phalanx-brokered context requests",
+      "goal": "Emit focused SemantixContextRequest objects when existing-system facts materially affect readiness, instead of inventing facts or querying Hoplon directly.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface",
+        "stx-spec-readiness-and-update-safety"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:269",
+        "docs/phalanx-spec-studio-integration-contract.md:295",
+        "docs/phalanx-spec-studio-integration-contract.md:1100",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:132"
+      ],
+      "definition_of_done": [
+        "Semantix can emit context requests for identify_target_surface, summarize_current_behavior, find_existing_flow, find_reusable_component, find_constraints, collect_hoplon_evidence, and inspect_reference_artifact.",
+        "Requests include stable id, sessionId, iteration, purpose, query, requestedFrom, constraints, and reason.",
+        "Requests use requestedFrom/allowedSources to ask Phalanx to broker Hoplon/repo/upload/trace access.",
+        "Tests prove no direct Semantix-to-Hoplon call path exists in this slice."
+      ],
+      "constraints": [
+        "Semantix must not query Hoplon directly.",
+        "Do not make unavailable context a fabricated fact.",
+        "Only request context when it materially affects readiness or acceptance clarity."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "This is the Semantix half of the Phalanx-owned context broker boundary."
+    },
+    {
+      "id": "stx-spec-grounded-context-ingestion",
+      "title": "Ingest Phalanx context responses without mixing interpretation into facts",
+      "goal": "Consume SemantixContextResponse facts/artifacts from Phalanx and update packets while preserving evidence refs and separating grounded facts from Semantix interpretation.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-context-request-generator"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:230",
+        "docs/phalanx-spec-studio-integration-contract.md:315",
+        "docs/phalanx-spec-studio-integration-contract.md:1017",
+        "docs/phalanx-spec-studio-integration-contract.md:1102"
+      ],
+      "definition_of_done": [
+        "Context response facts with evidence refs become groundedFacts with stable FACT IDs, source, text, confidence, and evidenceRef.",
+        "Unavailable/empty/error context responses become contextSources with status unavailable or skipped and do not fabricate groundedFacts.",
+        "Semantix interpretations from grounded facts go into assumptions, risks, findings, recommendations, or requirement facts, not groundedFacts.",
+        "Tests cover successful Hoplon-grounded fact, unavailable context, skipped context, and fact/interpretation separation."
+      ],
+      "constraints": [
+        "Grounded facts require evidence refs.",
+        "Hoplon is context acquisition only, not spec authority.",
+        "User approval and locked artifact remain the desired-behavior authority."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Pairs with the context-request generator; closes the evidence-ref and separation guarantees."
+    },
+    {
+      "id": "stx-spec-user-turn-loop",
+      "title": "Implement user-turn, reconsider, skip, and decide-all semantics",
+      "goal": "Support the interactive Spec Studio loop where user answers, free text, reconsiderations, skipped gaps, and delegated Semantix decisions trigger packet re-evaluation.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-stable-id-continuity",
+        "stx-spec-readiness-and-update-safety"
+      ],
+      "effort": "l",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:56",
+        "docs/phalanx-spec-studio-integration-contract.md:372",
+        "docs/phalanx-spec-studio-integration-contract.md:418",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:129"
+      ],
+      "definition_of_done": [
+        "Choice and free-text user turns update requirements, findings, decisions, openQuestions, coverage hints, and nextTurn deterministically enough for tests.",
+        "Reconsider supersedes prior decisions or requirements instead of rewriting history.",
+        "Skip or flag-as-gap preserves an auditable finding or concern.",
+        "decided-by-semantix decisions are flagged for human visibility and never treated as canonical Phalanx audit IDs."
+      ],
+      "constraints": [
+        "Semantix may propose decision semantics, but Phalanx mints canonical decision IDs.",
+        "Findings cannot be silently dismissed.",
+        "Do not implement Phalanx persistence in Semantix."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Makes the packet evolve across the actual Spec Studio conversation, not just initial prompt evaluation."
+    },
+    {
+      "id": "stx-spec-degraded-behavior",
+      "title": "Produce honest degraded/unavailable Semantix packet behavior",
+      "goal": "Ensure Semantix partial failure returns needs_user with blocker findings and never silently passes a degraded state into lock or Staff planning.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "s",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:630",
+        "docs/phalanx-spec-studio-integration-contract.md:648",
+        "docs/phalanx-spec-studio-integration-contract.md:1105",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:158"
+      ],
+      "definition_of_done": [
+        "Partial Semantix degraded packet uses source semantix, readiness needs_user, a blocker finding, alignmentPct 0 unless prior packet is explicitly stale-safe, and no new ungrounded requirement facts.",
+        "Malformed or unavailable model/evaluator output degrades honestly in the Semantix adapter surface.",
+        "Tests prove degraded packets validate but are not lockable by downstream contract expectations.",
+        "Docs/report state that fully unreachable Semantix fallback envelopes remain Phalanx-owned."
+      ],
+      "constraints": [
+        "Do not mark degraded packets ready.",
+        "Do not start or modify Phalanx run behavior.",
+        "Do not invent facts during degradation."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Critical trust behavior: failure must be visible and non-lockable."
+    },
+    {
+      "id": "stx-spec-no-staff-authority-guard",
+      "title": "Guard against Semantix emitting Staff-owned planning content",
+      "goal": "Prevent Semantix output from carrying Staff design docs, feature puzzles, verify commands, implementation plans, or file-change authority inside packets or next-turn bodies.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "contract",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "s",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:9",
+        "docs/phalanx-spec-studio-integration-contract.md:480",
+        "docs/phalanx-spec-studio-integration-contract.md:1107",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:178"
+      ],
+      "definition_of_done": [
+        "Validator/evaluator rejects or reports Staff-owned fields at any packet depth, including nextTurn bodies and requirement extras.",
+        "Semantix can recommend clarification, assumptions, risks, findings, and acceptance criteria but not Staff implementation plans.",
+        "Tests cover top-level and nested Staff-owned output bleed.",
+        "Execution report documents the authority boundary."
+      ],
+      "constraints": [
+        "Staff plans only after lock from the locked artifact.",
+        "Semantix aligns user intent; it does not execute code or choose verify commands.",
+        "Do not weaken packet passthrough so much that Staff-owned fields can hide in nested payloads."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Mirrors the Phalanx-side guard Codex added during review; Semantix should enforce the same boundary before packets leave the repo."
+    },
+    {
+      "id": "stx-spec-sample-fixture-matrix",
+      "title": "Build upstream sample fixture and regression matrix",
+      "goal": "Create compact Semantix-side fixtures and targeted tests for all sample packet flows and evaluator transitions required by the contract.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "proof",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-readiness-and-update-safety",
+        "stx-spec-grounded-context-ingestion",
+        "stx-spec-degraded-behavior",
+        "stx-spec-no-staff-authority-guard"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:708",
+        "docs/phalanx-spec-studio-integration-contract.md:790",
+        "docs/phalanx-spec-studio-integration-contract.md:878",
+        "docs/phalanx-spec-studio-integration-contract.md:959",
+        "docs/phalanx-spec-studio-integration-contract.md:1017"
+      ],
+      "definition_of_done": [
+        "Fixtures cover greenfield ready, update ready, ambiguous needs_user, replacement blocked, Hoplon-grounded update, degraded/unavailable, malformed context, and nested Staff-owned field bleed.",
+        "Targeted tests run without a live Phalanx or Hoplon service.",
+        "Fixtures stay compact and do not copy unrelated prose from the contract docs.",
+        "A report lists what samples were used and what remains out of scope."
+      ],
+      "constraints": [
+        "Do not depend on a live Semantix service process in fixture tests.",
+        "Do not copy large doc sections into fixtures.",
+        "Do not use fixture success as proof of Phalanx lock authority."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/",
+        "packages/core/src/",
+        "packages/stx/src/",
+        "shared/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "This gives Codex a compact review harness for each future Claude slice."
+    },
+    {
+      "id": "stx-spec-phalanx-capability-handshake",
+      "title": "Expose a Phalanx capability-handshake adapter",
+      "goal": "Provide a small callable Semantix adapter that Phalanx can use to verify Semantix packet generation, malformed-output handling, unavailable behavior, and prior-state preservation.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface",
+        "stx-spec-sample-fixture-matrix"
+      ],
+      "effort": "m",
+      "references": [
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:90",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_PACKET_CONTRACT_CLAUDE_PROMPT.md:46",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:48",
+        "docs/phalanx-spec-studio-integration-contract.md:36"
+      ],
+      "definition_of_done": [
+        "Adapter can run in fixture/simulated mode from Phalanx tests without a long-running Semantix service.",
+        "Adapter returns packets that pass the Semantix-side and Phalanx-side contract validators.",
+        "Unavailable adapter behavior is explicit and degraded, not a thrown opaque failure.",
+        "Tests cover successful packet validation, malformed response, unavailable Semantix, and prior-state ID preservation."
+      ],
+      "constraints": [
+        "Do not require editing Project-Phalanx from this task.",
+        "Do not make Semantix unavailable a terminal Phalanx pipeline failure.",
+        "Do not hardcode one machine-specific repo path as the only integration mode."
+      ],
+      "expected_changes": [
+        "packages/stx/src/",
+        "packages/core/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "This is the Semantix-side counterpart to Phalanx task rm-semantix-capability-handshake."
+    },
+    {
+      "id": "stx-spec-end-to-end-flow-proof",
+      "title": "Prove Semantix-side Spec Studio evaluator flows end to end",
+      "goal": "Run a focused Semantix-side proof for new, update, ambiguous, blocked replacement, degraded, Hoplon-grounded context-response, and multi-turn reconsider flows.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "proof",
+        "priorityId": "p2"
+      },
+      "dependencies": [
+        "stx-spec-phalanx-capability-handshake",
+        "stx-spec-user-turn-loop"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:1138",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:222",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:212"
+      ],
+      "definition_of_done": [
+        "A focused proof suite exercises the evaluator through greenfield ready, update ready, ambiguous needs_user, blocked replacement, degraded, Hoplon-grounded update, reconsider/supersede, and skipped-gap cases.",
+        "The proof asserts packet validity, stable IDs, fact/interpretation separation, no Staff-owned output, and correct readiness behavior.",
+        "The execution report states exactly which flows are Semantix-side only and which require Phalanx lock/session/handoff work.",
+        "Tracker task context records test commands and results for Codex review."
+      ],
+      "constraints": [
+        "Do not claim Phalanx UI/session/lock/Staff integration is complete from Semantix-only proof.",
+        "Do not start pipeline runs automatically.",
+        "Use targeted tests and a concise execution report."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/",
+        "packages/core/src/",
+        "packages/stx/src/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Final Semantix-side proof before Codex review and Phalanx-side handshake integration."
+    }
+  ]
+}
