@@ -43,8 +43,8 @@
         "label": "P3"
       }
     ],
-    "rev": 12,
-    "updatedAt": "2026-04-30T04:39:37.179Z"
+    "rev": 14,
+    "updatedAt": "2026-04-30T04:46:10.350Z"
   },
   "tasks": [
     {
@@ -202,7 +202,7 @@
       "id": "stx-spec-readiness-and-update-safety",
       "title": "Implement readiness classifier and update-safety rules",
       "goal": "Teach Semantix to classify ready, needs_user, and blocked for greenfield, update, unknown, duplicate, replacement, and degraded cases using the Spec Studio contract rules.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "evaluator",
         "priorityId": "p0"
@@ -245,7 +245,8 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Core Semantix behavior: prevent the blank-slate-update failure mode before Staff receives context."
+      "comment": "Landed packages/stx/src/spec-studio-readiness.js: classifyReadiness handles greenfield (alignedRequirement+scope+must-acceptance+exclusions), update (targetSurfaces + doNotChange/reuse/compatibility), unknown (needs_user + Q-MODE-001 + blocker), duplicate/replacement (blocked/needs_user/explicit). applyReadinessVerdict merges classifier output preserving user findings. promoteNegativeRequirements lifts negatives + doNotChange to first-class facts. docs/plans report added. 24 tests.",
+      "assignee": "claude-opus"
     },
     {
       "id": "stx-spec-context-request-generator",

@@ -9,3 +9,4 @@ export * from "./spec-studio-evaluator.js";
 export * from "./spec-studio-id-continuity.js";
 export * from "./spec-studio-no-staff-authority.js";
 export * from "./spec-studio-degraded.js";
+export * from "./spec-studio-readiness.js";
