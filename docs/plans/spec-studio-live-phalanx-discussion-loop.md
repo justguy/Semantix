@@ -101,6 +101,20 @@ HTTP endpoint.
    `evaluatorSource: "live:semantix"` and confirm the session evidence
    mode is live, not degraded.
 
+   **GATE**: `PHALANX_SEMANTIX_HTTP_URL` wiring requires `ss-llm-008`
+   (LLM-backed readiness proof) to be complete first. The server defaults to
+   the deterministic probe evaluator unless `SPEC_STUDIO_EVALUATOR=llm` is
+   set and a real LLM connector is configured. Verify the server is in LLM
+   mode before connecting Phalanx:
+
+   ```bash
+   curl http://127.0.0.1:<port>/spec-studio/mode
+   # expected: {"evaluatorMode":"llm","ready":true}
+   ```
+
+   See `docs/spec-studio-llm-proof.md` for the proof evidence required
+   before this gate opens.
+
 ## Already Done On Semantix End
 
 - The public package export includes all Spec Studio modules.

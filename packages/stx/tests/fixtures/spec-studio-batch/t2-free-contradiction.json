@@ -1,0 +1,14 @@
+{
+  "sessionId": "sess_batch_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_batch_002",
+    "body": {
+      "kind": "free",
+      "text": "Users submit expense reports for approval. We'll route approvals through the existing SAP Finance API."
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

@@ -21,6 +21,11 @@ import {
   validateSemantixContextResponse,
 } from "./spec-studio-contracts.js";
 
+export const EVALUATOR_MODE = Object.freeze({
+  PROBE: "probe",
+  LLM: "llm",
+});
+
 export const EVALUATE_TRIGGER = Object.freeze({
   INITIAL: "initial",
   USER_TURN: "user_turn",
@@ -46,6 +51,7 @@ export const USER_TURN_BODY_KIND_VALUES = Object.freeze([
   "skip",
   "delegate",
   "reconsider",
+  "batch",
 ]);
 
 /**
@@ -219,6 +225,15 @@ function validateUserTurn(userTurn, errors) {
         "$.userTurn.body.priorTurnId",
         "user_turn_missing_prior_turn_id",
         "userTurn body of kind reconsider requires a priorTurnId.",
+      );
+    }
+  } else if (userTurn.body.kind === "batch") {
+    if (!Array.isArray(userTurn.body.answers) || userTurn.body.answers.length === 0) {
+      pushError(
+        errors,
+        "$.userTurn.body.answers",
+        "user_turn_batch_missing_answers",
+        "userTurn body of kind batch requires a non-empty answers array.",
       );
     }
   }

@@ -1,0 +1,16 @@
+{
+  "sessionId": "sess_mt_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_mt_005",
+    "body": {
+      "kind": "choice",
+      "picked": "OPT-DEFER-CONFIRM",
+      "label": "Confirmed — defer auth to a later sprint",
+      "questionTurnId": "T-MT-Q5"
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

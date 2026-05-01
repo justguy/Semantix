@@ -12,7 +12,9 @@
     "build:ui": "node scripts/build-ui.js",
     "preview:ui": "node src/cli.js serve",
     "test": "node --test tests/*.test.js",
-    "probe:spec-studio-json": "node scripts/probe-spec-studio-json.js"
+    "probe:spec-studio-json": "node scripts/probe-spec-studio-json.js",
+    "probe:spec-studio-multi-turn": "node scripts/probe-spec-studio-multi-turn.js",
+    "probe:spec-studio-batch": "node scripts/probe-spec-studio-batch.js"
   },
   "exports": {
     ".": "./src/index.js",

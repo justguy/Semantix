@@ -93,7 +93,7 @@ test("EVALUATE_TRIGGER exposes the six required trigger values", () => {
 test("USER_TURN_BODY_KIND_VALUES enumerates supported bodies", () => {
   assert.deepEqual(
     [...USER_TURN_BODY_KIND_VALUES],
-    ["text", "free", "choice", "skip", "delegate", "reconsider"],
+    ["text", "free", "choice", "skip", "delegate", "reconsider", "batch"],
   );
 });
 

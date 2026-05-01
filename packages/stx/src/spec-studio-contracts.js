@@ -598,12 +598,12 @@ function validateSemantixTurnInternal(turn, path, errors) {
     pushError(errors, `${path}.body`, "next_turn_missing_body", "nextTurn requires a body.");
   } else if (!isPlainObject(turn.body)) {
     pushError(errors, `${path}.body`, "next_turn_invalid_body", "nextTurn.body must be an object.");
-  } else if (turn.body.kind && !["question", "finding"].includes(turn.body.kind)) {
+  } else if (turn.body.kind && !["question", "finding", "batch"].includes(turn.body.kind)) {
     pushError(
       errors,
       `${path}.body.kind`,
       "next_turn_invalid_body_kind",
-      "nextTurn.body.kind must be \"question\" or \"finding\".",
+      "nextTurn.body.kind must be \"question\", \"finding\", or \"batch\".",
     );
   } else if (turn.body.kind === "question" && !isNonEmptyString(turn.body.q)) {
     pushError(
@@ -612,6 +612,15 @@ function validateSemantixTurnInternal(turn, path, errors) {
       "next_turn_question_missing_text",
       "nextTurn question bodies require q.",
     );
+  } else if (turn.body.kind === "batch") {
+    if (!Array.isArray(turn.body.questions) || turn.body.questions.length === 0) {
+      pushError(
+        errors,
+        `${path}.body.questions`,
+        "next_turn_batch_missing_questions",
+        "nextTurn batch bodies require a non-empty questions array.",
+      );
+    }
   } else if (turn.body.kind === "finding" && !isNonEmptyString(turn.findingRef)) {
     pushError(
       errors,

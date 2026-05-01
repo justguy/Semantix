@@ -1,0 +1,16 @@
+{
+  "sessionId": "sess_mt_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_mt_001",
+    "body": {
+      "kind": "choice",
+      "picked": "OPT-NEW",
+      "label": "New system",
+      "questionTurnId": "T-MT-Q1"
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

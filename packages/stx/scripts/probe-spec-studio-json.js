@@ -17,8 +17,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(__dirname, "..", "tests", "fixtures", "spec-studio-manual-json");
 export const DEFAULT_PROBE_URL = "http://127.0.0.1:4401/spec-studio/evaluate";
 
-export function parseProbeUrl(args = process.argv.slice(2)) {
+export function parseProbeArgs(args = process.argv.slice(2)) {
   let url = null;
+  let mode = null;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--url") {
@@ -44,9 +45,44 @@ export function parseProbeUrl(args = process.argv.slice(2)) {
       url = value;
       continue;
     }
+    if (arg === "--mode") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--mode requires a value (probe or llm).");
+      }
+      if (!["probe", "llm"].includes(value)) {
+        throw new Error(`--mode must be "probe" or "llm", got "${value}".`);
+      }
+      mode = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--mode=")) {
+      const value = arg.slice("--mode=".length);
+      if (!["probe", "llm"].includes(value)) {
+        throw new Error(`--mode must be "probe" or "llm", got "${value}".`);
+      }
+      mode = value;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      console.log([
+        "Usage: probe-spec-studio-json.js [options]",
+        "",
+        "Options:",
+        "  --url <url>        Spec Studio evaluate endpoint (default: http://127.0.0.1:4401/spec-studio/evaluate)",
+        "  --mode probe|llm   Expected evaluator mode. When --mode llm, the probe checks GET /spec-studio/mode first.",
+        "  --help             Show this help message.",
+      ].join("\n"));
+      process.exit(0);
+    }
     throw new Error(`Unknown argument "${arg}".`);
   }
-  return url ?? DEFAULT_PROBE_URL;
+  return { url: url ?? DEFAULT_PROBE_URL, mode: mode ?? "probe" };
+}
+
+export function parseProbeUrl(args = process.argv.slice(2)) {
+  return parseProbeArgs(args).url;
 }
 
 function loadFixture(name) {
@@ -106,11 +142,62 @@ function probeError(message, body) {
   return error;
 }
 
+async function getJson(url) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = http.request({
+      hostname: parsed.hostname,
+      port: parsed.port ? Number(parsed.port) : undefined,
+      path: `${parsed.pathname}${parsed.search}`,
+      method: "GET",
+      headers: { "accept": "application/json" },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+        } catch {
+          resolve({ status: res.statusCode, body: null });
+        }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 export async function runProbe({
   url = DEFAULT_PROBE_URL,
+  mode = "probe",
   log = console.log,
 } = {}) {
-  log(`Probing: ${url}`);
+  log(`Probing: ${url} (expected mode: ${mode})`);
+
+  // Check evaluator mode when --mode is specified
+  const baseUrl = url.replace(/\/spec-studio\/evaluate.*$/, "");
+  const modeUrl = `${baseUrl}/spec-studio/mode`;
+  try {
+    const modeResult = await getJson(modeUrl);
+    if (modeResult.status === 200 && modeResult.body) {
+      const serverMode = modeResult.body.evaluatorMode ?? "unknown";
+      log(`[mode] server evaluatorMode: ${serverMode}, ready: ${modeResult.body.ready}`);
+      if (serverMode !== mode) {
+        throw probeError(
+          `expected evaluatorMode="${mode}" but server reports "${serverMode}"`,
+          modeResult.body,
+        );
+      }
+    }
+  } catch (error) {
+    if (error?.body !== undefined) {
+      throw error;
+    }
+    throw probeError(
+      `could not verify evaluator mode at ${modeUrl}`,
+      { error: "MODE_CHECK_FAILED", message: error?.message ?? String(error) },
+    );
+  }
 
   const initial = loadFixture("initial.json");
   log("\n[1] POST initial.json");
@@ -156,7 +243,8 @@ export async function runProbe({
 }
 
 async function main() {
-  await runProbe({ url: parseProbeUrl() });
+  const { url, mode } = parseProbeArgs();
+  await runProbe({ url, mode });
 }
 
 const entryPath = process.argv[1] ? fileURLToPath(import.meta.url) === process.argv[1] : false;

@@ -10,6 +10,7 @@ import { createSemantixHandshakeAdapter } from "../src/spec-studio-handshake.js"
 import { isPacketLockable } from "../src/spec-studio-degraded.js";
 import {
   DEFAULT_PROBE_URL,
+  parseProbeArgs,
   parseProbeUrl,
   runProbe,
 } from "../scripts/probe-spec-studio-json.js";
@@ -71,6 +72,30 @@ async function postRaw(url, rawBody) {
     });
     req.on("error", reject);
     req.write(data);
+    req.end();
+  });
+}
+
+async function get(url) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = http.request({
+      hostname: parsed.hostname,
+      port: Number(parsed.port),
+      path: parsed.pathname,
+      method: "GET",
+      headers: {
+        "accept": "application/json",
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve({
+        status: res.statusCode,
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+      }));
+    });
+    req.on("error", reject);
     req.end();
   });
 }
@@ -137,6 +162,10 @@ test("free text user turn returns 200 needs_user packet", async (t) => {
 
 test("manual probe URL parser defaults and validates CLI args", () => {
   assert.equal(parseProbeUrl([]), DEFAULT_PROBE_URL);
+  assert.deepEqual(parseProbeArgs(["--mode", "llm"]), {
+    url: DEFAULT_PROBE_URL,
+    mode: "llm",
+  });
   assert.equal(
     parseProbeUrl(["--url", "http://127.0.0.1:9000/spec-studio/evaluate"]),
     "http://127.0.0.1:9000/spec-studio/evaluate",
@@ -169,6 +198,44 @@ test("manual probe runner completes the two-turn HTTP discussion loop", async (t
   assert.equal(result.first.packet.readiness, "needs_user");
   assert.equal(result.second.packet.readiness, "ready");
   assert.equal(result.second.packet.coverage.alignmentPct, 100);
+});
+
+test("manual probe runner fails closed when expected evaluator mode does not match server", async (t) => {
+  const { url, close } = await startServer();
+  t.after(close);
+
+  await assert.rejects(
+    () => runProbe({ url, mode: "llm", log: () => {} }),
+    /expected evaluatorMode="llm" but server reports "probe"/,
+  );
+});
+
+test("server reports unavailable instead of falling back to probe when llm mode lacks connector", async (t) => {
+  const previousMode = process.env.SPEC_STUDIO_EVALUATOR;
+  process.env.SPEC_STUDIO_EVALUATOR = "llm";
+  t.after(() => {
+    if (previousMode === undefined) {
+      delete process.env.SPEC_STUDIO_EVALUATOR;
+    } else {
+      process.env.SPEC_STUDIO_EVALUATOR = previousMode;
+    }
+  });
+
+  const { url, close } = await startServer();
+  t.after(close);
+
+  const modeUrl = url.replace("/spec-studio/evaluate", "/spec-studio/mode");
+  const mode = await get(modeUrl);
+  assert.equal(mode.status, 200);
+  assert.deepEqual(mode.body, {
+    evaluatorMode: "unavailable",
+    ready: false,
+  });
+
+  const res = await post(url, loadFixture("initial.json"));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.packet.readiness, "needs_user");
+  assert.match(res.body.packet.findings[0].text, /no LLM connector/i);
 });
 
 test("skip trigger returns 200 valid packet", async (t) => {

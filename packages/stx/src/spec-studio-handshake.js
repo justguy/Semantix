@@ -284,6 +284,7 @@ export function createSemantixHandshakeAdapter(options = {}) {
     describe: describeSemantixCapabilities,
     evaluate,
     isAvailable: () => !unavailable,
+    evaluatorMode: typeof evaluator === "function" && evaluator.evaluatorMode ? evaluator.evaluatorMode : "probe",
     capabilities: describeSemantixCapabilities(),
   };
 }

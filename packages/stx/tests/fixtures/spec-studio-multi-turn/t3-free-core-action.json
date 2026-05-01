@@ -1,0 +1,14 @@
+{
+  "sessionId": "sess_mt_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_mt_003",
+    "body": {
+      "kind": "free",
+      "text": "Users need to submit expense reports and track approval status."
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

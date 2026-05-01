@@ -6,6 +6,7 @@ import { URL } from "node:url";
 
 import { createSemantixHandshakeAdapter } from "../spec-studio-handshake.js";
 import { createSpecStudioJsonProbeEvaluator } from "../spec-studio-json-probe-evaluator.js";
+import { createLlmSpecStudioEvaluator } from "../spec-studio-llm-evaluator.js";
 
 const MAIN_UI_ROUTE = "/index.html";
 const LEGACY_UI_ROUTES = new Set([
@@ -139,6 +140,10 @@ function routeMatch(pathname, method) {
 
   if (method === "POST" && pathname === "/spec-studio/evaluate") {
     return { name: "spec-studio.evaluate" };
+  }
+
+  if (method === "GET" && pathname === "/spec-studio/mode") {
+    return { name: "spec-studio.mode" };
   }
 
   if (runs !== "runs" || !runId) {
@@ -365,10 +370,24 @@ function handleError(response, error) {
   });
 }
 
-export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd, specStudioAdapter } = {}) {
-  const adapter = specStudioAdapter ?? createSemantixHandshakeAdapter({
-    evaluator: createSpecStudioJsonProbeEvaluator(),
-  });
+export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd, specStudioAdapter, connector } = {}) {
+  let adapter = specStudioAdapter;
+  if (!adapter) {
+    const llmRequested = process.env.SPEC_STUDIO_EVALUATOR === "llm";
+    if (llmRequested && !connector) {
+      adapter = createSemantixHandshakeAdapter({
+        unavailable: true,
+        unavailableReason:
+          "SPEC_STUDIO_EVALUATOR=llm was requested, but no LLM connector is configured.",
+      });
+      adapter.evaluatorMode = "unavailable";
+    } else {
+      const evaluator = llmRequested
+        ? createLlmSpecStudioEvaluator({ connector })
+        : createSpecStudioJsonProbeEvaluator();
+      adapter = createSemantixHandshakeAdapter({ evaluator });
+    }
+  }
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -437,6 +456,14 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         });
 
         return undefined;
+      }
+
+      if (match.name === "spec-studio.mode") {
+        const evaluatorMode = adapter.evaluatorMode ?? adapter.evaluate?.evaluatorMode ?? "probe";
+        return json(response, 200, {
+          evaluatorMode,
+          ready: evaluatorMode === "llm",
+        });
       }
 
       if (match.name === "spec-studio.evaluate") {

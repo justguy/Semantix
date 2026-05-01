@@ -92,7 +92,7 @@ function event(kind, sessionId, iteration) {
 }
 
 export function createSpecStudioJsonProbeEvaluator() {
-  return function evaluate(request) {
+  const evaluate = function evaluate(request) {
     const sessionId = request.sessionId;
     const priorPacket = request.currentPacket ?? null;
     const iteration = (priorPacket?.iteration ?? -1) + 1;
@@ -121,4 +121,6 @@ export function createSpecStudioJsonProbeEvaluator() {
       contextRequests: [],
     };
   };
+  evaluate.evaluatorMode = "probe";
+  return evaluate;
 }

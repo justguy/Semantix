@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Spec Studio JSON Probe swimlane is 7/7 complete. Review follow-up fixed deterministic probe output and probe-spec-studio-json URL parsing/default handling before commit. Verification: spec-studio-manual-json-http 13/13, spec-studio-phalanx-request-probe 3/3, npm test @semantix/stx 369/369 and @semantix/control-plane 27/27.",
+    "scratchpad": "Verification correction: Spec Studio Real Evaluator implementation and mocked tests exist, but final live LLM manual proof is not recorded. ss-llm-006 and ss-llm-008 are reopened/not_started. Fixed fail-closed behavior so --mode llm aborts on evaluatorMode mismatch and SPEC_STUDIO_EVALUATOR=llm without connector reports unavailable instead of silently falling back to probe.",
     "swimlanes": [
       {
         "id": "contract",
@@ -28,6 +28,11 @@
         "id": "spec-studio-json-probe",
         "label": "Spec Studio JSON Probe",
         "description": "Semantix-only manual JSON discussion loop before live Phalanx wiring."
+      },
+      {
+        "id": "spec-studio-real-evaluator",
+        "label": "Spec Studio Real Evaluator",
+        "description": "LLM-backed Semantix alignment evaluator behind /spec-studio/evaluate; JSON probe remains explicit test/probe mode only."
       }
     ],
     "priorities": [
@@ -48,8 +53,8 @@
         "label": "P3"
       }
     ],
-    "rev": 34,
-    "updatedAt": "2026-04-30T23:31:14.902Z"
+    "rev": 44,
+    "updatedAt": "2026-05-01T03:33:12.507Z"
   },
   "tasks": [
     {
@@ -934,6 +939,310 @@
       },
       "assignee": "claude",
       "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-001",
+      "title": "Make Spec Studio evaluator backing explicit and fail closed",
+      "goal": "Remove ambiguity around /spec-studio/evaluate by making the active evaluator mode visible and preventing the deterministic probe evaluator from being mistaken for production readiness.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "packages/stx/src/http/server.js:368",
+        "packages/stx/src/spec-studio-json-probe-evaluator.js:1",
+        "docs/spec-studio-manual-json-probe.md:1"
+      ],
+      "definition_of_done": [
+        "The HTTP route exposes or logs the active evaluator backing as one of probe, llm, or unavailable.",
+        "Default behavior is documented and cannot be described as production-ready when backed by the probe evaluator.",
+        "Tests assert that probe mode is explicitly labeled in responses, health, docs, or an equivalent observable surface.",
+        "Manual JSON docs clearly distinguish transport/probe readiness from LLM-backed readiness."
+      ],
+      "constraints": [
+        "Do not remove the probe evaluator; keep it for regression and transport tests.",
+        "Do not claim Phalanx integration readiness from probe-mode evidence."
+      ],
+      "context": {
+        "reason": "Prevents repeating the readiness ambiguity that made a mock transport look like a real evaluator."
+      },
+      "tags": [
+        "readiness",
+        "safety",
+        "probe-mode"
+      ],
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-002",
+      "title": "Design the LLM-backed Spec Studio evaluator contract",
+      "goal": "Define the concrete prompt, input synthesis, output schema, and degradation expectations for a real Semantix evaluator that consumes SemantixEvaluateRequest and emits SemantixEvaluateResponse.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-evaluator.js:1",
+        "packages/stx/src/spec-studio-contracts.js:1",
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:1"
+      ],
+      "definition_of_done": [
+        "A repo-local design/spec document names the real evaluator module, injected dependencies, model connector boundary, prompt inputs, and output schema.",
+        "The spec covers initial, user_turn, reconsider, skip, decide_all, and context_response triggers.",
+        "The spec states how decisions, findings, currentPacket, and contextResponses are summarized into the LLM request.",
+        "The spec defines failure behavior: malformed model output degrades honestly and never returns ready."
+      ],
+      "constraints": [
+        "No Phalanx runtime dependency in the Semantix evaluator.",
+        "No Staff-owned fields may be produced by the evaluator."
+      ],
+      "context": {
+        "reason": "Locks down what real evaluator means before writing adapter code."
+      },
+      "tags": [
+        "design",
+        "llm",
+        "contract"
+      ],
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "ss-llm-001",
+        "ss-llm-002"
+      ],
+      "id": "ss-llm-003",
+      "title": "Implement the real LLM-backed Spec Studio evaluator adapter",
+      "goal": "Add an evaluator implementation that calls the configured LLM/model connector and returns contract-valid SemantixEvaluateResponse packets instead of canned probe output.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "packages/stx/src/spec-studio-evaluator.js:1",
+        "packages/stx/src/http/server.js:368",
+        "packages/stx/src/application.js:268"
+      ],
+      "definition_of_done": [
+        "A new real evaluator module exists and is separate from spec-studio-json-probe-evaluator.js.",
+        "The evaluator uses a configured LLM/model connector rather than deterministic canned responses.",
+        "The evaluator handles at least initial and user_turn triggers with non-canned packet generation.",
+        "The route can be configured to use the LLM evaluator, while probe mode remains explicitly opt-in or explicitly labeled.",
+        "All evaluator outputs are validated by the existing Semantix response validator."
+      ],
+      "constraints": [
+        "Do not wire Phalanx as part of this task.",
+        "Do not silently fall back from LLM mode to probe mode."
+      ],
+      "context": {
+        "reason": "This is the missing production behavior behind the HTTP transport."
+      },
+      "tags": [
+        "implementation",
+        "llm",
+        "evaluator"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003"
+      ],
+      "id": "ss-llm-004",
+      "title": "Add robust LLM output repair and degraded handling",
+      "goal": "Ensure malformed, partial, or failed LLM evaluator output becomes an honest non-lockable degraded packet instead of a fake ready packet or a hard-to-debug transport failure.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-degraded.js:1",
+        "packages/stx/src/spec-studio-handshake.js:1",
+        "packages/stx/src/spec-studio-contracts.js:1"
+      ],
+      "definition_of_done": [
+        "Malformed model JSON is caught and converted to a needs_user degraded packet with blocker finding.",
+        "Ready packets with coverage/findings contradictions are demoted or rejected by tests.",
+        "LLM timeout/provider failure never emits readiness ready.",
+        "Errors preserve enough diagnostic detail for manual JSON debugging without leaking unrelated runtime noise."
+      ],
+      "constraints": [
+        "Never mark degraded output lockable.",
+        "Keep Phalanx lock authority semantics unchanged."
+      ],
+      "context": {
+        "reason": "A real LLM path needs failure semantics before live integration."
+      },
+      "tags": [
+        "degraded",
+        "validation",
+        "llm"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003",
+        "ss-llm-004"
+      ],
+      "id": "ss-llm-005",
+      "title": "Add mocked-LLM regression tests for real iterative discussion",
+      "goal": "Prove the real evaluator path performs an iterative discussion loop using mocked LLM responses, not the deterministic probe evaluator.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js:1",
+        "packages/stx/tests/spec-studio-evaluator.test.js:1"
+      ],
+      "definition_of_done": [
+        "Tests run the route in LLM evaluator mode with mocked model responses.",
+        "Initial request can produce a non-canned Semantix nextTurn derived from the request.",
+        "A follow-up user_turn updates the packet based on prior currentPacket and answer.",
+        "Tests fail if the probe evaluator is used accidentally in LLM-mode scenarios.",
+        "All new tests pass with the existing workspace test suite."
+      ],
+      "constraints": [
+        "Mock the LLM deterministically in tests; do not require network/model access in CI.",
+        "Keep probe-mode tests separate and clearly named."
+      ],
+      "context": {
+        "reason": "This is the first proof that discussion behavior is real rather than canned."
+      },
+      "tags": [
+        "tests",
+        "discussion-loop",
+        "llm"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003",
+        "ss-llm-004",
+        "ss-llm-005"
+      ],
+      "id": "ss-llm-006",
+      "title": "Add manual JSON proof for LLM-backed evaluator mode",
+      "goal": "Extend the manual JSON probe so an operator can run the same initial -> follow-up flow against the real LLM evaluator and see evidence that the output is not the canned probe path.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/scripts/probe-spec-studio-json.js:1",
+        "docs/spec-studio-manual-json-probe.md:1",
+        "packages/stx/tests/fixtures/spec-studio-manual-json/initial.json:1"
+      ],
+      "definition_of_done": [
+        "Manual instructions include how to start Semantix in LLM evaluator mode.",
+        "Probe output identifies evaluator backing as llm.",
+        "Manual proof requires at least initial -> needs_user and one follow-up turn that changes the packet based on the answer.",
+        "Docs state that probe-mode success is insufficient for Phalanx readiness.",
+        "A captured proof command/result is recorded in the tracker task context or docs."
+      ],
+      "constraints": [
+        "Do not require Phalanx for this proof.",
+        "Do not count deterministic probe output as satisfying this task."
+      ],
+      "context": {
+        "reason": "This is the missing pre-Phalanx proof the user originally needed.",
+        "verification_status": "Not complete: docs and probe support exist, but no live LLM-backed manual JSON proof has been recorded against a running instance."
+      },
+      "tags": [
+        "manual-proof",
+        "json",
+        "llm"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-006"
+      ],
+      "id": "ss-llm-007",
+      "title": "Gate Phalanx integration on real evaluator proof",
+      "goal": "Update docs/tracker handoff so PHALANX_SEMANTIX_HTTP_URL is not treated as ready until the LLM-backed manual JSON proof is complete.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:1",
+        "docs/spec-studio-manual-json-probe.md:1",
+        ".llm-tracker/trackers/semantix.json:1"
+      ],
+      "definition_of_done": [
+        "Phalanx integration docs distinguish transport-ready, probe-ready, LLM-backed ready, and production-ready states.",
+        "The next Phalanx task references the LLM-backed manual JSON proof as a prerequisite.",
+        "No doc says no Semantix code changes are required unless the route is actually backed by the real evaluator.",
+        "Tracker scratchpad records the current readiness state accurately."
+      ],
+      "constraints": [
+        "Do not mark live Phalanx integration unblocked from probe-only evidence."
+      ],
+      "context": {
+        "reason": "Prevents repeating the false readiness handoff."
+      },
+      "tags": [
+        "handoff",
+        "docs",
+        "readiness"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-006",
+        "ss-llm-007"
+      ],
+      "id": "ss-llm-008",
+      "title": "Run final LLM-backed readiness proof before Phalanx wiring",
+      "goal": "Execute and record the final evidence that Semantix can run a real LLM-backed iterative Spec Studio discussion through manual JSON before connecting Phalanx.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/spec-studio-manual-json-probe.md:1",
+        "packages/stx/scripts/probe-spec-studio-json.js:1"
+      ],
+      "definition_of_done": [
+        "Full test suite passes.",
+        "Manual JSON proof passes in LLM evaluator mode.",
+        "Proof output shows evaluator backing llm, not probe.",
+        "The run reaches a meaningful needs_user/ready/blocked state based on real model output, not a canned packet.",
+        "Only after this task is complete may Phalanx live wiring be called ready to start."
+      ],
+      "constraints": [
+        "If model access is unavailable, this task remains incomplete.",
+        "Do not substitute mocked-LLM tests for this manual proof."
+      ],
+      "context": {
+        "reason": "This is the explicit go/no-go gate for live Phalanx integration.",
+        "verification_status": "Not complete: final gate requires a live LLM-mode manual proof; mocked tests and mode checks are insufficient."
+      },
+      "tags": [
+        "proof",
+        "go-no-go",
+        "integration-gate"
+      ]
     }
   ]
 }

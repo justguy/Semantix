@@ -81,6 +81,24 @@ npm run probe:spec-studio-json --workspace packages/stx -- \
 
 Exit 0 means both turns returned valid packets and the sequence completed.
 
+### LLM evaluator mode
+
+To verify the server is running the real LLM-backed evaluator, pass `--mode llm`. The script will first
+hit `GET /spec-studio/mode` and print the server's reported evaluator mode, then proceed with the two-turn probe:
+
+```bash
+SPEC_STUDIO_EVALUATOR=llm node packages/stx/src/cli.js serve &
+
+npm run probe:spec-studio-json --workspace packages/stx -- \
+  --url http://127.0.0.1:4401/spec-studio/evaluate \
+  --mode llm
+```
+
+**Important**: `SPEC_STUDIO_EVALUATOR=llm` wiring (and therefore Phalanx integration via
+`PHALANX_SEMANTIX_HTTP_URL`) requires `ss-llm-008` (LLM-backed readiness proof) to be complete.
+Do not point Phalanx at Semantix until that task is done and the proof is recorded in
+`docs/spec-studio-llm-proof.md`.
+
 ## Identifying success
 
 A successful probe response has:
@@ -123,11 +141,16 @@ All fixtures are under `packages/stx/tests/fixtures/spec-studio-manual-json/`.
 
 ## Handoff to live Phalanx integration
 
-Once the probe passes, live Phalanx integration is reduced to:
+Probe-mode success is not sufficient for live Phalanx integration. Before
+setting `PHALANX_SEMANTIX_HTTP_URL`, run Semantix in LLM mode and record a
+successful LLM-backed manual proof in `docs/spec-studio-llm-proof.md`.
+
+Once the LLM-backed proof passes, live Phalanx integration is reduced to:
 
 1. Set `PHALANX_SEMANTIX_HTTP_URL=http://<semantix-host>:<port>/spec-studio/evaluate`
    in the Phalanx environment.
 2. Confirm that Phalanx's `live:semantix` transport sends the same JSON shapes
    exercised by these fixtures.
 
-No Semantix code changes are required for that wiring step.
+No additional Semantix code changes are expected for that wiring step after
+the LLM-backed proof is recorded.
