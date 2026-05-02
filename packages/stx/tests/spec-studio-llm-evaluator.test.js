@@ -11,6 +11,7 @@ import {
 
 import { validateSemantixAlignmentPacket } from "../src/spec-studio-contracts.js";
 import { isDegradedPacket } from "../src/spec-studio-degraded.js";
+import { checkIdContinuity } from "../src/spec-studio-id-continuity.js";
 
 // ---- Helpers ----------------------------------------------------------------
 
@@ -313,6 +314,89 @@ test("parseEvaluatorOutput repairs invalid coverage alignmentPct instead of leak
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
+test("parseEvaluatorOutput preserves prior stable IDs when a follow-up LLM packet drops them", () => {
+  const sessionId = "spec_continuity_repair";
+  const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  priorPacket.requirements = [
+    {
+      id: "REQ-001",
+      type: "functional",
+      text: "Show observation summaries.",
+      priority: "must",
+      sourceRef: "u1",
+      acceptance: "Summaries are visible.",
+      status: "proposed",
+    },
+  ];
+  priorPacket.openQuestions = [
+    {
+      id: "T-001",
+      section: "scope",
+      question: "Who can see the summaries?",
+      options: ["Internal only", "Everyone"],
+    },
+  ];
+  priorPacket.findings = [
+    {
+      id: "F-001",
+      kind: "gap",
+      sev: "blocker",
+      section: "scope",
+      ref: "T-001",
+      text: "Visibility scope is unresolved.",
+      resolved: false,
+      raisedBy: "semantix",
+    },
+  ];
+  priorPacket.contextSources = [
+    {
+      id: "CS-001",
+      kind: "user",
+      summary: "User asked for observation summaries.",
+      status: "used",
+      evidenceRefs: ["u1"],
+    },
+  ];
+  priorPacket.groundedFacts = [
+    {
+      id: "GF-001",
+      source: "user",
+      text: "The request is about observation summaries.",
+      confidence: "high",
+      evidenceRef: "u1",
+    },
+  ];
+
+  const nextPacket = JSON.parse(buildReadyPacketJson(sessionId, 1));
+  nextPacket.requirements = [];
+  nextPacket.findings = [];
+  nextPacket.contextSources = [];
+  nextPacket.groundedFacts = [];
+  nextPacket.userDecisions = [];
+
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+    sessionId,
+    trigger: "user_turn",
+    userTurn: {
+      id: "u2",
+      body: { kind: "choice", picked: "OPT-001", label: "Internal only", questionTurnId: "T-001" },
+    },
+    currentPacket: priorPacket,
+    decisions: [],
+  });
+
+  assert.equal(result.packet.requirements[0].id, "REQ-001");
+  assert.equal(result.packet.findings[0].id, "F-001");
+  assert.equal(result.packet.findings[0].resolved, true);
+  assert.equal(result.packet.groundedFacts[0].id, "GF-001");
+  assert.equal(result.packet.contextSources[0].id, "CS-001");
+  assert.equal(result.packet.userDecisions[0].turnId, "u2");
+  const continuity = checkIdContinuity({ priorPacket, nextPacket: result.packet });
+  assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
 test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
   const sessionId = "spec_outgoing_choice_reject";
   const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
@@ -330,7 +414,7 @@ test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
   );
 });
 
-test("parseEvaluatorOutput rejects stable ID continuity violations before Phalanx sees them", () => {
+test("parseEvaluatorOutput still rejects in-place stable ID mutations before Phalanx sees them", () => {
   const sessionId = "spec_continuity_reject";
   const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   priorPacket.requirements = [
@@ -345,14 +429,19 @@ test("parseEvaluatorOutput rejects stable ID continuity violations before Phalan
     },
   ];
   const nextPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 1));
-  nextPacket.requirements = [];
+  nextPacket.requirements = [
+    {
+      ...priorPacket.requirements[0],
+      text: "Mutated under the same id.",
+    },
+  ];
   assert.throws(
     () => parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
       sessionId,
       trigger: "user_turn",
       currentPacket: priorPacket,
     }),
-    /stable ID continuity: requirement_dropped/,
+    /stable ID continuity: requirement_mutated/,
   );
 });
 

@@ -53,8 +53,8 @@
         "label": "P3"
       }
     ],
-    "rev": 46,
-    "updatedAt": "2026-05-02T01:54:56.001Z"
+    "rev": 47,
+    "updatedAt": "2026-05-02T15:35:29.512Z"
   },
   "tasks": [
     {
@@ -205,7 +205,7 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Landed packages/stx/src/spec-studio-id-continuity.js: checkIdContinuity / assertIdContinuity compare prior vs next packet for requirements / findings / groundedFacts plus context-request reissue. Catches drops, silent same-id mutation, supersedion w/o replacement, reuse-after-supersede, resolved-finding regression, resolved silent-remove. Decisions stay Phalanx-owned. 21 tests pass.",
+      "comment": "Landed continuity guard for requirements/findings/groundedFacts/context-request reissue. Follow-up hardening added in LLM evaluator: omitted prior IDs are repaired from currentPacket before validation, user choices can resolve linked findings, same-ID mutations/duplicates still fail, and degraded follow-ups preserve prior stable IDs.",
       "assignee": "claude-opus"
     },
     {

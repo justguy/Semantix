@@ -19,6 +19,7 @@ import {
 } from "./spec-studio-contracts.js";
 import { withDegradationFallback } from "./spec-studio-degraded.js";
 import { checkIdContinuity } from "./spec-studio-id-continuity.js";
+import { applyUserChoiceTurn } from "./spec-studio-user-turn-loop.js";
 
 // ---- ss-llm-002: contract design -------------------------------------------
 
@@ -43,7 +44,7 @@ export function buildEvaluatorSystemPrompt() {
     "- Never set readiness=ready if there are unresolved blocker findings.",
     "- When readiness=ready: set coverage.alignmentPct=100, coverage.openBlockers=0, and mark every prior blocker finding as resolved=true.",
     "- When readiness=ready AND existingSystemContext.mode=update, you MUST include at least one targetSurfaces entry AND at least one of doNotChange, reuseRequirements, or compatibilityRequirements.",
-    "- Preserve all stable IDs (requirements, findings, decisions) from the currentPacket when provided.",
+    "- Preserve all stable IDs from currentPacket when provided: requirements, findings, groundedFacts, contextSources, and userDecisions. If a user answer resolves a finding, keep the same finding id and mark it resolved; do not drop it.",
     "",
     "Required JSON shape (all fields are required unless marked optional):",
     JSON.stringify({
@@ -185,6 +186,15 @@ export function synthesizeEvaluatorInput(request) {
     if (Array.isArray(p.findings) && p.findings.length > 0) {
       lines.push(`currentPacket.findings: ${JSON.stringify(p.findings)}`);
     }
+    if (Array.isArray(p.groundedFacts) && p.groundedFacts.length > 0) {
+      lines.push(`currentPacket.groundedFacts: ${JSON.stringify(p.groundedFacts)}`);
+    }
+    if (Array.isArray(p.contextSources) && p.contextSources.length > 0) {
+      lines.push(`currentPacket.contextSources: ${JSON.stringify(p.contextSources)}`);
+    }
+    if (Array.isArray(p.userDecisions) && p.userDecisions.length > 0) {
+      lines.push(`currentPacket.userDecisions: ${JSON.stringify(p.userDecisions)}`);
+    }
     if (p.nextTurn) {
       lines.push(`currentPacket.nextTurn: ${JSON.stringify(p.nextTurn)}`);
     }
@@ -263,6 +273,10 @@ function asArray(value) {
   if (Array.isArray(value)) return value;
   if (value === undefined || value === null) return [];
   return [value];
+}
+
+function deepClone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
 function textOf(value) {
@@ -560,6 +574,138 @@ function isCanonicalUserDecision(decision) {
   );
 }
 
+function idOf(value) {
+  return isPlainObject(value) && isNonEmptyString(value.id) ? value.id : null;
+}
+
+function mergeMissingStableItems(priorItems, nextItems, shouldCarry = () => true) {
+  const prior = asArray(priorItems).filter((item) => idOf(item));
+  const next = asArray(nextItems);
+  const nextIds = new Set();
+  for (const item of next) {
+    const id = idOf(item);
+    if (id) nextIds.add(id);
+  }
+
+  const missingPrior = prior
+    .filter((priorItem) => !nextIds.has(idOf(priorItem)) && shouldCarry(priorItem))
+    .map(deepClone);
+  return [...missingPrior, ...next].filter(Boolean);
+}
+
+function countResolvedFindings(priorPacket, nextPacket) {
+  const nextById = new Map(asArray(nextPacket?.findings).map((finding) => [idOf(finding), finding]));
+  return asArray(priorPacket?.findings).reduce((count, priorFinding) => {
+    const id = idOf(priorFinding);
+    if (!id || priorFinding.resolved) return count;
+    const nextFinding = nextById.get(id);
+    return nextFinding?.resolved ? count + 1 : count;
+  }, 0);
+}
+
+function countConsumedQuestions(priorPacket, nextPacket) {
+  const nextQuestionIds = new Set(asArray(nextPacket?.openQuestions).map(idOf).filter(Boolean));
+  return asArray(priorPacket?.openQuestions).reduce((count, question) => {
+    const id = idOf(question);
+    if (!id) return count;
+    return nextQuestionIds.has(id) ? count : count + 1;
+  }, 0);
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set(values.filter(isNonEmptyString))];
+}
+
+function findPhalanxDecisionId(request) {
+  const userTurnId = request?.userTurn?.id;
+  if (!isNonEmptyString(userTurnId)) return undefined;
+  const decision = asArray(request?.decisions).find(
+    (item) => isPlainObject(item) && item.turnId === userTurnId && isNonEmptyString(item.id),
+  );
+  return decision?.id;
+}
+
+function buildStableBaseline(request) {
+  const prior = request?.currentPacket;
+  if (!isPlainObject(prior)) return null;
+  const userTurn = request?.userTurn;
+  const body = userTurn?.body;
+  if (!isPlainObject(userTurn) || !isPlainObject(body) || body.kind !== "choice") {
+    return prior;
+  }
+
+  const singleOpenQuestion =
+    asArray(prior.openQuestions).filter(isPlainObject).length === 1
+      ? asArray(prior.openQuestions).find(isPlainObject)
+      : null;
+  const candidateRefs = uniqueNonEmpty([
+    body.questionTurnId,
+    prior.nextTurn?.id,
+    singleOpenQuestion?.id,
+  ]);
+  if (!isNonEmptyString(body.picked) || candidateRefs.length === 0) return prior;
+
+  let best = null;
+  let bestScore = 0;
+  for (const questionRef of candidateRefs) {
+    try {
+      const result = applyUserChoiceTurn({
+        packet: prior,
+        userTurn,
+        questionRef,
+        pickedOptionId: body.picked,
+        pickedLabel: body.label,
+        section: prior.nextTurn?.target,
+        decisionId: findPhalanxDecisionId(request),
+      });
+      const score =
+        countResolvedFindings(prior, result.packet) +
+        countConsumedQuestions(prior, result.packet);
+      if (score > bestScore) {
+        best = result.packet;
+        bestScore = score;
+      }
+    } catch {
+      // If the user-turn helper cannot link the choice, fall back to raw prior state.
+    }
+  }
+  return best ?? prior;
+}
+
+function repairCoverageAfterStableMerge(packet) {
+  if (!isPlainObject(packet.coverage)) return;
+  const unresolved = asArray(packet.findings).filter(
+    (finding) => isPlainObject(finding) && finding.resolved !== true,
+  );
+  const openBlockers = unresolved.filter((finding) => finding.sev === "blocker").length;
+  const openConcerns = unresolved.filter((finding) => finding.sev === "concern").length;
+  const openFYI = unresolved.filter((finding) => finding.sev === "fyi").length;
+  packet.coverage.openBlockers = openBlockers;
+  packet.coverage.openConcerns = openConcerns;
+  packet.coverage.openFYI = openFYI;
+  if (packet.readiness === "ready" && openBlockers > 0) {
+    packet.readiness = "needs_user";
+    packet.readinessReason =
+      "Prior blocker findings remain unresolved after preserving stable IDs.";
+    packet.coverage.alignmentPct = Math.min(packet.coverage.alignmentPct, 99);
+  }
+}
+
+function preserveStableIds(packet, request) {
+  const baseline = buildStableBaseline(request);
+  if (!isPlainObject(baseline)) return;
+  packet.requirements = mergeMissingStableItems(
+    baseline.requirements,
+    packet.requirements,
+    (requirement) => requirement.status !== "superseded",
+  );
+  packet.findings = mergeMissingStableItems(baseline.findings, packet.findings);
+  packet.groundedFacts = mergeMissingStableItems(baseline.groundedFacts, packet.groundedFacts);
+  packet.contextSources = mergeMissingStableItems(baseline.contextSources, packet.contextSources);
+  packet.userDecisions = mergeMissingStableItems(baseline.userDecisions, packet.userDecisions);
+  repairCoverageAfterStableMerge(packet);
+}
+
 function canonicalizeLlmPacket(packet, request) {
   packet.blockingReasons = normalizeBlockingReasons(packet.blockingReasons);
   packet.flow = normalizeFlow(packet.flow);
@@ -570,6 +716,7 @@ function canonicalizeLlmPacket(packet, request) {
   packet.existingSystemContext = normalizeExistingSystemContext(packet.existingSystemContext);
   packet.contextSources = normalizeContextSources(packet.contextSources, request);
   packet.coverage = normalizeCoverage(packet.coverage, packet.readiness);
+  preserveStableIds(packet, request);
   return packet;
 }
 

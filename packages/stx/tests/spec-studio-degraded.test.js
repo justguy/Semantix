@@ -20,6 +20,7 @@ import {
   greenfieldReadyPacket,
   hoplonGroundedPacket,
 } from "./fixtures/spec-studio-samples.js";
+import { checkIdContinuity } from "../src/spec-studio-id-continuity.js";
 
 // ---- createDegradedPacket -------------------------------------------------
 
@@ -86,6 +87,7 @@ test("when staleSafe is set with a prior packet, carries forward prior coverage 
   // Carry forward
   assert.equal(packet.coverage.alignmentPct, prior.coverage.alignmentPct);
   assert.equal(packet.requirements.length, prior.requirements.length);
+  assert.equal(packet.groundedFacts.length, prior.groundedFacts.length);
   // Even staleSafe degraded packets must NOT mark ready
   assert.equal(packet.readiness, READINESS.NEEDS_USER);
   // existingSystemContext is preserved
@@ -93,6 +95,33 @@ test("when staleSafe is set with a prior packet, carries forward prior coverage 
     packet.existingSystemContext.mode,
     prior.existingSystemContext.mode,
   );
+});
+
+test("fallback degradation on follow-up preserves prior stable IDs", async () => {
+  const prior = hoplonGroundedPacket;
+  const evaluate = withDegradationFallback(() => {
+    throw new Error("model timeout");
+  });
+  const response = await evaluate({
+    sessionId: prior.sessionId,
+    trigger: "user_turn",
+    currentPacket: prior,
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+
+  assert.equal(response.packet.readiness, READINESS.NEEDS_USER);
+  assert.equal(response.packet.requirements.length, prior.requirements.length);
+  assert.equal(response.packet.groundedFacts.length, prior.groundedFacts.length);
+  for (const finding of prior.findings) {
+    assert.ok(
+      response.packet.findings.some((nextFinding) => nextFinding.id === finding.id),
+      `missing prior finding ${finding.id}`,
+    );
+  }
+  const continuity = checkIdContinuity({ priorPacket: prior, nextPacket: response.packet });
+  assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
 });
 
 test("validates as a degraded packet via the contract validator", () => {

@@ -58,6 +58,22 @@ function safePriorRequirements(priorPacket) {
   return priorPacket.requirements.map((req) => ({ ...req }));
 }
 
+function safePriorArray(priorPacket, key) {
+  if (!isPlainObject(priorPacket)) return [];
+  if (!Array.isArray(priorPacket[key])) return [];
+  return JSON.parse(JSON.stringify(priorPacket[key]));
+}
+
+function nextDegradedFindingId(priorPacket, preferredId) {
+  const ids = new Set(safePriorArray(priorPacket, "findings").map((finding) => finding?.id));
+  if (!ids.has(preferredId)) return preferredId;
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `F-DEGRADED-${String(i).padStart(3, "0")}`;
+    if (!ids.has(candidate)) return candidate;
+  }
+  return `F-DEGRADED-${Date.now()}`;
+}
+
 function safeFlow(priorPacket) {
   if (
     isPlainObject(priorPacket) &&
@@ -154,9 +170,10 @@ export function createDegradedPacket({
 
   const finding = {
     ...DEFAULT_BLOCKER,
-    id: blockerId ?? DEFAULT_BLOCKER.id,
+    id: nextDegradedFindingId(priorPacket, blockerId ?? DEFAULT_BLOCKER.id),
     text: reason,
   };
+  const priorFindings = staleSafe ? safePriorArray(priorPacket, "findings") : [];
 
   return {
     contractVersion: CONTRACT_VERSION,
@@ -179,9 +196,9 @@ export function createDegradedPacket({
     userDecisions: [],
     acceptanceSummary: [],
     existingSystemContext: safeExistingSystemContext(priorPacket),
-    contextSources: [],
-    groundedFacts: [],
-    findings: [finding],
+    contextSources: staleSafe ? safePriorArray(priorPacket, "contextSources") : [],
+    groundedFacts: staleSafe ? safePriorArray(priorPacket, "groundedFacts") : [],
+    findings: [...priorFindings, finding],
     coverage: {
       alignmentPct,
       sections: [],
@@ -301,7 +318,7 @@ export function withDegradationFallback(evaluator, options = {}) {
         originalUserRequest: priorPacket?.originalUserRequest,
         reason: raisedError.message,
         priorPacket,
-        staleSafe: false,
+        staleSafe: Boolean(priorPacket),
       });
       const event = buildEvent
         ? buildEvent({ request, error: raisedError })
@@ -332,7 +349,7 @@ export function withDegradationFallback(evaluator, options = {}) {
         reason:
           "Evaluator marked readiness=\"ready\" but coverage or blocker findings disagree.",
         priorPacket: response.packet,
-        staleSafe: false,
+        staleSafe: true,
       });
       return {
         packet,
