@@ -10,8 +10,15 @@
 
 import { randomUUID } from "node:crypto";
 
-import { CONTRACT_VERSION, SOURCE_SEMANTIX, validateSemantixAlignmentPacket } from "./spec-studio-contracts.js";
+import {
+  CONTEXT_SOURCE_KIND_VALUES,
+  CONTRACT_VERSION,
+  SECTION_ID_VALUES,
+  SOURCE_SEMANTIX,
+  validateSemantixAlignmentPacket,
+} from "./spec-studio-contracts.js";
 import { withDegradationFallback } from "./spec-studio-degraded.js";
+import { checkIdContinuity } from "./spec-studio-id-continuity.js";
 
 // ---- ss-llm-002: contract design -------------------------------------------
 
@@ -61,16 +68,21 @@ export function buildEvaluatorSystemPrompt() {
           status: "proposed | confirmed | contested | superseded",
         },
       ],
-      flow: { pages: [], states: [], transitions: [], dataNeeded: [] },
+      flow: {
+        pages: [{ id: "PAGE-001", name: "<string>", purpose: "<string>", sourceRef: "<string>" }],
+        states: [{ id: "STATE-001", name: "<string>", description: "<string>", sourceRef: "<string>" }],
+        transitions: [{ id: "TRANS-001", from: "<state id>", to: "<state id>", trigger: "<string>", result: "<string>", sourceRef: "<string>" }],
+        dataNeeded: [{ id: "DATA-001", name: "<string>", consumerRef: "<string>", requiredFor: "<string>", unresolved: true }],
+      },
       scope: { inScope: [], outOfScope: [], negativeRequirements: [] },
-      assumptions: [],
-      openQuestions: [],
-      risks: [],
+      assumptions: [{ id: "A-001", text: "<string>", section: "assumptions", sourceRef: "<string>" }],
+      openQuestions: [{ id: "Q-001", section: "scope", question: "<string>", options: ["<string>"] }],
+      risks: [{ id: "RISK-001", text: "<string>", section: "risks", sourceRef: "<string>" }],
       userDecisions: [],
       acceptanceSummary: [],
       existingSystemContext: {
         mode: "new | update | unknown",
-        targetSurfaces: ["<string — required when mode=update AND readiness=ready: UI/API/component area being changed>"],
+        targetSurfaces: [{ id: "surf_001", kind: "ui-page | ui-panel | api | component | unknown", name: "<string>" }],
         doNotChange: ["<string — required when mode=update AND readiness=ready: things that must not change>"],
         reuseRequirements: ["<string — existing requirements to reuse unchanged>"],
         compatibilityRequirements: ["<string — backward-compat constraints>"],
@@ -79,9 +91,9 @@ export function buildEvaluatorSystemPrompt() {
         {
           id: "<stable string e.g. CS-001>",
           kind: "user | html | spec | phalanx | hoplon | repo | trace | upload",
-          ref: "<string>",
           summary: "<string>",
           status: "used | unavailable | skipped",
+          evidenceRefs: ["<string — required when status=used>"],
         },
       ],
       groundedFacts: [
@@ -107,7 +119,16 @@ export function buildEvaluatorSystemPrompt() {
       ],
       coverage: {
         alignmentPct: "<number 0-100>",
-        sections: [],
+        sections: [
+          {
+            id: "intent | scope | boundaries | success | constraints | assumptions | stakeholders | risks | failure | nfr",
+            name: "<string>",
+            required: "must | should | could",
+            coverage: "<number 0-100>",
+            status: "locked | covered | weak | empty",
+            annotations: "<number>",
+          },
+        ],
         openBlockers: "<number>",
         openConcerns: "<number>",
         openFYI: "<number>",
@@ -230,6 +251,328 @@ export function extractJsonFromLlmOutput(rawText) {
   return null;
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null) return [];
+  return [value];
+}
+
+function textOf(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isPlainObject(value)) {
+    for (const key of ["text", "question", "summary", "name", "description", "reason"]) {
+      if (isNonEmptyString(value[key])) return value[key].trim();
+    }
+  }
+  return "";
+}
+
+function slug(value) {
+  const text = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return text || "item";
+}
+
+function numberedId(prefix, index) {
+  return `${prefix}-${String(index + 1).padStart(3, "0")}`;
+}
+
+function normalizeSectionId(value, fallback = "intent") {
+  if (typeof value !== "string") return fallback;
+  const normalized = slug(value);
+  return SECTION_ID_VALUES.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeTextRecord(value, index, prefix, textKey = "text", extra = {}) {
+  if (isPlainObject(value)) {
+    const text = textOf(value);
+    return {
+      ...value,
+      id: isNonEmptyString(value.id) ? value.id : numberedId(prefix, index),
+      [textKey]: text || `${prefix} ${index + 1}`,
+      ...extra,
+    };
+  }
+  return {
+    id: numberedId(prefix, index),
+    [textKey]: textOf(value) || `${prefix} ${index + 1}`,
+    ...extra,
+  };
+}
+
+function normalizeBlockingReasons(value) {
+  return asArray(value)
+    .map((item, index) => normalizeTextRecord(item, index, "BR-LLM"))
+    .filter((item) => isNonEmptyString(item.text));
+}
+
+function normalizeOpenQuestions(value) {
+  return asArray(value)
+    .map((item, index) => {
+      const question = normalizeTextRecord(item, index, "Q-LLM", "question", {
+        section: normalizeSectionId(item?.section ?? item?.target ?? item?.ref, "scope"),
+      });
+      if (Array.isArray(item?.options)) question.options = item.options;
+      return question;
+    })
+    .filter((item) => isNonEmptyString(item.question));
+}
+
+function normalizeInterpretations(value, prefix, defaultSection) {
+  return asArray(value)
+    .map((item, index) => normalizeTextRecord(item, index, prefix, "text", {
+      section: normalizeSectionId(item?.section, defaultSection),
+      sourceRef: isNonEmptyString(item?.sourceRef) ? item.sourceRef : "llm",
+    }))
+    .filter((item) => isNonEmptyString(item.text));
+}
+
+function normalizeFlowItems(value, prefix, buildFromText, fillObject) {
+  return asArray(value)
+    .map((item, index) => {
+      if (isPlainObject(item)) return fillObject(item, index);
+      return buildFromText(textOf(item), index);
+    })
+    .filter(Boolean);
+}
+
+function normalizeFlow(flow) {
+  const input = isPlainObject(flow) ? flow : {};
+  return {
+    ...input,
+    pages: normalizeFlowItems(
+      input.pages,
+      "PAGE-LLM",
+      (text, index) => text ? {
+        id: numberedId("PAGE-LLM", index),
+        name: text,
+        purpose: text,
+        sourceRef: "llm",
+      } : null,
+      (item, index) => ({
+        ...item,
+        id: isNonEmptyString(item.id) ? item.id : numberedId("PAGE-LLM", index),
+        name: textOf(item.name ?? item) || `Page ${index + 1}`,
+        purpose: isNonEmptyString(item.purpose) ? item.purpose : textOf(item) || `Page ${index + 1}`,
+        sourceRef: isNonEmptyString(item.sourceRef) ? item.sourceRef : "llm",
+      }),
+    ),
+    states: normalizeFlowItems(
+      input.states,
+      "STATE-LLM",
+      (text, index) => text ? {
+        id: numberedId("STATE-LLM", index),
+        name: text,
+        description: text,
+        sourceRef: "llm",
+      } : null,
+      (item, index) => ({
+        ...item,
+        id: isNonEmptyString(item.id) ? item.id : numberedId("STATE-LLM", index),
+        name: textOf(item.name ?? item) || `State ${index + 1}`,
+        description: isNonEmptyString(item.description) ? item.description : textOf(item) || `State ${index + 1}`,
+        sourceRef: isNonEmptyString(item.sourceRef) ? item.sourceRef : "llm",
+      }),
+    ),
+    transitions: normalizeFlowItems(
+      input.transitions,
+      "TRANS-LLM",
+      (text, index) => text ? {
+        id: numberedId("TRANS-LLM", index),
+        from: "unknown",
+        to: "unknown",
+        trigger: text,
+        result: text,
+        sourceRef: "llm",
+      } : null,
+      (item, index) => ({
+        ...item,
+        id: isNonEmptyString(item.id) ? item.id : numberedId("TRANS-LLM", index),
+        from: isNonEmptyString(item.from) ? item.from : "unknown",
+        to: isNonEmptyString(item.to) ? item.to : "unknown",
+        trigger: isNonEmptyString(item.trigger) ? item.trigger : textOf(item) || `Transition ${index + 1}`,
+        result: isNonEmptyString(item.result) ? item.result : textOf(item) || `Transition ${index + 1}`,
+        sourceRef: isNonEmptyString(item.sourceRef) ? item.sourceRef : "llm",
+      }),
+    ),
+    dataNeeded: normalizeFlowItems(
+      input.dataNeeded,
+      "DATA-LLM",
+      (text, index) => text ? {
+        id: numberedId("DATA-LLM", index),
+        name: text,
+        consumerRef: "unknown",
+        requiredFor: text,
+        unresolved: true,
+      } : null,
+      (item, index) => ({
+        ...item,
+        id: isNonEmptyString(item.id) ? item.id : numberedId("DATA-LLM", index),
+        name: textOf(item.name ?? item) || `Data ${index + 1}`,
+        consumerRef: isNonEmptyString(item.consumerRef) ? item.consumerRef : "unknown",
+        requiredFor: isNonEmptyString(item.requiredFor) ? item.requiredFor : textOf(item) || `Data ${index + 1}`,
+        unresolved: typeof item.unresolved === "boolean" ? item.unresolved : true,
+      }),
+    ),
+  };
+}
+
+function normalizeTargetSurfaces(value) {
+  return asArray(value)
+    .map((item, index) => {
+      if (isPlainObject(item)) {
+        const name = textOf(item.name ?? item);
+        return {
+          ...item,
+          id: isNonEmptyString(item.id) ? item.id : `surf_${slug(name || index + 1)}`,
+          kind: isNonEmptyString(item.kind) ? item.kind : "unknown",
+          name: name || `Target surface ${index + 1}`,
+        };
+      }
+      const name = textOf(item);
+      if (!name) return null;
+      return {
+        id: `surf_${slug(name)}`,
+        kind: "unknown",
+        name,
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeExistingSystemContext(value) {
+  const context = isPlainObject(value) ? { ...value } : { mode: "unknown" };
+  if (!["new", "update", "unknown"].includes(context.mode)) context.mode = "unknown";
+  context.targetSurfaces = normalizeTargetSurfaces(context.targetSurfaces);
+  for (const key of [
+    "knownFiles",
+    "existingFlows",
+    "existingConstraints",
+    "doNotChange",
+    "reuseRequirements",
+    "compatibilityRequirements",
+    "migrationConcerns",
+    "observedProblems",
+    "referenceArtifacts",
+  ]) {
+    if (context[key] !== undefined && !Array.isArray(context[key])) {
+      context[key] = asArray(context[key]).filter((item) => item !== undefined && item !== null);
+    }
+  }
+  return context;
+}
+
+function fallbackEvidenceRef(request) {
+  return request?.userTurn?.id ?? request?.currentPacket?.nextTurn?.id ?? "llm-output";
+}
+
+function normalizeContextSources(value, request) {
+  return asArray(value)
+    .filter(isPlainObject)
+    .map((source, index) => {
+      const id = isNonEmptyString(source.id) ? source.id : numberedId("CS-LLM", index);
+      const status = ["used", "unavailable", "skipped"].includes(source.status) ? source.status : "used";
+      const evidenceRefs = Array.isArray(source.evidenceRefs)
+        ? source.evidenceRefs.filter(isNonEmptyString)
+        : isNonEmptyString(source.evidenceRef)
+          ? [source.evidenceRef]
+          : isNonEmptyString(source.ref)
+            ? [source.ref]
+            : status === "used"
+              ? [fallbackEvidenceRef(request)]
+              : [];
+      return {
+        ...source,
+        id,
+        kind: CONTEXT_SOURCE_KIND_VALUES.includes(source.kind) ? source.kind : "user",
+        status,
+        summary: typeof source.summary === "string" ? source.summary : textOf(source),
+        evidenceRefs,
+      };
+    });
+}
+
+function normalizeCoverage(value, readiness) {
+  const coverage = isPlainObject(value) ? { ...value } : {};
+  const parsedPct =
+    typeof coverage.alignmentPct === "number"
+      ? coverage.alignmentPct
+      : Number.parseFloat(String(coverage.alignmentPct ?? ""));
+  coverage.alignmentPct = Number.isFinite(parsedPct)
+    ? Math.max(0, Math.min(100, parsedPct))
+    : readiness === "ready"
+      ? 100
+      : 0;
+  coverage.sections = asArray(coverage.sections)
+    .map((section, index) => {
+      const rawId = isPlainObject(section) ? section.id : section;
+      const id = normalizeSectionId(rawId, SECTION_ID_VALUES[index] ?? "intent");
+      const sectionCoverage =
+        isPlainObject(section) && typeof section.coverage === "number"
+          ? Math.max(0, Math.min(100, section.coverage))
+          : coverage.alignmentPct;
+      return {
+        ...(isPlainObject(section) ? section : {}),
+        id,
+        name: isNonEmptyString(section?.name) ? section.name : id,
+        required: ["must", "should", "could"].includes(section?.required) ? section.required : "must",
+        coverage: sectionCoverage,
+        status:
+          ["locked", "covered", "weak", "empty"].includes(section?.status)
+            ? section.status
+            : sectionCoverage >= 100
+              ? "covered"
+              : sectionCoverage > 0
+                ? "weak"
+                : "empty",
+        annotations: Number.isFinite(section?.annotations) ? section.annotations : 0,
+      };
+    });
+  coverage.openBlockers = Number.isFinite(Number(coverage.openBlockers)) ? Number(coverage.openBlockers) : 0;
+  coverage.openConcerns = Number.isFinite(Number(coverage.openConcerns)) ? Number(coverage.openConcerns) : 0;
+  coverage.openFYI = Number.isFinite(Number(coverage.openFYI)) ? Number(coverage.openFYI) : 0;
+  return coverage;
+}
+
+function isCanonicalUserDecision(decision) {
+  return (
+    isPlainObject(decision) &&
+    isNonEmptyString(decision.id) &&
+    isNonEmptyString(decision.turnId) &&
+    SECTION_ID_VALUES.includes(decision.section) &&
+    isNonEmptyString(decision.questionRef) &&
+    isNonEmptyString(decision.question) &&
+    ["choice", "free", "decided-by-semantix", "dismiss"].includes(decision.kind) &&
+    isPlainObject(decision.answer) &&
+    isNonEmptyString(decision.at)
+  );
+}
+
+function canonicalizeLlmPacket(packet, request) {
+  packet.blockingReasons = normalizeBlockingReasons(packet.blockingReasons);
+  packet.flow = normalizeFlow(packet.flow);
+  packet.assumptions = normalizeInterpretations(packet.assumptions, "A-LLM", "assumptions");
+  packet.openQuestions = normalizeOpenQuestions(packet.openQuestions);
+  packet.risks = normalizeInterpretations(packet.risks, "RISK-LLM", "risks");
+  packet.userDecisions = asArray(packet.userDecisions).filter(isCanonicalUserDecision);
+  packet.existingSystemContext = normalizeExistingSystemContext(packet.existingSystemContext);
+  packet.contextSources = normalizeContextSources(packet.contextSources, request);
+  packet.coverage = normalizeCoverage(packet.coverage, packet.readiness);
+  return packet;
+}
+
 /**
  * Parse LLM raw text output into a valid SemantixEvaluateResponse.
  * Throws with a descriptive message on malformed or invalid output so
@@ -258,6 +601,8 @@ export function parseEvaluatorOutput(sessionId, iteration, rawText, request) {
     iteration,
   };
 
+  canonicalizeLlmPacket(packet, request);
+
   // Ensure required arrays exist
   if (!Array.isArray(packet.requirements)) packet.requirements = [];
   if (!Array.isArray(packet.findings)) packet.findings = [];
@@ -280,21 +625,23 @@ export function parseEvaluatorOutput(sessionId, iteration, rawText, request) {
     );
   }
 
-  // Ensure coverage exists
-  if (!packet.coverage || typeof packet.coverage !== "object") {
-    packet.coverage = { alignmentPct: 0, sections: [], openBlockers: 0, openConcerns: 0, openFYI: 0 };
-  }
-
-  // Ensure existingSystemContext exists
-  if (!packet.existingSystemContext || typeof packet.existingSystemContext !== "object") {
-    packet.existingSystemContext = { mode: "unknown" };
-  }
-
   // Validate the resulting packet
   const validation = validateSemantixAlignmentPacket(packet);
   if (!validation.ok) {
     const codes = validation.errors.map((e) => e.code).join(", ");
     throw new Error(`LLM evaluator returned an invalid packet: ${codes}`);
+  }
+
+  if (request.currentPacket) {
+    const continuity = checkIdContinuity({
+      priorPacket: request.currentPacket,
+      nextPacket: packet,
+      nextContextRequests: [],
+    });
+    if (!continuity.ok) {
+      const codes = continuity.violations.map((violation) => violation.kind).join(", ");
+      throw new Error(`LLM evaluator violated stable ID continuity: ${codes}`);
+    }
   }
 
   const eventId = `evt_llm_${request.trigger}_${sessionId}_${iteration}_${Date.now()}`;

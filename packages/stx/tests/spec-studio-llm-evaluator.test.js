@@ -109,6 +109,8 @@ test("buildEvaluatorSystemPrompt returns a non-empty string", () => {
   assert.ok(prompt.includes("SemantixAlignmentPacket"));
   assert.ok(prompt.includes("readiness"));
   assert.ok(prompt.includes("body.options"), "prompt must describe Phalanx-style question options");
+  assert.ok(prompt.includes("evidenceRefs"), "prompt must describe contextSource evidenceRefs");
+  assert.ok(prompt.includes("targetSurfaces\":[{\"id\""), "prompt must describe structured target surfaces");
   assert.ok(prompt.includes('"body":{"kind":"question"'), "prompt must show the real nextTurn.body key");
   assert.equal(prompt.includes('"kind":"choice"'), false, "prompt must not advertise outgoing choice nextTurn bodies");
 });
@@ -238,6 +240,79 @@ test("parseEvaluatorOutput accepts a packet with question nextTurn options", () 
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
+test("parseEvaluatorOutput canonicalizes common live LLM shape drift before validation", () => {
+  const sessionId = "spec_live_shape_drift";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.blockingReasons = ["Need target surface."];
+  packet.flow = {
+    pages: ["Run View"],
+    states: ["Summary hidden", "Summary visible"],
+    transitions: ["User opens a run and sees summaries"],
+    dataNeeded: ["Observation summary text"],
+  };
+  packet.assumptions = ["User means the existing Run View."];
+  packet.openQuestions = ["Should this update the existing Run View?"];
+  packet.risks = ["Could duplicate an existing surface."];
+  packet.userDecisions = [{ id: "dec_bad", kind: "choice" }];
+  packet.existingSystemContext = {
+    mode: "update",
+    targetSurfaces: ["Run View"],
+  };
+  packet.contextSources = [
+    {
+      id: "CS-001",
+      kind: "user",
+      status: "used",
+      ref: "u1",
+      summary: "User requested observation summaries.",
+    },
+  ];
+  packet.coverage = {
+    alignmentPct: "42%",
+    sections: ["scope"],
+    openBlockers: "1",
+    openConcerns: "0",
+    openFYI: "0",
+  };
+
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: { id: "u1", body: { kind: "text", text: "Add observation summaries." } },
+  });
+
+  assert.equal(result.packet.blockingReasons[0].id, "BR-LLM-001");
+  assert.equal(result.packet.flow.states[0].id, "STATE-LLM-001");
+  assert.equal(result.packet.flow.transitions[0].from, "unknown");
+  assert.equal(result.packet.flow.dataNeeded[0].unresolved, true);
+  assert.equal(result.packet.assumptions[0].id, "A-LLM-001");
+  assert.equal(result.packet.openQuestions[0].section, "scope");
+  assert.equal(result.packet.risks[0].section, "risks");
+  assert.deepEqual(result.packet.userDecisions, []);
+  assert.deepEqual(result.packet.existingSystemContext.targetSurfaces[0], {
+    id: "surf_run_view",
+    kind: "unknown",
+    name: "Run View",
+  });
+  assert.deepEqual(result.packet.contextSources[0].evidenceRefs, ["u1"]);
+  assert.equal(result.packet.coverage.alignmentPct, 42);
+  assert.equal(result.packet.coverage.sections[0].id, "scope");
+  assert.equal(result.packet.coverage.sections[0].status, "weak");
+
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput repairs invalid coverage alignmentPct instead of leaking it", () => {
+  const sessionId = "spec_live_bad_coverage";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.coverage.alignmentPct = "not available";
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), { sessionId, trigger: "initial" });
+  assert.equal(result.packet.coverage.alignmentPct, 0);
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
 test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
   const sessionId = "spec_outgoing_choice_reject";
   const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
@@ -252,6 +327,32 @@ test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
   assert.throws(
     () => parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), { sessionId, trigger: "initial" }),
     /next_turn_invalid_body_kind/,
+  );
+});
+
+test("parseEvaluatorOutput rejects stable ID continuity violations before Phalanx sees them", () => {
+  const sessionId = "spec_continuity_reject";
+  const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  priorPacket.requirements = [
+    {
+      id: "REQ-001",
+      type: "functional",
+      text: "Show observation summaries.",
+      priority: "must",
+      sourceRef: "u1",
+      acceptance: "Summaries are visible.",
+      status: "proposed",
+    },
+  ];
+  const nextPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 1));
+  nextPacket.requirements = [];
+  assert.throws(
+    () => parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+      sessionId,
+      trigger: "user_turn",
+      currentPacket: priorPacket,
+    }),
+    /stable ID continuity: requirement_dropped/,
   );
 });
 
