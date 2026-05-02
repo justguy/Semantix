@@ -563,6 +563,55 @@ function validateFindingInternal(finding, path, errors) {
   }
 }
 
+function validateTurnOptions(options, path, errors) {
+  if (options === undefined) return;
+  if (!Array.isArray(options) || options.length === 0) {
+    pushError(
+      errors,
+      path,
+      "next_turn_options_missing",
+      "nextTurn question options must be a non-empty array when provided.",
+    );
+    return;
+  }
+  if (options.length > 5) {
+    pushError(
+      errors,
+      path,
+      "next_turn_options_too_many",
+      "nextTurn question options allow at most 5 options.",
+    );
+  }
+  options.forEach((option, index) => {
+    const optionPath = `${path}[${index}]`;
+    if (!isPlainObject(option)) {
+      pushError(
+        errors,
+        optionPath,
+        "next_turn_option_not_object",
+        "nextTurn question options must be objects.",
+      );
+      return;
+    }
+    if (!isNonEmptyString(option.id)) {
+      pushError(
+        errors,
+        `${optionPath}.id`,
+        "next_turn_option_missing_id",
+        "nextTurn question option requires an id.",
+      );
+    }
+    if (!isNonEmptyString(option.label)) {
+      pushError(
+        errors,
+        `${optionPath}.label`,
+        "next_turn_option_missing_label",
+        "nextTurn question option requires a label.",
+      );
+    }
+  });
+}
+
 function validateSemantixTurnInternal(turn, path, errors) {
   if (turn === null) return;
   if (!isPlainObject(turn)) {
@@ -605,13 +654,16 @@ function validateSemantixTurnInternal(turn, path, errors) {
       "next_turn_invalid_body_kind",
       "nextTurn.body.kind must be \"question\", \"finding\", or \"batch\".",
     );
-  } else if (turn.body.kind === "question" && !isNonEmptyString(turn.body.q)) {
-    pushError(
-      errors,
-      `${path}.body.q`,
-      "next_turn_question_missing_text",
-      "nextTurn question bodies require q.",
-    );
+  } else if (turn.body.kind === "question") {
+    if (!isNonEmptyString(turn.body.q)) {
+      pushError(
+        errors,
+        `${path}.body.q`,
+        "next_turn_question_missing_text",
+        "nextTurn question bodies require q.",
+      );
+    }
+    validateTurnOptions(turn.body.options, `${path}.body.options`, errors);
   } else if (turn.body.kind === "batch") {
     if (!Array.isArray(turn.body.questions) || turn.body.questions.length === 0) {
       pushError(

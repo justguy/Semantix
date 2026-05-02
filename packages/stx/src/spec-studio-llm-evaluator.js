@@ -30,9 +30,12 @@ export function buildEvaluatorSystemPrompt() {
     "- Return exactly ONE JSON object and nothing else (no markdown, no explanation).",
     "- The JSON must conform to the SemantixAlignmentPacket schema.",
     "- Do not invent facts about the codebase or project that were not provided.",
-    "- Ask clarifying questions (readiness=needs_user, nextTurn with kind=question) when the request is ambiguous.",
+    "- Ask clarifying questions (readiness=needs_user, nextTurn.body.kind=question) when the request is ambiguous.",
+    "- For a small set of discrete answers (e.g. placement, storage scope), keep nextTurn.body.kind=\"question\" and include body.options with 2-5 options, each with a unique id and a short label. The user may still answer in free text — options are suggestions only.",
     "- Only set readiness=ready when scope, boundaries, and key requirements are fully resolved.",
     "- Never set readiness=ready if there are unresolved blocker findings.",
+    "- When readiness=ready: set coverage.alignmentPct=100, coverage.openBlockers=0, and mark every prior blocker finding as resolved=true.",
+    "- When readiness=ready AND existingSystemContext.mode=update, you MUST include at least one targetSurfaces entry AND at least one of doNotChange, reuseRequirements, or compatibilityRequirements.",
     "- Preserve all stable IDs (requirements, findings, decisions) from the currentPacket when provided.",
     "",
     "Required JSON shape (all fields are required unless marked optional):",
@@ -67,9 +70,29 @@ export function buildEvaluatorSystemPrompt() {
       acceptanceSummary: [],
       existingSystemContext: {
         mode: "new | update | unknown",
+        targetSurfaces: ["<string — required when mode=update AND readiness=ready: UI/API/component area being changed>"],
+        doNotChange: ["<string — required when mode=update AND readiness=ready: things that must not change>"],
+        reuseRequirements: ["<string — existing requirements to reuse unchanged>"],
+        compatibilityRequirements: ["<string — backward-compat constraints>"],
       },
-      contextSources: [],
-      groundedFacts: [],
+      contextSources: [
+        {
+          id: "<stable string e.g. CS-001>",
+          kind: "user | html | spec | phalanx | hoplon | repo | trace | upload",
+          ref: "<string>",
+          summary: "<string>",
+          status: "used | unavailable | skipped",
+        },
+      ],
+      groundedFacts: [
+        {
+          id: "<stable string e.g. GF-001>",
+          source: "user | html | spec | phalanx | hoplon | repo | trace | upload",
+          text: "<string>",
+          evidenceRef: "<string — must be non-empty>",
+          confidence: "high | medium | low",
+        },
+      ],
       findings: [
         {
           id: "<stable string e.g. F-001>",
@@ -95,7 +118,18 @@ export function buildEvaluatorSystemPrompt() {
         at: "<ISO timestamp>",
         phase: "crisp | socratic | adversarial | locked",
         target: "<string>",
-        body: { kind: "question", q: "<string>" },
+        body: {
+          kind: "question",
+          q: "<string>",
+          options: [
+            {
+              id: "OPT-001",
+              label: "<short option label>",
+              description: "<optional string>",
+              tag: "recommend | risk | neutral",
+            },
+          ],
+        },
       },
     }),
     "",
@@ -229,6 +263,22 @@ export function parseEvaluatorOutput(sessionId, iteration, rawText, request) {
   if (!Array.isArray(packet.findings)) packet.findings = [];
   if (!Array.isArray(packet.contextSources)) packet.contextSources = [];
   if (!Array.isArray(packet.groundedFacts)) packet.groundedFacts = [];
+
+  // Strip groundedFacts with invalid source values so schema validation passes.
+  // groundedFacts are supplemental; silently dropping malformed items is safer
+  // than rejecting the whole packet.
+  if (packet.groundedFacts.length > 0) {
+    const validSources = new Set(["user", "html", "spec", "phalanx", "hoplon", "repo", "trace", "upload"]);
+    packet.groundedFacts = packet.groundedFacts.filter(
+      (f) =>
+        f !== null &&
+        typeof f === "object" &&
+        typeof f.id === "string" && f.id.length > 0 &&
+        validSources.has(f.source) &&
+        typeof f.text === "string" && f.text.length > 0 &&
+        typeof f.evidenceRef === "string" && f.evidenceRef.length > 0,
+    );
+  }
 
   // Ensure coverage exists
   if (!packet.coverage || typeof packet.coverage !== "object") {

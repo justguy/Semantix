@@ -552,6 +552,69 @@ test("validateSemantixTurn rejects malformed turn", () => {
   assert.equal(result.ok, false);
 });
 
+const validQuestionTurnWithOptions = () => ({
+  id: "nt-question-001",
+  side: "semantix",
+  at: "2026-05-01T00:00:00Z",
+  phase: "crisp",
+  target: "user",
+  body: {
+    kind: "question",
+    q: "Where should the toggle live?",
+    options: [
+      { id: "OPT-001", label: "Top-right nav bar" },
+      { id: "OPT-002", label: "Settings page" },
+    ],
+  },
+});
+
+test("validateSemantixTurn accepts a question body with Phalanx-style options", () => {
+  const result = validateSemantixTurn(validQuestionTurnWithOptions());
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("validateSemantixTurn rejects outgoing choice body kind", () => {
+  const turn = validQuestionTurnWithOptions();
+  turn.body.kind = "choice";
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_invalid_body_kind");
+});
+
+test("validateSemantixTurn rejects question body missing q", () => {
+  const turn = validQuestionTurnWithOptions();
+  delete turn.body.q;
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_question_missing_text");
+});
+
+test("validateSemantixTurn rejects question body with empty options", () => {
+  const turn = validQuestionTurnWithOptions();
+  turn.body.options = [];
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_options_missing");
+});
+
+test("validateSemantixTurn rejects question body with more than 5 options", () => {
+  const turn = validQuestionTurnWithOptions();
+  turn.body.options = [1, 2, 3, 4, 5, 6].map((n) => ({ id: `OPT-00${n}`, label: `Option ${n}` }));
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_options_too_many");
+});
+
+test("validateSemantixTurn rejects question options missing id", () => {
+  const turn = validQuestionTurnWithOptions();
+  delete turn.body.options[0].id;
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_option_missing_id");
+});
+
+test("validateSemantixTurn rejects question options missing label", () => {
+  const turn = validQuestionTurnWithOptions();
+  delete turn.body.options[0].label;
+  const result = validateSemantixTurn(turn);
+  expectErrorCode(result, "next_turn_option_missing_label");
+});
+
 // ---- Source identifier exports --------------------------------------------
 
 test("source identifier exports are stable", () => {

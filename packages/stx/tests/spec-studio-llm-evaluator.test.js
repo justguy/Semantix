@@ -108,6 +108,9 @@ test("buildEvaluatorSystemPrompt returns a non-empty string", () => {
   assert.ok(prompt.length > 100);
   assert.ok(prompt.includes("SemantixAlignmentPacket"));
   assert.ok(prompt.includes("readiness"));
+  assert.ok(prompt.includes("body.options"), "prompt must describe Phalanx-style question options");
+  assert.ok(prompt.includes('"body":{"kind":"question"'), "prompt must show the real nextTurn.body key");
+  assert.equal(prompt.includes('"kind":"choice"'), false, "prompt must not advertise outgoing choice nextTurn bodies");
 });
 
 // ---- synthesizeEvaluatorInput ----------------------------------------------
@@ -191,6 +194,65 @@ test("parseEvaluatorOutput returns valid response for needs_user packet", () => 
 
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput accepts a packet with question nextTurn options", () => {
+  const sessionId = "spec_question_options_test";
+  const packet = {
+    contractVersion: "semantix.phalanx.spec-studio.v1",
+    source: "semantix",
+    sessionId,
+    iteration: 0,
+    readiness: "needs_user",
+    readinessReason: "Toggle placement is unspecified.",
+    blockingReasons: [],
+    approvalRequired: true,
+    originalUserRequest: "Add dark mode toggle.",
+    alignedRequirement: "Add dark mode toggle.",
+    requirements: [],
+    flow: { pages: [], states: [], transitions: [], dataNeeded: [] },
+    scope: { inScope: [], outOfScope: [], negativeRequirements: [] },
+    assumptions: [], openQuestions: [], risks: [], userDecisions: [], acceptanceSummary: [],
+    existingSystemContext: { mode: "unknown" },
+    contextSources: [], groundedFacts: [], findings: [],
+    coverage: { alignmentPct: 30, sections: [], openBlockers: 0, openConcerns: 1, openFYI: 0 },
+    nextTurn: {
+      id: "nt-001", side: "semantix", at: "2026-05-01T00:00:00.000Z",
+      phase: "crisp", target: "user",
+      body: {
+        kind: "question",
+        q: "Where should the toggle appear?",
+        options: [
+          { id: "OPT-001", label: "Top-right nav bar" },
+          { id: "OPT-002", label: "Settings page" },
+          { id: "OPT-003", label: "Floating button" },
+        ],
+      },
+    },
+  };
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), { sessionId, trigger: "initial" });
+  assert.equal(result.packet.readiness, "needs_user");
+  assert.equal(result.packet.nextTurn.body.kind, "question");
+  assert.equal(result.packet.nextTurn.body.options.length, 3);
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
+  const sessionId = "spec_outgoing_choice_reject";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.nextTurn.body = {
+    kind: "choice",
+    q: "Where should the toggle appear?",
+    options: [
+      { id: "OPT-001", label: "Top-right nav bar" },
+      { id: "OPT-002", label: "Settings page" },
+    ],
+  };
+  assert.throws(
+    () => parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), { sessionId, trigger: "initial" }),
+    /next_turn_invalid_body_kind/,
+  );
 });
 
 test("parseEvaluatorOutput stamps contractVersion and source", () => {

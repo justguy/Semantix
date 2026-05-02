@@ -53,8 +53,8 @@
         "label": "P3"
       }
     ],
-    "rev": 44,
-    "updatedAt": "2026-05-01T03:33:12.507Z"
+    "rev": 46,
+    "updatedAt": "2026-05-02T01:54:56.001Z"
   },
   "tasks": [
     {
@@ -1137,7 +1137,7 @@
       "id": "ss-llm-006",
       "title": "Add manual JSON proof for LLM-backed evaluator mode",
       "goal": "Extend the manual JSON probe so an operator can run the same initial -> follow-up flow against the real LLM evaluator and see evidence that the output is not the canned probe path.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "spec-studio-real-evaluator",
         "priorityId": "p1"
@@ -1161,13 +1161,17 @@
       ],
       "context": {
         "reason": "This is the missing pre-Phalanx proof the user originally needed.",
-        "verification_status": "Not complete: docs and probe support exist, but no live LLM-backed manual JSON proof has been recorded against a running instance."
+        "verification_status": "Complete: live LLM-backed manual proof is recorded in docs/spec-studio-llm-proof.md and the STX suite passes 399/399.",
+        "completionEvidence": "docs/spec-studio-llm-proof.md records LLM-mode proof and 399/399 STX tests passing.",
+        "verification": "npm run test --workspace @semantix/stx -- --test-reporter=tap => 399 pass, 0 fail",
+        "contractCorrection": "Discrete answer suggestions use nextTurn.body.kind=\"question\" with body.options; outgoing nextTurn.body.kind=\"choice\" is rejected."
       },
       "tags": [
         "manual-proof",
         "json",
         "llm"
-      ]
+      ],
+      "comment": "Completed: manual LLM evaluator proof is recorded in docs/spec-studio-llm-proof.md, mode instructions identify evaluatorMode=llm, and proof evidence distinguishes LLM-backed flow from probe mode. Corrected multi-choice prompt shape to Phalanx-compatible question+options."
     },
     {
       "dependencies": [
@@ -1213,7 +1217,7 @@
       "id": "ss-llm-008",
       "title": "Run final LLM-backed readiness proof before Phalanx wiring",
       "goal": "Execute and record the final evidence that Semantix can run a real LLM-backed iterative Spec Studio discussion through manual JSON before connecting Phalanx.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "spec-studio-real-evaluator",
         "priorityId": "p0"
@@ -1236,13 +1240,17 @@
       ],
       "context": {
         "reason": "This is the explicit go/no-go gate for live Phalanx integration.",
-        "verification_status": "Not complete: final gate requires a live LLM-mode manual proof; mocked tests and mode checks are insufficient."
+        "verification_status": "Complete: final LLM-backed readiness proof is recorded and Phalanx-facing nextTurn options now align with the contract.",
+        "completionEvidence": "docs/spec-studio-llm-proof.md gate status and proof/test counts updated.",
+        "verification": "Focused Spec Studio contract/evaluator/Phalanx probe tests passed; full STX suite passed 399/399.",
+        "phalanxContractAlignment": "Semantix nextTurn choice prompts remain question turns with options; option items require id and label."
       },
       "tags": [
         "proof",
         "go-no-go",
         "integration-gate"
-      ]
+      ],
+      "comment": "Completed: final LLM-backed readiness proof is restored as Phalanx-unblocking evidence after contract review correction. The Phalanx-facing shape now aligns with docs/phalanx-spec-studio-integration-contract.md and tests cover rejecting unsupported outgoing choice turns."
     }
   ]
 }
