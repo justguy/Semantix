@@ -503,8 +503,8 @@ test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {
   );
 });
 
-test("parseEvaluatorOutput still rejects in-place stable ID mutations before Phalanx sees them", () => {
-  const sessionId = "spec_continuity_reject";
+test("parseEvaluatorOutput converts same-id requirement mutations into valid supersession", () => {
+  const sessionId = "spec_requirement_mutation_repair";
   const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   priorPacket.requirements = [
     {
@@ -521,17 +521,68 @@ test("parseEvaluatorOutput still rejects in-place stable ID mutations before Pha
   nextPacket.requirements = [
     {
       ...priorPacket.requirements[0],
-      text: "Mutated under the same id.",
+      text: "Show observation summaries to internal users only.",
+      acceptance: "Internal users can see summaries.",
     },
   ];
-  assert.throws(
-    () => parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
-      sessionId,
-      trigger: "user_turn",
-      currentPacket: priorPacket,
-    }),
-    /stable ID continuity: requirement_mutated/,
-  );
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+    sessionId,
+    trigger: "user_turn",
+    currentPacket: priorPacket,
+  });
+
+  const superseded = result.packet.requirements.find((requirement) => requirement.id === "REQ-001");
+  const replacement = result.packet.requirements.find((requirement) => requirement.id === superseded.supersededBy);
+  assert.equal(superseded.status, "superseded");
+  assert.equal(superseded.supersededBy, "REQ-002");
+  assert.equal(replacement.id, "REQ-002");
+  assert.equal(replacement.text, "Show observation summaries to internal users only.");
+  assert.equal(replacement.acceptance, "Internal users can see summaries.");
+  assert.notEqual(replacement.id, superseded.id);
+  const continuity = checkIdContinuity({ priorPacket, nextPacket: result.packet });
+  assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput preserves mutated finding history and mints a new finding id", () => {
+  const sessionId = "spec_finding_mutation_repair";
+  const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  priorPacket.findings = [
+    {
+      id: "F-001",
+      kind: "gap",
+      sev: "blocker",
+      section: "scope",
+      ref: "T-001",
+      text: "Visibility scope is unresolved.",
+      resolved: false,
+      raisedBy: "semantix",
+    },
+  ];
+  const nextPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 1));
+  nextPacket.findings = [
+    {
+      ...priorPacket.findings[0],
+      text: "Placement is unresolved.",
+      ref: "T-002",
+    },
+  ];
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+    sessionId,
+    trigger: "user_turn",
+    currentPacket: priorPacket,
+  });
+
+  assert.ok(result.packet.findings.some((finding) => finding.id === "F-001"));
+  const replacement = result.packet.findings.find((finding) => finding.id !== "F-001");
+  assert.equal(replacement.id, "F-002");
+  assert.equal(replacement.text, "Placement is unresolved.");
+  assert.equal(replacement.ref, "T-002");
+  const continuity = checkIdContinuity({ priorPacket, nextPacket: result.packet });
+  assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
 test("parseEvaluatorOutput stamps contractVersion and source", () => {

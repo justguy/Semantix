@@ -610,7 +610,30 @@ function isValidSupersession(requirement, nextIds) {
   );
 }
 
+function fieldsChanged(a, b, fields) {
+  if (!isPlainObject(a) || !isPlainObject(b)) return false;
+  return fields.some((field) => a[field] !== b[field]);
+}
+
+function nextStableId(prefix, items) {
+  const used = new Set(asArray(items).map(idOf).filter(Boolean));
+  let max = 0;
+  const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+  for (const id of used) {
+    const match = pattern.exec(id);
+    if (!match) continue;
+    const n = Number.parseInt(match[1], 10);
+    if (Number.isFinite(n)) max = Math.max(max, n);
+  }
+  for (let i = max + 1; i < max + 1000; i += 1) {
+    const candidate = `${prefix}-${String(i).padStart(3, "0")}`;
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${prefix}-${Date.now()}`;
+}
+
 function mergeRequirementsPreservingInvalidSupersession(priorItems, nextItems) {
+  const identityFields = ["text", "type", "priority", "acceptance"];
   const priorById = new Map(
     asArray(priorItems)
       .filter((item) => idOf(item))
@@ -619,20 +642,76 @@ function mergeRequirementsPreservingInvalidSupersession(priorItems, nextItems) {
   const next = asArray(nextItems);
   const nextIds = new Set(next.map(idOf).filter(Boolean));
   const replacedPriorIds = new Set();
-  const repairedNext = next.map((requirement) => {
+  const repairBase = [...asArray(priorItems), ...next];
+  const repairedNext = [];
+  for (const requirement of next) {
     const id = idOf(requirement);
     const prior = id ? priorById.get(id) : null;
     if (prior && !isValidSupersession(requirement, nextIds)) {
       replacedPriorIds.add(id);
-      return deepClone(prior);
+      repairedNext.push(deepClone(prior));
+      continue;
     }
-    return requirement;
-  });
+    if (
+      prior &&
+      prior.status !== "superseded" &&
+      requirement.status !== "superseded" &&
+      fieldsChanged(prior, requirement, identityFields)
+    ) {
+      const replacementId = nextStableId("REQ", [...repairBase, ...repairedNext]);
+      const supersededPrior = {
+        ...deepClone(prior),
+        status: "superseded",
+        supersededBy: replacementId,
+      };
+      const replacement = {
+        ...requirement,
+        id: replacementId,
+        status: requirement.status === "superseded" ? "proposed" : requirement.status,
+        supersededBy: undefined,
+      };
+      replacedPriorIds.add(id);
+      repairedNext.push(supersededPrior, replacement);
+      continue;
+    }
+    repairedNext.push(requirement);
+  }
   const repairedIds = new Set(repairedNext.map(idOf).filter(Boolean));
   const missingPrior = asArray(priorItems)
     .filter((prior) => {
       const id = idOf(prior);
       return id && !repairedIds.has(id) && prior.status !== "superseded" && !replacedPriorIds.has(id);
+    })
+    .map(deepClone);
+  return [...missingPrior, ...repairedNext].filter(Boolean);
+}
+
+function mergeFindingsPreservingMutations(priorItems, nextItems) {
+  const identityFields = ["text", "kind", "sev", "section", "ref"];
+  const priorById = new Map(
+    asArray(priorItems)
+      .filter((item) => idOf(item))
+      .map((item) => [idOf(item), item]),
+  );
+  const next = asArray(nextItems);
+  const carriedPriorIds = new Set();
+  const repairedNext = [];
+  for (const finding of next) {
+    const id = idOf(finding);
+    const prior = id ? priorById.get(id) : null;
+    if (prior && fieldsChanged(prior, finding, identityFields)) {
+      const replacementId = nextStableId("F", [...asArray(priorItems), ...next, ...repairedNext]);
+      carriedPriorIds.add(id);
+      repairedNext.push(deepClone(prior), { ...finding, id: replacementId });
+      continue;
+    }
+    repairedNext.push(finding);
+  }
+  const repairedIds = new Set(repairedNext.map(idOf).filter(Boolean));
+  const missingPrior = asArray(priorItems)
+    .filter((prior) => {
+      const id = idOf(prior);
+      return id && !repairedIds.has(id) && !carriedPriorIds.has(id);
     })
     .map(deepClone);
   return [...missingPrior, ...repairedNext].filter(Boolean);
@@ -751,7 +830,7 @@ function preserveStableIds(packet, request) {
     baseline.requirements,
     packet.requirements,
   );
-  packet.findings = mergeMissingStableItems(baseline.findings, packet.findings);
+  packet.findings = mergeFindingsPreservingMutations(baseline.findings, packet.findings);
   packet.groundedFacts = mergeMissingStableItems(baseline.groundedFacts, packet.groundedFacts);
   packet.contextSources = mergeMissingStableItems(baseline.contextSources, packet.contextSources);
   packet.userDecisions = mergeMissingStableItems(baseline.userDecisions, packet.userDecisions);
