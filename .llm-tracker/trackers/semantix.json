@@ -53,8 +53,8 @@
         "label": "P3"
       }
     ],
-    "rev": 47,
-    "updatedAt": "2026-05-02T15:35:29.512Z"
+    "rev": 48,
+    "updatedAt": "2026-05-02T17:45:22.641Z"
   },
   "tasks": [
     {
@@ -205,7 +205,7 @@
         "docs/plans/",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "comment": "Landed continuity guard for requirements/findings/groundedFacts/context-request reissue. Follow-up hardening added in LLM evaluator: omitted prior IDs are repaired from currentPacket before validation, user choices can resolve linked findings, same-ID mutations/duplicates still fail, and degraded follow-ups preserve prior stable IDs.",
+      "comment": "Follow-up hardening in LLM evaluator: omitted prior IDs are repaired from currentPacket, user choices record decisions and can resolve linked findings, invalid LLM supersession without a valid replacement is reverted to the prior requirement, nextTurn.target is normalized for Phalanx, mutations/duplicates still fail, degraded follow-ups preserve prior IDs.",
       "assignee": "claude-opus"
     },
     {

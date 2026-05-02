@@ -314,6 +314,16 @@ test("parseEvaluatorOutput repairs invalid coverage alignmentPct instead of leak
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
+test("parseEvaluatorOutput normalizes invalid nextTurn target values for Phalanx", () => {
+  const sessionId = "spec_bad_next_target";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.nextTurn.target = "user";
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), { sessionId, trigger: "initial" });
+  assert.equal(result.packet.nextTurn.target, "intent");
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
 test("parseEvaluatorOutput preserves prior stable IDs when a follow-up LLM packet drops them", () => {
   const sessionId = "spec_continuity_repair";
   const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
@@ -395,6 +405,85 @@ test("parseEvaluatorOutput preserves prior stable IDs when a follow-up LLM packe
   assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput repairs invalid LLM supersession and records the user choice", () => {
+  const sessionId = "spec_invalid_supersession_repair";
+  const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  priorPacket.nextTurn = {
+    id: "T-CHOICE-001",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "scope",
+    body: {
+      kind: "question",
+      q: "Who can see observation summaries?",
+      options: [
+        { id: "OPT-001", label: "Internal only", tag: "recommend" },
+        { id: "OPT-002", label: "Everyone" },
+      ],
+    },
+  };
+  priorPacket.requirements = [
+    {
+      id: "REQ-001",
+      type: "functional",
+      text: "Show observation summaries.",
+      priority: "must",
+      sourceRef: "u1",
+      acceptance: "Summaries are visible.",
+      status: "proposed",
+    },
+  ];
+  priorPacket.findings = [
+    {
+      id: "F-001",
+      kind: "gap",
+      sev: "blocker",
+      section: "scope",
+      ref: "T-CHOICE-001",
+      text: "Visibility scope is unresolved.",
+      resolved: false,
+      raisedBy: "semantix",
+    },
+  ];
+
+  const nextPacket = JSON.parse(buildReadyPacketJson(sessionId, 1));
+  nextPacket.requirements = [
+    {
+      ...priorPacket.requirements[0],
+      status: "superseded",
+    },
+  ];
+  nextPacket.findings = [];
+  nextPacket.userDecisions = [];
+
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+    sessionId,
+    trigger: "user_turn",
+    userTurn: {
+      id: "u2",
+      body: { kind: "choice", picked: "OPT-001", label: "Internal only" },
+    },
+    currentPacket: priorPacket,
+    decisions: [],
+  });
+
+  assert.equal(result.packet.source, "semantix");
+  assert.equal(result.packet.readiness, "ready");
+  assert.equal(result.packet.nextTurn, null);
+  assert.equal(result.packet.requirements[0].id, "REQ-001");
+  assert.equal(result.packet.requirements[0].status, "proposed");
+  assert.equal(result.packet.findings[0].id, "F-001");
+  assert.equal(result.packet.findings[0].resolved, true);
+  assert.equal(result.packet.userDecisions.length, 1);
+  assert.equal(result.packet.userDecisions[0].turnId, "u2");
+  assert.equal(result.packet.userDecisions[0].question, "Who can see observation summaries?");
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+  const continuity = checkIdContinuity({ priorPacket, nextPacket: result.packet });
+  assert.equal(continuity.ok, true, JSON.stringify(continuity.violations));
 });
 
 test("parseEvaluatorOutput rejects outgoing choice nextTurn body", () => {

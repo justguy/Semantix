@@ -518,6 +518,14 @@ function normalizeContextSources(value, request) {
     });
 }
 
+function normalizeNextTurn(value) {
+  if (!isPlainObject(value)) return value;
+  return {
+    ...value,
+    target: normalizeSectionId(value.target, "intent"),
+  };
+}
+
 function normalizeCoverage(value, readiness) {
   const coverage = isPlainObject(value) ? { ...value } : {};
   const parsedPct =
@@ -593,6 +601,43 @@ function mergeMissingStableItems(priorItems, nextItems, shouldCarry = () => true
   return [...missingPrior, ...next].filter(Boolean);
 }
 
+function isValidSupersession(requirement, nextIds) {
+  return (
+    requirement.status !== "superseded" ||
+    (isNonEmptyString(requirement.supersededBy) &&
+      requirement.supersededBy !== requirement.id &&
+      nextIds.has(requirement.supersededBy))
+  );
+}
+
+function mergeRequirementsPreservingInvalidSupersession(priorItems, nextItems) {
+  const priorById = new Map(
+    asArray(priorItems)
+      .filter((item) => idOf(item))
+      .map((item) => [idOf(item), item]),
+  );
+  const next = asArray(nextItems);
+  const nextIds = new Set(next.map(idOf).filter(Boolean));
+  const replacedPriorIds = new Set();
+  const repairedNext = next.map((requirement) => {
+    const id = idOf(requirement);
+    const prior = id ? priorById.get(id) : null;
+    if (prior && !isValidSupersession(requirement, nextIds)) {
+      replacedPriorIds.add(id);
+      return deepClone(prior);
+    }
+    return requirement;
+  });
+  const repairedIds = new Set(repairedNext.map(idOf).filter(Boolean));
+  const missingPrior = asArray(priorItems)
+    .filter((prior) => {
+      const id = idOf(prior);
+      return id && !repairedIds.has(id) && prior.status !== "superseded" && !replacedPriorIds.has(id);
+    })
+    .map(deepClone);
+  return [...missingPrior, ...repairedNext].filter(Boolean);
+}
+
 function countResolvedFindings(priorPacket, nextPacket) {
   const nextById = new Map(asArray(nextPacket?.findings).map((finding) => [idOf(finding), finding]));
   return asArray(priorPacket?.findings).reduce((count, priorFinding) => {
@@ -647,6 +692,7 @@ function buildStableBaseline(request) {
 
   let best = null;
   let bestScore = 0;
+  let firstApplied = null;
   for (const questionRef of candidateRefs) {
     try {
       const result = applyUserChoiceTurn({
@@ -658,9 +704,16 @@ function buildStableBaseline(request) {
         section: prior.nextTurn?.target,
         decisionId: findPhalanxDecisionId(request),
       });
+      const decision = asArray(result.packet.userDecisions).find(
+        (item) => isPlainObject(item) && item.turnId === userTurn.id,
+      );
+      if (decision && !isNonEmptyString(decision.question) && isNonEmptyString(prior.nextTurn?.body?.q)) {
+        decision.question = prior.nextTurn.body.q;
+      }
       const score =
         countResolvedFindings(prior, result.packet) +
         countConsumedQuestions(prior, result.packet);
+      if (!firstApplied) firstApplied = result.packet;
       if (score > bestScore) {
         best = result.packet;
         bestScore = score;
@@ -669,7 +722,7 @@ function buildStableBaseline(request) {
       // If the user-turn helper cannot link the choice, fall back to raw prior state.
     }
   }
-  return best ?? prior;
+  return best ?? firstApplied ?? prior;
 }
 
 function repairCoverageAfterStableMerge(packet) {
@@ -694,10 +747,9 @@ function repairCoverageAfterStableMerge(packet) {
 function preserveStableIds(packet, request) {
   const baseline = buildStableBaseline(request);
   if (!isPlainObject(baseline)) return;
-  packet.requirements = mergeMissingStableItems(
+  packet.requirements = mergeRequirementsPreservingInvalidSupersession(
     baseline.requirements,
     packet.requirements,
-    (requirement) => requirement.status !== "superseded",
   );
   packet.findings = mergeMissingStableItems(baseline.findings, packet.findings);
   packet.groundedFacts = mergeMissingStableItems(baseline.groundedFacts, packet.groundedFacts);
@@ -713,6 +765,7 @@ function canonicalizeLlmPacket(packet, request) {
   packet.openQuestions = normalizeOpenQuestions(packet.openQuestions);
   packet.risks = normalizeInterpretations(packet.risks, "RISK-LLM", "risks");
   packet.userDecisions = asArray(packet.userDecisions).filter(isCanonicalUserDecision);
+  packet.nextTurn = normalizeNextTurn(packet.nextTurn);
   packet.existingSystemContext = normalizeExistingSystemContext(packet.existingSystemContext);
   packet.contextSources = normalizeContextSources(packet.contextSources, request);
   packet.coverage = normalizeCoverage(packet.coverage, packet.readiness);
