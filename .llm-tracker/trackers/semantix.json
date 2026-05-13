@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Verification correction: Spec Studio Real Evaluator implementation and mocked tests exist, but final live LLM manual proof is not recorded. ss-llm-006 and ss-llm-008 are reopened/not_started. Fixed fail-closed behavior so --mode llm aborts on evaluatorMode mismatch and SPEC_STUDIO_EVALUATOR=llm without connector reports unavailable instead of silently falling back to probe.",
+    "scratchpad": "Phase 2 proof has been made concrete in tracker: stx-p2-009 now captures stale approval rejection, fresh re-approval, audit replay, and Codex plus mock/second-adapter execution.",
     "swimlanes": [
       {
         "id": "contract",
@@ -33,6 +33,16 @@
         "id": "spec-studio-real-evaluator",
         "label": "Spec Studio Real Evaluator",
         "description": "LLM-backed Semantix alignment evaluator behind /spec-studio/evaluate; JSON probe remains explicit test/probe mode only."
+      },
+      {
+        "id": "phase-1-closeout",
+        "label": "Phase 1 Closeout",
+        "description": "Hardening and evidence needed before declaring Semantix phase 1 closed."
+      },
+      {
+        "id": "phase-2-constraint-engine",
+        "label": "Phase 2 Constraint Engine",
+        "description": "Compiled constraints, runtime admission, audit, provenance, and replay."
       }
     ],
     "priorities": [
@@ -53,8 +63,8 @@
         "label": "P3"
       }
     ],
-    "rev": 49,
-    "updatedAt": "2026-05-02T23:05:44.944Z"
+    "rev": 59,
+    "updatedAt": "2026-05-13T00:30:56.474Z"
   },
   "tasks": [
     {
@@ -1251,6 +1261,866 @@
         "integration-gate"
       ],
       "comment": "Completed: final LLM-backed readiness proof is restored as Phalanx-unblocking evidence after contract review correction. The Phalanx-facing shape now aligns with docs/phalanx-spec-studio-integration-contract.md and tests cover rejecting unsupported outgoing choice turns."
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-001",
+      "title": "Revalidate Codex app-server protocol",
+      "goal": "Run a live smoke proof against the installed Codex CLI and record which app-server methods, settings, and version assumptions are currently valid.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:5-12",
+        "control-plane/KNOWN_GAPS.md:24-27",
+        "docs/plans/semantix-phase-2-plan.md:24-39"
+      ],
+      "definition_of_done": [
+        "Current `codex` and `codex exec` versions are recorded in closeout evidence.",
+        "Live app-server smoke proof covers initialize, thread/start, turn/start, turn/interrupt, thread/read, and thread/turns/list or records a precise unsupported-method result.",
+        "Control-plane README no longer cites stale local validation evidence.",
+        "A focused connector or smoke test documents the accepted request/response shape."
+      ],
+      "constraints": [
+        "Do not treat mocked connector tests as protocol proof.",
+        "Do not change runtime semantics until the live protocol evidence is known."
+      ],
+      "expected_changes": [
+        "control-plane/README.md",
+        "control-plane/KNOWN_GAPS.md",
+        "docs/plans/semantix-phase-1-readiness.md or equivalent closeout evidence",
+        "packages/runtime-codex/tests/* or control-plane/tests/* if adding protocol smoke coverage"
+      ],
+      "allowed_paths": [
+        "control-plane/**",
+        "packages/runtime-codex/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "codex",
+          "protocol-proof"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+          "control-plane/tests/codex-app-server-connector.test.js",
+          "control-plane/README.md",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "notes": "Live app-server probe recorded 0.130.0 support for initialize, thread/start, turn/start, thread/read metadata, turn/interrupt with turnId+expectedTurnId, and precise limitations for includeTurns/list before materialization.",
+        "verification": "TPF_LLM_TOOL=codex tpf npm test in control-plane passed 27 tests; focused connector test passed 2 tests.",
+        "execution_report_reference": "docs/plans/semantix-phase-1-readiness.md:1"
+      },
+      "comment": "Completed Codex app-server protocol revalidation against codex-cli 0.130.0; connector and docs now record current initialize/thread/turn behavior and limitations.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "stx-p1-001"
+      ],
+      "id": "stx-p1-002",
+      "title": "Settle resume and steering semantics",
+      "goal": "Resolve whether the current Codex app-server supports true resume/steer. Implement it if available, or reclassify the gap honestly as an upstream limitation.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:5-12",
+        "docs/plans/semantix-phase-2-plan.md:28-30"
+      ],
+      "definition_of_done": [
+        "The connector exposes supported resume/steer methods if the live protocol supports them.",
+        "The control-plane service uses the new methods only through freshness-checked Semantix session state.",
+        "If unsupported, `KNOWN_GAPS.md` and runtime capabilities explicitly state the limitation without implying true resume/steer.",
+        "Tests cover either supported implementation behavior or unsupported/deferred behavior."
+      ],
+      "constraints": [
+        "Codex transcript history must not become authoritative state.",
+        "Freshness checks must remain server-side for resumed or steered turns."
+      ],
+      "expected_changes": [
+        "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+        "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+        "packages/core/src/control-plane-service.js",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/tests/*.test.js"
+      ],
+      "allowed_paths": [
+        "packages/runtime-codex/**",
+        "packages/core/**",
+        "control-plane/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": [
+        "Changing public session route contracts",
+        "Changing the authoritative source of runtime session state"
+      ],
+      "context": {
+        "tags": [
+          "phase-1",
+          "multi-turn",
+          "freshness"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39"
+      },
+      "comment": "Depends on live protocol evidence so the implementation does not guess at unsupported app-server methods.",
+      "blocker_reason": "Waiting for stx-p1-001 to prove which Codex app-server methods are available."
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-003",
+      "title": "Close preview fidelity gap",
+      "goal": "Make preview fidelity explicit so real runtime diff content and synthesized metadata previews cannot be confused by the UI, CLI, or audit trail.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:14-22",
+        "docs/semantix-control-plane-spec.md:650-671",
+        "docs/plans/semantix-phase-2-plan.md:31-35"
+      ],
+      "definition_of_done": [
+        "Preview records expose whether content came from runtime diff/preview text or synthesized StateEffect metadata.",
+        "UI and CLI labels make metadata-only previews visibly distinct from real unified diffs.",
+        "Tests prove previewRef resolution preserves source fidelity and does not imply file-hunk output when none exists.",
+        "`KNOWN_GAPS.md` is updated to reflect the final behavior."
+      ],
+      "constraints": [
+        "Do not fabricate unified diff bodies.",
+        "StateEffect metadata remains useful, but must be labeled as metadata when no explicit diff exists."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "packages/stx/ui/control-surface/*.jsx",
+        "packages/stx/src/cli.js",
+        "control-plane/tests/*.test.js",
+        "packages/stx/tests/*.test.js",
+        "control-plane/KNOWN_GAPS.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/stx/**",
+        "control-plane/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "preview",
+          "audit"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "packages/stx/src/http/server.js",
+          "packages/stx/src/cli.js",
+          "packages/stx/ui/control-surface/ui.jsx",
+          "packages/stx/ui/control-surface/diff.jsx",
+          "packages/stx/ui/control-surface/phases.jsx",
+          "control-plane/tests/server.test.js",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "notes": "Preview records expose source/sourceLabel/fidelity/contentIsSynthetic. Metadata-only previews are labeled in browser UI and stx diff, and runtime diff previews are tagged runtime_diff.",
+        "verification": "control-plane npm test passed 27 tests; npm run test --workspace @semantix/stx passed; npm run build:ui --workspace @semantix/stx passed.",
+        "execution_report_reference": "docs/plans/semantix-phase-1-readiness.md:35"
+      },
+      "comment": "Completed preview fidelity closeout: preview records, UI, CLI, docs, and tests now distinguish runtime diff bodies from synthesized StateEffect metadata.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-004",
+      "title": "Rerun browser-host verification",
+      "goal": "Verify the bundled browser host path outside the socket-restricted sandbox and record whether `stx serve` works end to end.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:14-22",
+        "control-plane/README.md:132-154",
+        "docs/plans/semantix-phase-2-plan.md:31-39"
+      ],
+      "definition_of_done": [
+        "`npm run build:ui --workspace @semantix/stx` or equivalent build command succeeds.",
+        "Live `stx serve` or preview server serves `/`, legacy UI redirects, `/health`, one previewRef lookup, and one SSE/event route.",
+        "If local environment still blocks sockets, the exact environment and error are recorded without claiming success.",
+        "Browser-host evidence is linked from the Phase 1 readiness record."
+      ],
+      "constraints": [
+        "Do not mask socket binding failures as successful browser verification.",
+        "Do not require Phalanx for this proof."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-1-readiness.md or equivalent closeout evidence",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/README.md"
+      ],
+      "allowed_paths": [
+        "docs/plans/**",
+        "control-plane/**",
+        "packages/stx/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "browser-host",
+          "verification"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "notes": "Sandboxed socket bind still fails with EPERM, so the live browser-host proof was run with approved escalation. Evidence file: /private/tmp/semantix-browser-host-proof.json. The server was stopped after verification and no listener remained on 127.0.0.1:4555.",
+        "files_touched": [
+          "control-plane/README.md",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "verification": "`npm run build:ui --workspace @semantix/stx` passed; control-plane `npm test` passed 27 tests; `npm run test --workspace @semantix/stx` passed; live HTTP proof covered /health, /, /chat redirect, previewRef, and SSE."
+      },
+      "comment": "Completed browser-host closeout: STX UI build passed and live `stx serve --host 127.0.0.1 --port 4555` succeeded outside the socket-restricted sandbox, with `/health`, `/`, `/chat` redirect, previewRef lookup, and SSE route verified.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "stx-p1-001",
+        "stx-p1-002",
+        "stx-p1-003",
+        "stx-p1-004"
+      ],
+      "id": "stx-p1-005",
+      "title": "Publish Phase 1 readiness record",
+      "goal": "Produce the final Phase 1 closeout record after protocol, preview, browser-host, documentation, and test evidence agree.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:24-39",
+        "docs/semantix-control-plane-spec.md:682-690"
+      ],
+      "definition_of_done": [
+        "A Phase 1 readiness doc records current test results, Codex version/protocol evidence, preview fidelity decision, and browser-host proof.",
+        "`KNOWN_GAPS.md` contains only true deferred limitations, not stale validation notes.",
+        "Tracker scratchpad summarizes whether Phase 1 is closed and what remains deferred.",
+        "Full `npm test` passes after closeout changes."
+      ],
+      "constraints": [
+        "Do not mark Phase 1 closed while any Phase 1 closeout dependency is incomplete.",
+        "Deferred items must be explicit and non-blocking for Phase 2."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-1-readiness.md",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/README.md",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        "docs/plans/**",
+        "control-plane/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Declaring Phase 1 closed with known deferred runtime limitations"
+      ],
+      "context": {
+        "tags": [
+          "phase-1",
+          "closeout",
+          "readiness"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39"
+      },
+      "comment": "Closeout record only happens after all Phase 1 proof tasks complete.",
+      "blocker_reason": "Waiting for all Phase 1 closeout proof tasks to finish."
+    },
+    {
+      "dependencies": [
+        "stx-p1-005"
+      ],
+      "id": "stx-p2-000",
+      "title": "Phase 2 Constraint Engine epic",
+      "kind": "group",
+      "goal": "Track Phase 2 work that turns Semantix constraints into executable admission, audit, provenance, and replay machinery.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "xl",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:41-64",
+        "docs/compiler-pipeline-and-neural-bytecode.md:102-151"
+      ],
+      "definition_of_done": [
+        "All child Phase 2 tasks are either complete or explicitly split/deferred with rationale.",
+        "Phase 2 exit criteria in the plan doc are reviewed against implementation evidence."
+      ],
+      "constraints": [
+        "This is a grouping task; child tasks carry execution-specific acceptance criteria."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-plan.md",
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "packages/stx/**"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        "packages/**",
+        "control-plane/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "epic",
+          "constraint-engine"
+        ],
+        "roadmap_section": "Phase 2 Scope",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:41-64"
+      }
+    },
+    {
+      "dependencies": [
+        "stx-p1-005"
+      ],
+      "id": "stx-p2-001",
+      "title": "Formalize Constraint IR",
+      "parent_id": "stx-p2-000",
+      "goal": "Define the durable intermediate representation for compiled Semantix constraints and document how `context`, `constraint`, and `~>` lower into it.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:68-86",
+        "docs/compiler-pipeline-and-neural-bytecode.md:102-138",
+        "docs/language-fundamentals.md:216-226"
+      ],
+      "definition_of_done": [
+        "`ConstraintIR` fields are specified for schemas, path policies, capabilities, approvals, retry policy, verifier policy, provenance, and failure classification.",
+        "At least three syntax examples are lowered into IR examples.",
+        "Compatibility notes explain how IR attaches to IntentContract, ExecutionPlan, StateEffect, and strict compiler envelopes.",
+        "Open questions are captured as follow-up tasks rather than implicit implementation guesses."
+      ],
+      "constraints": [
+        "Do not implement broad syntax before the IR is reviewed.",
+        "Keep the first IR minimal enough to compile and test."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-plan.md",
+        "docs/language-fundamentals.md",
+        "docs/compiler-pipeline-and-neural-bytecode.md",
+        "packages/core/src/contracts.js"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        "packages/core/**"
+      ],
+      "approval_required_for": [
+        "Changing public Semantix language syntax"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "ir",
+          "constraints"
+        ],
+        "roadmap_section": "Milestone 1: Constraint IR",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:68-86"
+      },
+      "comment": "First Phase 2 implementation task; held until Phase 1 readiness is published.",
+      "blocker_reason": "Waiting for stx-p1-005 to close Phase 1."
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-002",
+      "title": "Implement deterministic constraint compiler slice",
+      "parent_id": "stx-p2-000",
+      "goal": "Build the first compiler path that lowers constraint declarations into deterministic validation artifacts without requiring live model calls.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:88-100",
+        "docs/compiler-pipeline-and-neural-bytecode.md:116-138"
+      ],
+      "definition_of_done": [
+        "Compiler emits structural validators, file path policy, required/forbidden field validators, approval markers, and retry/fail policy for the first supported constraint subset.",
+        "Compiler rejects illegal or unsatisfiable hard constraints with deterministic errors.",
+        "Unit tests cover positive lowering and negative invalid-constraint cases.",
+        "No live model or provider dependency is needed for compiler tests."
+      ],
+      "constraints": [
+        "Prefer local package patterns over a new compiler framework.",
+        "No broad parser rewrite unless required by the chosen IR."
+      ],
+      "expected_changes": [
+        "packages/core/src/**",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/runtime-codex/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Changing existing strict compiler envelope shape"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "compiler",
+          "constraints"
+        ],
+        "roadmap_section": "Milestone 2: Deterministic Constraint Compiler",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:88-100"
+      },
+      "comment": "Compiler implementation starts after the Constraint IR is reviewed.",
+      "blocker_reason": "Waiting for stx-p2-001 to define the Constraint IR."
+    },
+    {
+      "dependencies": [
+        "stx-p2-002"
+      ],
+      "id": "stx-p2-003",
+      "title": "Implement runtime admission loop",
+      "parent_id": "stx-p2-000",
+      "goal": "Route semantic output candidates through compiled constraints before admission into trusted state, including bounded retry and fail-closed behavior.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:102-113",
+        "docs/compiler-pipeline-and-neural-bytecode.md:140-151"
+      ],
+      "definition_of_done": [
+        "Semantic candidates are parsed, validated, classified, retried within policy, and either admitted or rejected with deterministic reason codes.",
+        "Hard constraint violations fail closed and cannot become trusted state.",
+        "Retryable failures have fixed attempt budgets and persisted attempt evidence.",
+        "Tests cover admitted, retried-then-admitted, retry-exhausted, and hard-failed candidates."
+      ],
+      "constraints": [
+        "Do not expose constraint failures only as conversational text.",
+        "Do not allow side effects before admission succeeds."
+      ],
+      "expected_changes": [
+        "packages/core/src/v0-artifact.js",
+        "packages/core/src/control-plane-service.js",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/runtime-codex/tests/**",
+        "control-plane/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Changing semantic admission status vocabulary",
+        "Changing retry defaults"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "runtime",
+          "admission"
+        ],
+        "roadmap_section": "Milestone 3: Runtime Admission Loop",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:102-113"
+      },
+      "comment": "Runtime admission should build on the deterministic compiler slice.",
+      "blocker_reason": "Waiting for stx-p2-002 to emit executable constraint artifacts."
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-004",
+      "title": "Add verifier provider hook contract",
+      "parent_id": "stx-p2-000",
+      "goal": "Define and implement a narrow verifier/provider hook for advisory semantic checks while preserving Semantix as the decision authority.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:115-126",
+        "docs/semantix-control-plane-spec.md:673-680"
+      ],
+      "definition_of_done": [
+        "Verifier hook contract supports contradiction, entailment, groundedness, and similarity-style checks as advisory evidence.",
+        "Control-plane/runtime code treats verifier output as policy-bound evidence, not direct authority.",
+        "Tests cover verifier unavailable, verifier concern, and verifier block/downgrade behavior according to policy.",
+        "Provider adapter docs explain why provider-only execution remains outside this slice."
+      ],
+      "constraints": [
+        "Providers may advise; Semantix decides.",
+        "No provider-only execution path in this task."
+      ],
+      "expected_changes": [
+        "packages/core/src/runtime-registry.js",
+        "packages/core/src/contracts.js",
+        "docs/semantix-control-plane-spec.md",
+        "packages/core/tests/** or control-plane/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Adding a new provider family or external network-backed default"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "verifier",
+          "provider-contract"
+        ],
+        "roadmap_section": "Milestone 4: Verifier And Provider Hooks",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:115-126"
+      },
+      "comment": "Verifier hooks can be designed once the Constraint IR defines policy attachment points.",
+      "blocker_reason": "Waiting for stx-p2-001 to define verifier policy in the Constraint IR."
+    },
+    {
+      "dependencies": [
+        "stx-p2-003",
+        "stx-p2-004"
+      ],
+      "id": "stx-p2-005",
+      "title": "Build Constraint Engine proof matrix",
+      "parent_id": "stx-p2-000",
+      "goal": "Create deterministic fixtures that prove the Constraint Engine handles representative Semantix programs and failure modes.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:128-141",
+        "docs/plans/semantix-phase-2-plan.md:207-219"
+      ],
+      "definition_of_done": [
+        "Fixture matrix covers extraction, constrained summarization, semantic routing, safe file-change proposal, blocked path mutation, retryable schema failure, and non-retryable policy failure.",
+        "Concrete proof fixture covers a proposed file/API/shell effect rendered structurally, approved, invalidated by an artifact change, rejected as stale, re-approved from the fresh artifact, resumed, and executed.",
+        "The same stale-approval proof runs through the active Codex path and a mock or second runtime adapter path without requiring live external services.",
+        "Each fixture asserts contract shape, admission outcome, policy classification, freshness state, and audit evidence.",
+        "Core matrix passes without live services; any live smoke proof is additive and explicitly labeled."
+      ],
+      "constraints": [
+        "Do not require Phalanx or external services for deterministic proof coverage.",
+        "Negative tests must fail closed."
+      ],
+      "expected_changes": [
+        "packages/core/tests/**",
+        "packages/runtime-codex/tests/**",
+        "packages/stx/tests/**",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Adding live-service tests to the default test suite"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "proof",
+          "fixtures"
+        ],
+        "roadmap_section": "Milestone 5: Proof Matrix",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:128-141"
+      },
+      "comment": "Proof matrix now includes the required concrete stale-approval side-effect proof and second-adapter replay scenario.",
+      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-004.",
+      "related": [
+        "stx-p2-009"
+      ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-006",
+      "title": "Define audit bundle and signed artifact path",
+      "parent_id": "stx-p2-000",
+      "goal": "Specify the exportable evidence bundle for constraint admission and the path toward signed review artifacts.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:143-159",
+        "docs/Semantix Control Plane UI.md:676-697"
+      ],
+      "definition_of_done": [
+        "Audit bundle schema includes reviewed artifact identity, compiled constraint identity, candidate metadata, validation results, verifier results, retries, final outcome, and shown state effects.",
+        "Audit replay can enumerate the concrete proof sequence: proposed effect, structural render, first approval, artifact mutation, stale rejection, fresh re-approval, resume, and execution.",
+        "Replay evidence preserves reviewer-visible state-effect previews for file, API, and shell-style effects without relying on conversational transcript memory.",
+        "Signed review artifact path is documented with explicit out-of-scope cryptographic production hardening if needed.",
+        "Existing audit record flow remains compatible with v1 approval/freshness rules.",
+        "Tests or fixtures prove a sample bundle can be generated from deterministic admission evidence."
+      ],
+      "constraints": [
+        "Audit export can be a first schema and fixture; full export UI is not required.",
+        "Do not weaken existing durable review recording."
+      ],
+      "expected_changes": [
+        "packages/core/src/contracts.js",
+        "packages/core/src/control-plane-service.js",
+        "docs/Semantix Control Plane UI.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "docs/**",
+        "control-plane/**"
+      ],
+      "approval_required_for": [
+        "Introducing signing dependencies or external key management"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "audit",
+          "signed-artifacts"
+        ],
+        "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-159",
+        "phase2_proof_contract": "Audit replay must show exactly what was seen, approved, changed, rejected as stale, re-approved, resumed, and executed."
+      },
+      "comment": "Audit bundle work must support replay of the concrete stale-approval proof, including exactly what was shown, approved, invalidated, and executed.",
+      "blocker_reason": "Waiting for stx-p2-001 to define compiled constraint identity."
+    },
+    {
+      "dependencies": [
+        "stx-p2-003",
+        "stx-p2-006"
+      ],
+      "id": "stx-p2-007",
+      "title": "Implement provenance and replay foundation",
+      "parent_id": "stx-p2-000",
+      "goal": "Connect admitted semantic values to context, constraints, verifier evidence, artifact versions, and deterministic replay of admission decisions.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:143-170",
+        "docs/plans/semantix-phase-2-plan.md:196-205"
+      ],
+      "definition_of_done": [
+        "Admitted semantic values carry provenance links to context, constraints, verifier evidence, artifact identity, and admission attempt metadata.",
+        "Replay can reproduce deterministic admission or rejection from recorded candidate plus compiled constraints.",
+        "Replay shows the approval freshness chain for the concrete proof: artifact seen by reviewer, artifact that changed, rejected stale approval envelope, fresh approval envelope, and executed artifact.",
+        "Replay docs explicitly avoid promising token-level model reproduction.",
+        "Tests cover deterministic replay of at least one admitted candidate, one rejected candidate, and one stale approval rejection."
+      ],
+      "constraints": [
+        "Replay target is admission decision replay, not model token replay.",
+        "Do not store secrets or raw unbounded transcripts in provenance records."
+      ],
+      "expected_changes": [
+        "packages/core/src/contracts.js",
+        "packages/core/src/control-plane-service.js",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/**/tests/**",
+        "docs/**"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Persisting new classes of raw model output or context payloads"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "provenance",
+          "replay"
+        ],
+        "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-170",
+        "phase2_proof_replay": "Replay must expose exactly what was seen, approved, changed, and executed for the stale-approval proof."
+      },
+      "comment": "Replay/provenance now explicitly owns deterministic replay of stale approval rejection and fresh re-approval evidence.",
+      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-006.",
+      "related": [
+        "stx-p2-009"
+      ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-005",
+        "stx-p2-007",
+        "stx-p2-009"
+      ],
+      "id": "stx-p2-008",
+      "title": "Run Phase 2 readiness review",
+      "parent_id": "stx-p2-000",
+      "goal": "Review Phase 2 exit criteria against implementation evidence and decide whether runtime/provider expansion belongs in the next phase.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:207-219",
+        "docs/semantix-control-plane-spec.md:673-680"
+      ],
+      "definition_of_done": [
+        "Every Phase 2 exit criterion is mapped to tests, docs, or explicit deferred work.",
+        "Concrete stale-approval side-effect proof passes through Codex and a mock or second runtime adapter, with audit replay evidence attached.",
+        "Full repo tests pass or any skipped live-service checks are explicitly classified as additive smoke coverage.",
+        "Tracker status explains whether Phase 2 is closed, split, or still blocked.",
+        "A next-phase recommendation is recorded for runtime/provider expansion."
+      ],
+      "constraints": [
+        "Do not expand into multi-runtime execution until Constraint Engine evidence is complete.",
+        "Deferred work must be explicit and non-blocking."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-readiness.md",
+        "docs/plans/semantix-phase-2-plan.md",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Declaring Phase 2 closed",
+        "Opening provider-only or multi-runtime execution as the next phase"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "readiness",
+          "next-phase"
+        ],
+        "roadmap_section": "Exit Criteria",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:207-219"
+      },
+      "comment": "Final Phase 2 review waits for the concrete stale-approval/second-adapter proof evidence in addition to proof matrix and replay/provenance evidence.",
+      "blocker_reason": "Waiting for stx-p2-005 and stx-p2-007."
+    },
+    {
+      "dependencies": [
+        "stx-p2-003",
+        "stx-p2-006",
+        "stx-p2-007"
+      ],
+      "id": "stx-p2-009",
+      "title": "Prove stale side-effect approval across adapters",
+      "goal": "Build the concrete Phase 2 proof: a proposed side effect is rendered structurally, approved, invalidated by artifact drift, rejected as stale, re-approved from fresh state, executed, and replayed through Codex and a mock or second runtime adapter.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "parent_id": "stx-p2-000",
+      "effort": "m",
+      "related": [
+        "stx-p2-005",
+        "stx-p2-006",
+        "stx-p2-007"
+      ],
+      "comment": "This is the concrete proof requested for Phase 2; it should remain deterministic first, with live runtime coverage treated as additive.",
+      "references": [
+        "semantix-codex-poc-v2.md:301-335",
+        "docs/plans/semantix-phase-2-plan.md:143-170",
+        "docs/plans/semantix-phase-2-plan.md:207-219"
+      ],
+      "definition_of_done": [
+        "Codex/runtime candidate proposes at least one file, API, or shell-style side effect as structured data, not prose-only text.",
+        "Semantix renders the proposed effect structurally with artifact identity, graph version, node revision, state-effect preview, policy state, reversibility, and approval gate identity.",
+        "Reviewer approval binds to the rendered artifact identity and is accepted only while fresh.",
+        "The underlying artifact changes before execution and the old approval envelope is rejected as stale server-side.",
+        "Reviewer re-approves the fresh artifact and execution resumes from the approved checkpoint.",
+        "Audit replay shows exactly what was seen, approved, changed, rejected as stale, freshly approved, resumed, and executed.",
+        "The same flow passes through the active Codex adapter path and through a mock or second runtime adapter path.",
+        "Tests prove no side effect executes before fresh approval."
+      ],
+      "constraints": [
+        "No side effects before fresh approval.",
+        "Do not use a conversational approval gesture as authority; bind approval to artifactHash, planVersion, graphVersion, and node revision.",
+        "The mock or second adapter path must exercise the runtime adapter boundary, not bypass it through test-only direct mutation.",
+        "Live-service proof is optional and must be explicitly separated from deterministic CI coverage."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "packages/core/src/contracts.js",
+        "packages/core/src/runtime-registry.js",
+        "packages/runtime-codex/src/**",
+        "control-plane/tests/**",
+        "packages/**/tests/**",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Changing public approval or freshness semantics",
+        "Adding live-service tests to the default test suite",
+        "Introducing a non-mock second runtime adapter as a default dependency"
+      ]
     }
   ]
 }
