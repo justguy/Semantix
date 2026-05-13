@@ -432,6 +432,13 @@ function SimpleChangeCard({
             </div>
           ) : null}
 
+          {change.previewFidelity && (
+            <div style={{ background: change.previewFidelity === "metadata_only" ? t.orangeSoft : t.greenSoft, borderBottom: `1px solid ${t.border}`, color: t.text, padding: "7px 16px", fontSize: 11.5, fontWeight: 700 }}>
+              {change.previewFidelity === "metadata_only"
+                ? "Metadata-only preview"
+                : change.previewSourceLabel || "Runtime preview"}
+            </div>
+          )}
           <div style={{ background: t.panel, borderBottom: `1px solid ${t.border}`, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5, lineHeight: 1.55, overflowX: "auto" }}>
             <pre style={{ margin: 0, padding: "14px 16px", color: t.text, whiteSpace: "pre" }}>{change.preview || change.diff || change.diffPreview || change.summary}</pre>
           </div>

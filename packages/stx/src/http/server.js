@@ -63,6 +63,10 @@ function compactInspectorPayload(payload) {
         summary: payload.outputPreview.summary,
         structuredData: payload.outputPreview.structuredData,
         previewRef: payload.outputPreview.previewRef,
+        previewSource: payload.outputPreview.previewSource,
+        previewSourceLabel: payload.outputPreview.previewSourceLabel,
+        previewFidelity: payload.outputPreview.previewFidelity,
+        previewIsSynthetic: payload.outputPreview.previewIsSynthetic,
         diffPreview: typeof payload.outputPreview.diffPreview === "string" ? payload.outputPreview.diffPreview : undefined,
         stateEffects: payload.outputPreview.stateEffects,
       })

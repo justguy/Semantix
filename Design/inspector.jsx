@@ -1,9 +1,13 @@
-function InspectorSection({ t, title, children }) {
+// Inspector — right panel detail for a selected node
+const { useState: useStateI } = React;
+
+function Section({ t, title, children, dense }) {
   return (
-    <div style={{ padding: "14px 14px 16px", borderBottom: `1px solid ${t.border}` }}>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: t.textFaint, marginBottom: 10 }}>
-        {title}
-      </div>
+    <div style={{ padding: dense ? '10px 14px' : '14px 14px', borderBottom: `1px solid ${t.border}` }}>
+      <div style={{
+        fontSize: 10, fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase',
+        color: t.textFaint, marginBottom: 8,
+      }}>{title}</div>
       {children}
     </div>
   );
@@ -11,360 +15,168 @@ function InspectorSection({ t, title, children }) {
 
 function KV({ t, label, children, mono }) {
   return (
-    <div style={{ display: "flex", gap: 10, fontSize: 12.5, lineHeight: 1.55, marginBottom: 6 }}>
-      <div style={{ color: t.textDim, minWidth: 104, fontSize: 11.5 }}>{label}</div>
-      <div style={{ flex: 1, color: t.text, fontFamily: mono ? 'ui-monospace, Menlo, monospace' : "inherit", wordBreak: "break-word" }}>{children}</div>
+    <div style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 4, lineHeight: 1.5 }}>
+      <div style={{ color: t.textDim, minWidth: 92, fontSize: 12 }}>{label}</div>
+      <div style={{ flex: 1, color: t.text, fontFamily: mono ? 'ui-monospace, Menlo, monospace' : 'inherit', fontSize: mono ? 12 : 12.5, wordBreak: 'break-word' }}>{children}</div>
     </div>
   );
 }
 
-function ListBlock({ t, items, bulletColor }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {items.map((item, index) => (
-        <div key={`${index}:${item}`} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.5 }}>
-          <span style={{ color: bulletColor || t.textFaint }}>•</span>
-          <span style={{ color: t.text }}>{item}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Inspector({ t, artifact, node, approvals, payload, isLoading, loadError, onJumpToDiff, onIntervene }) {
+function Inspector({ t, node, allDiff, onJumpToDiff, onIntervene }) {
   if (!node) {
     return (
-      <div style={{ padding: 42, textAlign: "center", color: t.textFaint, fontSize: 13 }}>
+      <div style={{ padding: 40, textAlign: 'center', color: t.textFaint, fontSize: 13 }}>
         <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.3 }}>◎</div>
-        Select an execution node to inspect its structured Semantix payload.
+        Select a node in the graph to inspect context, constraints, and intervention options.
       </div>
     );
   }
 
-  const resolvedPayload = payload || getNodeInspectorPayload(artifact, node.id) || { node };
-  const risk = resolveRiskFromNode(node);
-  const { fg: riskFg, bg: riskBg } = RISK_TOKEN(t, risk);
-  const sections = [];
-  const proposedChanges = resolvedPayload.proposedChanges || [];
-  const gates = resolvedPayload.approvals?.gates || (resolvedPayload.approvals?.gateId ? [{
-    id: resolvedPayload.approvals.gateId,
-    status: resolvedPayload.approvals.gateStatus || resolvedPayload.approvals.status,
-    planVersion: resolvedPayload.approvals.planVersion,
-  }] : []);
-  const contextInputs = resolvedPayload.context?.inputs || resolvedPayload.context?.visibleSources || [];
-
-  sections.push({
-    title: "Overview",
-    content: (
-      <>
-        <KV t={t} label="Node id" mono>{node.id}</KV>
-        <KV t={t} label="Type">{node.nodeType}</KV>
-        <KV t={t} label="Review status">{reviewStatusLabel(node.reviewStatus)}</KV>
-        <KV t={t} label="Execution">{reviewStatusLabel(node.executionStatus)}</KV>
-        {resolvedPayload.overview?.purpose && <KV t={t} label="Purpose">{resolvedPayload.overview.purpose}</KV>}
-        <KV t={t} label="Owner">{prettySystemName(node.gatingOwner)}</KV>
-        {node.contributingSystems?.length > 0 && (
-          <KV t={t} label="Systems">{node.contributingSystems.map(prettySystemName).join(" · ")}</KV>
-        )}
-      </>
-    ),
-  });
-
-  if (resolvedPayload.intentLinkage) {
-    sections.push({
-      title: "Intent linkage",
-      content: (
-        <>
-          <KV t={t} label="Directive">{resolvedPayload.intentLinkage.primaryDirective}</KV>
-          {resolvedPayload.intentLinkage.strictBoundaries?.length > 0 && (
-            <KV t={t} label="Boundaries">
-              <ListBlock t={t} items={resolvedPayload.intentLinkage.strictBoundaries} bulletColor={t.red} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (contextInputs.length || resolvedPayload.context?.inputSummary || resolvedPayload.context?.grounding || node.sourceCount != null) {
-    sections.push({
-      title: "Context",
-      content: (
-        <>
-          {resolvedPayload.context?.inputSummary && <KV t={t} label="Summary">{resolvedPayload.context.inputSummary}</KV>}
-          {resolvedPayload.context?.grounding && <KV t={t} label="Grounding">{resolvedPayload.context.grounding}</KV>}
-          {node.sourceCount != null && <KV t={t} label="Sources">{node.sourceCount}</KV>}
-          {contextInputs.length > 0 && (
-            <KV t={t} label="Inputs">
-              <ListBlock t={t} items={contextInputs} />
-            </KV>
-          )}
-          {resolvedPayload.context?.upstreamInputs?.length > 0 && (
-            <KV t={t} label="Upstream">
-              <ListBlock t={t} items={resolvedPayload.context.upstreamInputs} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (resolvedPayload.constraints?.hard?.length || resolvedPayload.constraints?.soft?.length) {
-    sections.push({
-      title: "Constraints",
-      content: (
-        <>
-          {resolvedPayload.constraints.hard?.length > 0 && (
-            <div style={{ marginBottom: resolvedPayload.constraints.soft?.length ? 10 : 0 }}>
-              <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Hard constraints</div>
-              <ListBlock t={t} items={resolvedPayload.constraints.hard} bulletColor={t.red} />
-            </div>
-          )}
-          {resolvedPayload.constraints.soft?.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Soft constraints</div>
-              <ListBlock t={t} items={resolvedPayload.constraints.soft} bulletColor={t.yellow} />
-            </div>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (resolvedPayload.outputPreview?.summary || resolvedPayload.outputPreview?.preview || node.outputSummary || resolvedPayload.outputPreview?.structuredData?.length) {
-    sections.push({
-      title: "Output preview",
-      content: (
-        <>
-          <KV t={t} label="Summary">{resolvedPayload.outputPreview?.summary || node.outputSummary}</KV>
-          {resolvedPayload.outputPreview?.preview && (
-            <div style={{ fontSize: 12, fontFamily: 'ui-monospace, Menlo, monospace', color: t.text, background: t.panelAlt, padding: 10, borderRadius: 8, border: `1px solid ${t.border}`, whiteSpace: "pre-wrap" }}>
-              {resolvedPayload.outputPreview.preview}
-            </div>
-          )}
-          {resolvedPayload.outputPreview?.structuredData?.length > 0 && (
-            <KV t={t} label="Structured">
-              <ListBlock t={t} items={resolvedPayload.outputPreview.structuredData.map((entry) => `${entry.id} · ${entry.target} · ${entry.policyState}`)} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (resolvedPayload.critique?.summary || resolvedPayload.critique?.riskFlags?.length || resolvedPayload.critique?.confidenceBand) {
-    sections.push({
-      title: "CT-MCP critique",
-      content: (
-        <div style={{ background: riskBg, border: `1px solid ${riskFg}40`, borderRadius: 10, padding: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", color: riskFg, marginBottom: 6 }}>
-            {resolvedPayload.critique?.severity || resolvedPayload.critique?.confidenceBand || "review warning"}
-          </div>
-          {resolvedPayload.critique?.summary && (
-            <div style={{ fontSize: 12.5, color: t.text, lineHeight: 1.55 }}>{resolvedPayload.critique.summary}</div>
-          )}
-          {!resolvedPayload.critique?.summary && resolvedPayload.critique?.riskFlags?.length > 0 && (
-            <ListBlock t={t} items={resolvedPayload.critique.riskFlags} bulletColor={riskFg} />
-          )}
-          {resolvedPayload.critique?.suggestion && (
-            <div style={{ fontSize: 12, color: t.textDim, marginTop: 8 }}>→ {resolvedPayload.critique.suggestion}</div>
-          )}
-        </div>
-      ),
-    });
-  }
-
-  if (resolvedPayload.tooling?.visibleTools?.length || resolvedPayload.tooling?.runtimeBinding?.runtimeKind || resolvedPayload.tooling?.permissionLevel || resolvedPayload.tooling?.capabilityScope?.length) {
-    sections.push({
-      title: "Tooling",
-      content: (
-        <>
-          {resolvedPayload.tooling?.runtimeBinding?.runtimeKind && (
-            <KV t={t} label="Runtime">{resolvedPayload.tooling.runtimeBinding.runtimeKind}</KV>
-          )}
-          {resolvedPayload.tooling?.permissionLevel && (
-            <KV t={t} label="Permission">{resolvedPayload.tooling.permissionLevel}</KV>
-          )}
-          {resolvedPayload.tooling?.capabilityScope?.length > 0 && (
-            <KV t={t} label="Scope">
-              <ListBlock t={t} items={resolvedPayload.tooling.capabilityScope} />
-            </KV>
-          )}
-          {resolvedPayload.tooling?.visibleTools?.length > 0 && (
-            <KV t={t} label="Visible tools">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {resolvedPayload.tooling.visibleTools.map((tool) => (
-                  <span key={tool} style={{ fontSize: 11.5, fontFamily: 'ui-monospace, Menlo, monospace', padding: "3px 8px", borderRadius: 7, background: t.panelAlt, color: t.text, border: `1px solid ${t.border}` }}>
-                    {tool}
-                  </span>
-                ))}
-              </div>
-            </KV>
-          )}
-          {resolvedPayload.tooling?.approvalPreconditions?.length > 0 && (
-            <KV t={t} label="Preconditions">
-              <ListBlock t={t} items={resolvedPayload.tooling.approvalPreconditions} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (proposedChanges.length > 0) {
-    sections.push({
-      title: "Proposed changes",
-      content: (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {proposedChanges.map((change) => (
-            <button
-              key={change.id}
-              onClick={() => onJumpToDiff(change.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: `1px solid ${t.border}`,
-                background: t.panelAlt,
-                color: t.text,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              <div style={{ color: t.textDim }}>
-                {(KIND_ICON[change.kind] || Icon.File)()}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {change.target}
-                </div>
-                <div style={{ fontSize: 11.5, color: t.textDim }}>{change.summary}</div>
-              </div>
-              <Pill t={t} risk={(change.policyState || change.policy) === "block" ? "red" : (change.policyState || change.policy) === "review_required" ? "orange" : "green"}>
-                {change.policyState || change.policy}
-              </Pill>
-            </button>
-          ))}
-        </div>
-      ),
-    });
-  }
-
-  if (resolvedPayload.approvals?.approvalRequired || resolvedPayload.approvals?.required || gates.length > 0) {
-    sections.push({
-      title: "Approvals and gates",
-      content: (
-        <>
-          <KV t={t} label="Approval required">{resolvedPayload.approvals?.approvalRequired || resolvedPayload.approvals?.required ? "yes" : "no"}</KV>
-          {gates.length > 0 && (
-            <KV t={t} label="Gates">
-              <ListBlock
-                t={t}
-                items={gates.map((gate) => `${gate.id} · ${gate.status} · plan v${gate.planVersion}`)}
-              />
-            </KV>
-          )}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            <Btn t={t} variant="ghost" icon={<Icon.Edit />} onClick={() => onIntervene(node.id, "add-source")}>
-              Edit context
-            </Btn>
-            <Btn t={t} variant="ghost" icon={<Icon.Edit />} onClick={() => onIntervene(node.id, "tighten")}>
-              Edit constraints
-            </Btn>
-            <Btn t={t} variant="ghost" icon={<Icon.Refresh />} onClick={() => onIntervene(node.id, "split-node")}>
-              Split node
-            </Btn>
-            <Btn t={t} variant="ghost" icon={<Icon.Refresh />} onClick={() => onIntervene(node.id, "regenerate")}>
-              Regenerate
-            </Btn>
-            <Btn t={t} variant="ghost" icon={<Icon.Lock />} onClick={() => onIntervene(node.id, "require-approval")}>
-              Mark approval-required
-            </Btn>
-          </div>
-        </>
-      ),
-    });
-  }
-
-  if (resolvedPayload.replay?.traceHandle || resolvedPayload.replay?.checkpointId || resolvedPayload.replay?.command || resolvedPayload.replay?.runId || resolvedPayload.replay?.checkpoints?.length) {
-    sections.push({
-      title: "Replay and trace",
-      content: (
-        <>
-          {resolvedPayload.replay?.checkpointId && <KV t={t} label="Checkpoint" mono>{resolvedPayload.replay.checkpointId}</KV>}
-          {resolvedPayload.replay?.traceHandle && <KV t={t} label="Trace" mono>{resolvedPayload.replay.traceHandle}</KV>}
-          {resolvedPayload.replay?.command && <KV t={t} label="Command" mono>{resolvedPayload.replay.command}</KV>}
-          {resolvedPayload.replay?.runId && <KV t={t} label="Run" mono>{resolvedPayload.replay.runId}</KV>}
-          {resolvedPayload.replay?.checkpoints?.length > 0 && (
-            <KV t={t} label="Checkpoints">
-              <ListBlock t={t} items={resolvedPayload.replay.checkpoints.map((checkpoint) => `${checkpoint.id} · ${checkpoint.reason}`)} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
-
-  if (resolvedPayload.audit?.artifactId || resolvedPayload.audit?.artifactHash || resolvedPayload.audit?.lastArtifactHash || resolvedPayload.audit?.nodeRevision != null || resolvedPayload.audit?.riskSignals?.length) {
-    sections.push({
-      title: "Audit metadata",
-      content: (
-        <>
-          {resolvedPayload.audit.artifactId && <KV t={t} label="Artifact" mono>{resolvedPayload.audit.artifactId}</KV>}
-          {resolvedPayload.audit.artifactHash && <KV t={t} label="Hash" mono>{shortHash(resolvedPayload.audit.artifactHash)}</KV>}
-          {!resolvedPayload.audit.artifactHash && resolvedPayload.audit.lastArtifactHash && (
-            <KV t={t} label="Hash" mono>{shortHash(resolvedPayload.audit.lastArtifactHash)}</KV>
-          )}
-          {resolvedPayload.audit.planVersion != null && <KV t={t} label="Plan version">{resolvedPayload.audit.planVersion}</KV>}
-          {resolvedPayload.audit.graphVersion != null && <KV t={t} label="Graph version">{resolvedPayload.audit.graphVersion}</KV>}
-          {resolvedPayload.audit.nodeRevision != null && <KV t={t} label="Node revision">{resolvedPayload.audit.nodeRevision}</KV>}
-          {resolvedPayload.audit.riskSignals?.length > 0 && (
-            <KV t={t} label="Risk signals">
-              <ListBlock t={t} items={resolvedPayload.audit.riskSignals.map((signal) => `${signal.severity} · ${signal.message}`)} />
-            </KV>
-          )}
-        </>
-      ),
-    });
-  }
+  const { fg: riskFg, bg: riskBg } = RISK_TOKEN(t, node.risk);
+  const nodeDiffs = allDiff.filter(d => d.node === node.id);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "auto" }}>
-      <div style={{ padding: "16px 14px", borderBottom: `1px solid ${t.border}`, background: t.panel }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <RiskDot t={t} risk={risk} />
-          <span style={{ fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', color: t.textFaint }}>{nodeRevisionKey(node)}</span>
-          <TypeBadge t={t} type={node.nodeType} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 14px', borderBottom: `1px solid ${t.border}`, background: t.panel }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <RiskDot t={t} risk={node.risk} />
+          <span style={{ fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', color: t.textFaint }}>{node.id}</span>
+          <TypeBadge t={t} type={node.type} />
           <div style={{ flex: 1 }} />
-          <Pill t={t} risk={risk}>{node.confidenceBand || "review"}</Pill>
+          <Pill t={t} risk={node.risk}>{node.confidence} confidence</Pill>
         </div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: t.text, marginBottom: 6 }}>{node.title}</div>
-      {node.reviewStatus === "stale" && (
-        <div style={{ padding: "8px 10px", borderRadius: 8, background: t.redSoft, color: t.text, fontSize: 12.5, border: `1px solid ${t.red}33` }}>
-          This node is stale and must be re-reviewed on the latest artifact.
-        </div>
-      )}
-      {isLoading && (
-        <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: t.panelAlt, color: t.textDim, fontSize: 12.5, border: `1px solid ${t.border}` }}>
-          Loading live inspector payload from the control plane…
-        </div>
-      )}
-      {loadError && (
-        <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: t.redSoft, color: t.text, fontSize: 12.5, border: `1px solid ${t.red}33` }}>
-          {loadError}
-        </div>
-      )}
+        <div style={{ fontSize: 16, fontWeight: 600, color: t.text, marginBottom: 6 }}>{node.title}</div>
+        <div style={{ fontSize: 12.5, color: t.textDim, lineHeight: 1.5 }}>{node.purpose}</div>
       </div>
 
-      {sections.filter((section) => section.content).map((section) => (
-        <InspectorSection key={section.title} t={t} title={section.title}>
-          {section.content}
-        </InspectorSection>
-      ))}
+      {/* Critique callout */}
+      {node.critique && (
+        <div style={{
+          margin: '12px 14px 0', padding: 12, borderRadius: 8,
+          background: riskBg, border: `1px solid ${riskFg}40`,
+          display: 'flex', gap: 10, alignItems: 'flex-start',
+        }}>
+          <div style={{ color: riskFg, marginTop: 1 }}><Icon.Alert /></div>
+          <div style={{ flex: 1, fontSize: 12.5, lineHeight: 1.5, color: t.text }}>
+            <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', color: riskFg }}>
+              {node.critique.severity.replace('-', ' ')}
+            </div>
+            <div>{node.critique.summary}</div>
+            {node.critique.suggestion && (
+              <div style={{ marginTop: 6, color: t.textDim, fontSize: 12 }}>
+                → {node.critique.suggestion}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <Section t={t} title="Grounding">
+        <div style={{ display: 'flex', gap: 16, fontSize: 12.5 }}>
+          <div>
+            <div style={{ color: t.textDim, fontSize: 11, marginBottom: 2 }}>Origin</div>
+            <div style={{ color: t.text, fontWeight: 500, textTransform: 'capitalize' }}>{node.grounding}</div>
+          </div>
+          <div>
+            <div style={{ color: t.textDim, fontSize: 11, marginBottom: 2 }}>Owner</div>
+            <div style={{ color: t.text, fontWeight: 500 }}>{node.owner}</div>
+          </div>
+          <div>
+            <div style={{ color: t.textDim, fontSize: 11, marginBottom: 2 }}>Sources</div>
+            <div style={{ color: t.text, fontWeight: 500 }}>{node.sources}</div>
+          </div>
+          <div>
+            <div style={{ color: t.textDim, fontSize: 11, marginBottom: 2 }}>Tools</div>
+            <div style={{ color: t.text, fontWeight: 500 }}>{node.tools}</div>
+          </div>
+        </div>
+      </Section>
+
+      <Section t={t} title="Context scope">
+        {node.inputs.map((inp, i) => (
+          <div key={i} style={{ fontSize: 12, fontFamily: 'ui-monospace, Menlo, monospace', color: t.text, padding: '3px 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: t.textFaint }}>·</span>{inp}
+          </div>
+        ))}
+      </Section>
+
+      <Section t={t} title="Constraints">
+        {node.constraints.hard.length === 0 && node.constraints.soft.length === 0 && (
+          <div style={{ fontSize: 12, color: t.textFaint }}>No constraints on this node.</div>
+        )}
+        {node.constraints.hard.map((c, i) => (
+          <div key={`h${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, padding: '3px 0' }}>
+            <Pill t={t} risk="red" style={{ fontSize: 9 }}>HARD</Pill>
+            <span style={{ color: t.text, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5 }}>{c}</span>
+          </div>
+        ))}
+        {node.constraints.soft.map((c, i) => (
+          <div key={`s${i}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, padding: '3px 0' }}>
+            <Pill t={t} style={{ fontSize: 9 }}>SOFT</Pill>
+            <span style={{ color: t.textDim, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5 }}>{c}</span>
+          </div>
+        ))}
+      </Section>
+
+      {node.tools_visible && node.tools_visible.length > 0 && (
+        <Section t={t} title="Visible tools">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {node.tools_visible.map(tool => (
+              <span key={tool} style={{
+                fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace',
+                padding: '3px 8px', borderRadius: 6, background: t.panelAlt, color: t.text,
+                border: `1px solid ${t.border}`,
+              }}>{tool}</span>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section t={t} title="Output preview">
+        <div style={{ fontSize: 12, fontFamily: 'ui-monospace, Menlo, monospace', color: t.text,
+          background: t.panelAlt, padding: 10, borderRadius: 6, border: `1px solid ${t.border}` }}>
+          {node.output}
+        </div>
+      </Section>
+
+      {nodeDiffs.length > 0 && (
+        <Section t={t} title={`Proposed changes (${nodeDiffs.length})`}>
+          {nodeDiffs.map(d => {
+            const KindIcon = KIND_ICON[d.kind] || Icon.File;
+            return (
+              <div key={d.id} onClick={() => onJumpToDiff(d.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                  borderRadius: 6, cursor: 'pointer', marginBottom: 4,
+                  background: t.panelAlt, border: `1px solid ${t.border}`,
+                }}>
+                <div style={{ color: t.textDim }}><KindIcon /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.target}</div>
+                  <div style={{ fontSize: 11, color: t.textDim }}>{d.summary}</div>
+                </div>
+                {d.policy === 'block' && <Pill t={t} risk="red" strong>blocked</Pill>}
+                {d.policy === 'review_required' && <Pill t={t} risk="orange">review</Pill>}
+                {d.policy === 'pass' && <Pill t={t} risk="green">pass</Pill>}
+              </div>
+            );
+          })}
+        </Section>
+      )}
+
+      {node.critique && (
+        <Section t={t} title="Interventions">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <Btn t={t} variant="ghost" onClick={() => onIntervene(node.id, 'add-source')} icon={<Icon.Edit />}>Add source</Btn>
+            <Btn t={t} variant="ghost" onClick={() => onIntervene(node.id, 'tighten')} icon={<Icon.Edit />}>Tighten constraint</Btn>
+            <Btn t={t} variant="ghost" onClick={() => onIntervene(node.id, 'regenerate')} icon={<Icon.Refresh />}>Regenerate</Btn>
+            <Btn t={t} variant="ghost" onClick={() => onIntervene(node.id, 'require-approval')} icon={<Icon.Lock />}>Require approval</Btn>
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
 
-Object.assign(window, { Inspector, InspectorSection, KV });
+Object.assign(window, { Inspector });

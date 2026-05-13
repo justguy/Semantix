@@ -683,7 +683,13 @@ test("resolves preview content JSON by previewRef over HTTP", async (t) => {
   assert.equal(preview.graphVersion, artifact.graphVersion);
   assert.equal(preview.artifactHash, artifact.artifactHash);
   assert.equal(preview.mediaType, "text/plain; charset=utf-8");
+  assert.equal(preview.source, "state_effect_metadata");
+  assert.equal(preview.sourceLabel, "Synthesized StateEffect metadata");
+  assert.equal(preview.fidelity, "metadata_only");
+  assert.equal(preview.contentIsSynthetic, true);
   assert.ok(preview.content.includes(`! previewRef ${effect.previewRef}`));
+  assert.ok(preview.content.includes("! previewSource state_effect_metadata"));
+  assert.ok(preview.content.includes("! previewFidelity metadata_only"));
   assert.ok(preview.content.includes(effect.summary));
 });
 
@@ -722,6 +728,17 @@ test("executes the Semantix v0.5 happy path over HTTP with stable proposed chang
   assert.ok(pausedEffect);
   assert.equal(pausedEffect.diffPreview, "@@ -1 +1 @@\n-old\n+new\n");
 
+  const previewResponse = await fetch(
+    `${baseUrl}/runs/run-http-v05-happy/previews?previewRef=${encodeURIComponent(pausedEffect.previewRef)}`,
+  );
+  assert.equal(previewResponse.status, 200);
+  const preview = await previewResponse.json();
+  assert.equal(preview.source, "runtime_diff");
+  assert.equal(preview.sourceLabel, "Runtime diff body");
+  assert.equal(preview.fidelity, "runtime_diff");
+  assert.equal(preview.contentIsSynthetic, false);
+  assert.equal(preview.mediaType, "text/x-diff; charset=utf-8");
+
   const inspectorResponse = await fetch(
     `${baseUrl}/runs/run-http-v05-happy/nodes/${encodeURIComponent(deterministicNode.id)}/inspector`,
   );
@@ -734,7 +751,13 @@ test("executes the Semantix v0.5 happy path over HTTP with stable proposed chang
   assert.equal(inspectorEffect.previewRef, "preview://host/1");
   assert.notEqual(inspectorEffect.target, DEFAULT_TARGET_SYMBOL);
   assert.equal(inspector.outputPreview.diffPreview, "@@ -1 +1 @@\n-old\n+new\n");
+  assert.equal(inspector.outputPreview.previewSource, "runtime_diff");
+  assert.equal(inspector.outputPreview.previewFidelity, "runtime_diff");
+  assert.equal(inspector.outputPreview.previewIsSynthetic, false);
   assert.equal(inspectorEffect.previewRef, "preview://host/1");
+  assert.equal(inspectorEffect.previewSource, "runtime_diff");
+  assert.equal(inspectorEffect.previewFidelity, "runtime_diff");
+  assert.equal(inspectorEffect.previewIsSynthetic, false);
 
   const approvalResponse = await postJson(`${baseUrl}/runs/run-http-v05-happy/approvals`, {
     actor: "reviewer",

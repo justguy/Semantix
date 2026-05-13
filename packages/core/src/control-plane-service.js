@@ -110,6 +110,8 @@ function synthesizePreviewContent(effect) {
     : effect.reversibility?.status ?? "unknown";
   const lines = [
     `! previewRef ${effect.previewRef ?? "none"}`,
+    "! previewSource state_effect_metadata",
+    "! previewFidelity metadata_only",
     `! kind ${effect.kind} · ${effect.operation}`,
     `! target ${effect.target}`,
     `! summary ${effect.summary}`,
@@ -129,37 +131,88 @@ function synthesizePreviewContent(effect) {
   return lines.join("\n");
 }
 
+function findExplicitPreviewContent(effect) {
+  const candidates = [
+    { value: effect.diff, source: "runtime_diff", fidelity: "runtime_diff", label: "Runtime diff body" },
+    { value: effect.diffPreview, source: "runtime_diff", fidelity: "runtime_diff", label: "Runtime diff body" },
+    { value: effect.preview, source: "runtime_preview", fidelity: "runtime_preview", label: "Runtime preview body" },
+    { value: effect.content, source: "runtime_preview", fidelity: "runtime_preview", label: "Runtime preview body" },
+    { value: effect.body, source: "runtime_preview", fidelity: "runtime_preview", label: "Runtime preview body" },
+  ];
+
+  for (const candidate of candidates) {
+    const content = stringifyPreviewValue(candidate.value);
+    if (content) {
+      return {
+        ...candidate,
+        content,
+      };
+    }
+  }
+
+  return null;
+}
+
+function decorateStateEffectWithPreviewRecord(effect, previewRecord) {
+  if (!previewRecord) {
+    return effect;
+  }
+
+  return {
+    ...effect,
+    previewSource: previewRecord.source,
+    previewSourceLabel: previewRecord.sourceLabel,
+    previewFidelity: previewRecord.fidelity,
+    previewIsSynthetic: previewRecord.contentIsSynthetic,
+  };
+}
+
 function resolvePreviewRecord(effect, previousRecord) {
   if (!effect?.previewRef) {
     return null;
   }
 
-  const explicitContent = [
-    effect.preview,
-    effect.diff,
-    effect.diffPreview,
-    effect.content,
-    effect.body,
-  ]
-    .map((value) => stringifyPreviewValue(value))
-    .find(Boolean);
+  const explicitContent = findExplicitPreviewContent(effect);
+  const fallbackRecord = previousRecord?.content
+    ? previousRecord
+    : {
+        content: synthesizePreviewContent(effect),
+        source: "state_effect_metadata",
+        sourceLabel: "Synthesized StateEffect metadata",
+        fidelity: "metadata_only",
+        contentIsSynthetic: true,
+      };
 
-  const content = explicitContent || previousRecord?.content || synthesizePreviewContent(effect);
-  const mediaType =
+  const content = explicitContent?.content ?? fallbackRecord.content;
+  const source = explicitContent?.source ?? fallbackRecord.source ?? "state_effect_metadata";
+  const sourceLabel =
+    explicitContent?.label ??
+    fallbackRecord.sourceLabel ??
+    (source === "state_effect_metadata" ? "Synthesized StateEffect metadata" : "Runtime preview body");
+  const fidelity =
+    explicitContent?.fidelity ??
+    fallbackRecord.fidelity ??
+    (source === "state_effect_metadata" ? "metadata_only" : "runtime_preview");
+  const contentIsSynthetic =
+    explicitContent ? false : fallbackRecord.contentIsSynthetic ?? source === "state_effect_metadata";
+  const declaredMediaType =
     effect.mediaType ??
     effect.previewMediaType ??
     effect.contentType ??
-    previousRecord?.mediaType ??
-    "text/plain; charset=utf-8";
+    previousRecord?.mediaType;
+  const mediaType =
+    source === "runtime_diff" && (!declaredMediaType || declaredMediaType === "text/plain; charset=utf-8")
+      ? "text/x-diff; charset=utf-8"
+      : declaredMediaType ?? "text/plain; charset=utf-8";
 
   return {
     previewRef: effect.previewRef,
     mediaType,
     content,
-    source:
-      explicitContent
-        ? "runtime"
-        : previousRecord?.source ?? "artifact",
+    source,
+    sourceLabel,
+    fidelity,
+    contentIsSynthetic,
   };
 }
 
@@ -278,19 +331,28 @@ function collectDeterministicReviewMetadata(effects = []) {
 
 function buildDeterministicInspectorPayloadMap(artifact) {
   const inspectors = buildInspectorPayloadMap(artifact);
+  const previewIndex = buildPreviewIndex(artifact);
 
   for (const node of artifact?.plan?.nodes ?? []) {
     if (!isDeterministicExecutionNode(node)) {
       continue;
     }
 
-    const stateEffects = findStateEffectsForNode(artifact, node);
+    const stateEffects = findStateEffectsForNode(artifact, node).map((effect) =>
+      decorateStateEffectWithPreviewRecord(effect, previewIndex[effect.previewRef]),
+    );
     const review = collectDeterministicReviewMetadata(stateEffects);
     const primaryEffect = stateEffects[0] ?? node.stateEffectPreview ?? null;
 
     inspectors[node.id] = mergeInspectorPayload(inspectors[node.id], {
       outputPreview: {
         ...(primaryEffect?.previewRef ? { previewRef: primaryEffect.previewRef } : {}),
+        ...(primaryEffect?.previewSource ? { previewSource: primaryEffect.previewSource } : {}),
+        ...(primaryEffect?.previewSourceLabel ? { previewSourceLabel: primaryEffect.previewSourceLabel } : {}),
+        ...(primaryEffect?.previewFidelity ? { previewFidelity: primaryEffect.previewFidelity } : {}),
+        ...(primaryEffect?.previewIsSynthetic !== undefined
+          ? { previewIsSynthetic: primaryEffect.previewIsSynthetic }
+          : {}),
         ...(primaryEffect?.preview !== undefined ? { preview: primaryEffect.preview } : {}),
         ...(primaryEffect?.diff !== undefined ? { diff: primaryEffect.diff } : {}),
         ...(primaryEffect?.diffPreview !== undefined ? { diffPreview: primaryEffect.diffPreview } : {}),

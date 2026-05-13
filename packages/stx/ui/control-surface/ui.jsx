@@ -562,6 +562,60 @@ function resolvePreviewBody(previewCache, change) {
   );
 }
 
+function resolvePreviewMetadata(previewCache, change) {
+  const cached = change.previewRef ? previewCache?.[change.previewRef] : null;
+  if (cached) {
+    const source = cached.previewSource || cached.source || "state_effect_metadata";
+    return {
+      previewSource: source,
+      previewSourceLabel: cached.previewSourceLabel || cached.sourceLabel || previewSourceLabel(source),
+      previewFidelity: cached.previewFidelity || cached.fidelity || (source === "state_effect_metadata" ? "metadata_only" : "runtime_preview"),
+      previewIsSynthetic: cached.previewIsSynthetic ?? cached.contentIsSynthetic ?? source === "state_effect_metadata",
+    };
+  }
+
+  if (change.previewSource || change.previewFidelity) {
+    const source = change.previewSource || (change.previewFidelity === "metadata_only" ? "state_effect_metadata" : "runtime_preview");
+    return {
+      previewSource: source,
+      previewSourceLabel: change.previewSourceLabel || previewSourceLabel(source),
+      previewFidelity: change.previewFidelity || (source === "state_effect_metadata" ? "metadata_only" : "runtime_preview"),
+      previewIsSynthetic: change.previewIsSynthetic ?? source === "state_effect_metadata",
+    };
+  }
+
+  if (change.diff || change.diffPreview) {
+    return {
+      previewSource: "runtime_diff",
+      previewSourceLabel: previewSourceLabel("runtime_diff"),
+      previewFidelity: "runtime_diff",
+      previewIsSynthetic: false,
+    };
+  }
+
+  if (change.preview || change.content || change.body) {
+    return {
+      previewSource: "runtime_preview",
+      previewSourceLabel: previewSourceLabel("runtime_preview"),
+      previewFidelity: "runtime_preview",
+      previewIsSynthetic: false,
+    };
+  }
+
+  return {
+    previewSource: "state_effect_metadata",
+    previewSourceLabel: previewSourceLabel("state_effect_metadata"),
+    previewFidelity: "metadata_only",
+    previewIsSynthetic: true,
+  };
+}
+
+function previewSourceLabel(source) {
+  if (source === "runtime_diff") return "Runtime diff";
+  if (source === "runtime_preview") return "Runtime preview";
+  return "Metadata-only preview";
+}
+
 function getChangeTargetLabel(change, { maxFiles = 3 } = {}) {
   const files = getChangeAffectedFiles(change);
   if (files.length === 1) return files[0];
@@ -763,6 +817,7 @@ function normalizeProposedChange(artifact, change, previewCache = {}) {
   const evidence = Array.isArray(enrichedChange.evidence)
     ? enrichedChange.evidence.map((entry) => normalizeIssueEvidence(entry)).filter(Boolean)
     : [];
+  const previewMetadata = resolvePreviewMetadata(previewCache, enrichedChange);
 
   return {
     ...enrichedChange,
@@ -770,6 +825,7 @@ function normalizeProposedChange(artifact, change, previewCache = {}) {
     node: enrichedChange.node || nodeId,
     originatingNodeId: enrichedChange.originatingNodeId || nodeId,
     preview: resolvePreviewBody(previewCache, enrichedChange),
+    ...previewMetadata,
     issues,
     issueSummary:
       enrichedChange.issueSummary

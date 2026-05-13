@@ -251,6 +251,11 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
                 {freshDecision && entry?.decision === "approve" && <Pill t={t} risk="green" strong>approved</Pill>}
                 {freshDecision && entry?.decision === "block" && <Pill t={t} risk="red" strong>blocked</Pill>}
                 {freshDecision && entry?.decision === "changes" && <Pill t={t} risk="orange" strong>changes requested</Pill>}
+                {change.previewFidelity === "metadata_only" ? (
+                  <Pill t={t} risk="orange">metadata-only preview</Pill>
+                ) : (
+                  <Pill t={t} risk="green">{change.previewSourceLabel || "runtime preview"}</Pill>
+                )}
                 {!isFreshView && <Pill t={t} risk="orange">stale view</Pill>}
               </div>
 
@@ -329,6 +334,11 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
                     </div>
                   )}
 
+                  {change.previewFidelity === "metadata_only" && (
+                    <div style={{ borderTop: `1px solid ${t.border}`, background: t.orangeSoft, color: t.text, padding: "8px 14px", fontSize: 12 }}>
+                      Metadata-only preview: no runtime diff body was recorded for this change.
+                    </div>
+                  )}
                   <div style={{ background: t.panelAlt, borderTop: `1px solid ${t.border}`, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, padding: "10px 0", overflowX: "auto", lineHeight: 1.55 }}>
                     {lines.map((line, index) => renderDiffLine(line, t, index))}
                   </div>

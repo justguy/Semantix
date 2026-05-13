@@ -48,6 +48,7 @@ export class CodexAppServerConnector {
     rawOverrides = {},
     clientName = "semantix-control-plane",
     clientVersion = "0.1.0",
+    experimentalApi = true,
     suppressedNotifications = [],
   } = {}) {
     this.spawnProcess = spawnProcess;
@@ -63,6 +64,7 @@ export class CodexAppServerConnector {
     this.rawOverrides = rawOverrides;
     this.clientName = clientName;
     this.clientVersion = clientVersion;
+    this.experimentalApi = experimentalApi;
     this.suppressedNotifications = suppressedNotifications;
 
     this.requestCounter = 0;
@@ -257,6 +259,7 @@ export class CodexAppServerConnector {
         },
         capabilities: {
           experimental: true,
+          experimentalApi: this.experimentalApi,
           suppressNotifications: this.suppressedNotifications,
         },
       });
@@ -404,6 +407,7 @@ export class CodexAppServerConnector {
     return this.request("turn/interrupt", {
       threadId,
       turnId,
+      expectedTurnId: turnId,
     });
   }
 
