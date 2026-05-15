@@ -403,6 +403,31 @@ export class CodexAppServerConnector {
     };
   }
 
+  async resumeThread({ threadId, ...params }) {
+    const result = await this.request("thread/resume", {
+      threadId,
+      ...params,
+    });
+    return {
+      ...result,
+      runtimeSessionId: result.thread?.id ?? threadId,
+    };
+  }
+
+  async steerTurn({ threadId, turnId, input, expectedTurnId = turnId, ...params }) {
+    const result = await this.request("turn/steer", {
+      threadId,
+      turnId,
+      expectedTurnId,
+      input,
+      ...params,
+    });
+    return {
+      ...result,
+      runtimeTurnId: result.turn?.id ?? turnId,
+    };
+  }
+
   async interruptTurn({ threadId, turnId }) {
     return this.request("turn/interrupt", {
       threadId,

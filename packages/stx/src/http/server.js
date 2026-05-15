@@ -206,6 +206,14 @@ function routeMatch(pathname, method) {
     return { name: "session.turns.submit", runId, sessionId: item };
   }
 
+  if (method === "POST" && collection === "sessions" && item && child === "steer") {
+    return { name: "session.turns.steer", runId, sessionId: item };
+  }
+
+  if (method === "POST" && collection === "sessions" && item && child === "resume") {
+    return { name: "session.resume", runId, sessionId: item };
+  }
+
   if (method === "POST" && collection === "sessions" && item && child === "interrupt") {
     return { name: "session.interrupt", runId, sessionId: item };
   }
@@ -654,6 +662,30 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
           response,
           200,
           await service.submitSessionTurn({
+            runId: match.runId,
+            sessionId: match.sessionId,
+            ...body,
+          }),
+        );
+      }
+
+      if (match.name === "session.turns.steer") {
+        return json(
+          response,
+          200,
+          await service.steerSessionTurn({
+            runId: match.runId,
+            sessionId: match.sessionId,
+            ...body,
+          }),
+        );
+      }
+
+      if (match.name === "session.resume") {
+        return json(
+          response,
+          200,
+          await service.resumeSession({
             runId: match.runId,
             sessionId: match.sessionId,
             ...body,

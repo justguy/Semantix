@@ -75,8 +75,10 @@ Current local evidence from the installed CLI on this machine:
 - `thread/turns/list` requires the client to advertise `experimentalApi`; empty threads still
   report that turns are unavailable before the first materialized user message
 - `thread/read` with `includeTurns: true` has the same pre-materialization limitation
-- `turn/steer` accepts `expectedTurnId`; resume and steering semantics are still tracked as a
-  Phase 1 closeout gap until integrated behavior is settled
+- `turn/steer` accepts `expectedTurnId`; the control plane now routes steering through a
+  freshness-checked Semantix session operation
+- `thread/resume` is integrated only for paused Semantix sessions after control-plane freshness and
+  approval checks pass; checkpoint resume remains the authoritative workflow resume path
 - `codex -c approval_policy="never" -c sandbox_mode="workspace-write" app-server` returns thread settings showing `approvalPolicy: "never"` and `sandbox.type: "workspaceWrite"`
 
 `CodexCliConnector` behavior:
@@ -95,6 +97,9 @@ Current local evidence from the installed CLI on this machine:
 - submits multi-turn input via `turn/start`
 - streams normalized notifications back into the control plane event bus
 - supports interrupting active turns via `turn/interrupt` using `turnId` and `expectedTurnId`
+- supports steering active turns via `turn/steer` using the tracked runtime turn id as
+  `expectedTurnId`
+- supports resuming paused runtime threads via `thread/resume` after Semantix state checks pass
 
 ## Multi-Turn Sessions
 
@@ -102,8 +107,12 @@ Interactive Codex sessions are now managed under the control plane instead of by
 
 - the reviewed `run` and `ReviewArtifact` remain the authoritative Semantix objects
 - runtime interaction is tracked as a durable session + turn layer under the run
-- session creation and turn submission are freshness-checked against the current artifact
-- stale turns are rejected server-side after interventions or other artifact changes
+- session creation, turn submission, turn steering, and paused-thread resume are
+  freshness-checked against the current artifact
+- stale turns, stale steering requests, and stale resume requests are rejected server-side after
+  interventions or other artifact changes
+- interrupted sessions remain Semantix-paused until a fresh resume request is accepted, even if the
+  runtime reports the underlying thread as idle
 - browser UI and `stx` consume the same session routes and the same normalized SSE stream
 
 Current HTTP routes for runtime sessions:
@@ -113,7 +122,9 @@ Current HTTP routes for runtime sessions:
 - `GET /runs/:runId/sessions/:sessionId`
 - `POST /runs/:runId/sessions/:sessionId/turns`
 - `GET /runs/:runId/sessions/:sessionId/turns`
+- `POST /runs/:runId/sessions/:sessionId/steer`
 - `POST /runs/:runId/sessions/:sessionId/interrupt`
+- `POST /runs/:runId/sessions/:sessionId/resume`
 - `GET /runs/:runId/events?after=<sequence>&sessionId=<sessionId>`
 
 Known gaps for the current multi-turn implementation are tracked in

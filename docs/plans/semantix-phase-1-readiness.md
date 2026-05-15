@@ -1,10 +1,11 @@
 # Semantix Phase 1 Readiness Record
 
-Status: in progress
-Updated: 2026-05-12
+Status: complete
+Updated: 2026-05-15
 
-This record tracks the Phase 1 closeout evidence. Phase 1 is not closed yet; this update records the
-Codex app-server protocol revalidation for `stx-p1-001`.
+This record tracks the Phase 1 closeout evidence. Phase 1 is closed with Codex app-server
+resume/steer integrated through Semantix-owned freshness gates and with the remaining app-server
+limitations documented below.
 
 ## Codex Version Evidence
 
@@ -33,8 +34,8 @@ Results against `codex-cli 0.130.0`:
 | `turn/interrupt` | Accepted when sent with `threadId`, `turnId`, and `expectedTurnId`; returned `{}` in the focused interrupt probe. A same-tick interrupt can return `no active turn to interrupt`. |
 | `thread/read` | Accepted for metadata when `includeTurns: false`. Before the first materialized user message, `includeTurns: true` returns an unavailable/not-materialized error. |
 | `thread/turns/list` | Requires the initialize capability `experimentalApi: true`. With that capability, a newly created empty thread still reports turns unavailable before the first materialized user message. |
-| `thread/resume` | Did not resolve for a newly created empty thread: `no rollout found for thread id ...`. |
-| `turn/steer` | Accepted with `expectedTurnId` and returned the target `turnId`; integrated steering behavior is still unsettled. |
+| `thread/resume` | Integrated for existing paused Semantix runtime sessions after artifact, node, approval, and session-state checks pass. It is not used as a replacement for Semantix checkpoint resume. |
+| `turn/steer` | Integrated for active Semantix turns. The control plane verifies the current artifact identity plus Semantix and runtime turn identities, then sends `expectedTurnId` to Codex. |
 
 ## Connector Evidence
 
@@ -42,12 +43,27 @@ The connector now:
 
 - advertises `experimentalApi: true` during JSON-RPC initialize
 - sends both `turnId` and `expectedTurnId` for `turn/interrupt`
+- exposes `thread/resume` and `turn/steer` wrappers without making Codex transcript state
+  authoritative
 - has focused test coverage for initialize capabilities, `thread/read`, `thread/turns/list`, and
-  `turn/interrupt` request shapes
+  `turn/interrupt`, `thread/resume`, and `turn/steer` request shapes
+
+The control plane now:
+
+- freshness-checks session creation, turn submission, active-turn steering, and paused-thread resume
+  against the current `ReviewArtifact`
+- rejects stale steering and stale resume requests after artifact changes
+- keeps interrupted sessions Semantix-paused until a fresh resume request succeeds, even if a runtime
+  idle notification arrives later
+- keeps checkpoint resume under Semantix checkpoint and approval identity rather than Codex
+  `thread/resume`
 
 Verification:
 
 - `node --test control-plane/tests/codex-app-server-connector.test.js`
+- `node --test control-plane/tests/control-plane.test.js`
+- `node --test --test-force-exit control-plane/tests/server.test.js`
+- `npm test --workspace @semantix/control-plane`
 
 ## Preview Fidelity Evidence
 
@@ -90,8 +106,20 @@ Verification:
 - `npm run build:ui --workspace @semantix/stx`
 - live `stx serve` probe captured in `/private/tmp/semantix-browser-host-proof.json`
 
-## Remaining Closeout Items
+## Final Verification
 
-- `stx-p1-002`: decide whether current `thread/resume` and `turn/steer` behavior should be
-  integrated or reclassified as upstream limitations.
-- `stx-p1-005`: publish the final Phase 1 readiness record after all closeout evidence agrees.
+Updated for `stx-p1-002` and `stx-p1-005` on 2026-05-15:
+
+- `node --test control-plane/tests/codex-app-server-connector.test.js` passed 2 tests.
+- `node --test control-plane/tests/control-plane.test.js` passed 15 tests.
+- `node --test --test-force-exit control-plane/tests/server.test.js` passed 8 tests outside the
+  socket-restricted sandbox.
+- `node --test packages/runtime-codex/tests/strict-compiler.test.js packages/runtime-codex/tests/admitted-code-change-host.test.js` passed 23 tests.
+- `npm test --workspace @semantix/control-plane` passed 28 tests outside the socket-restricted
+  sandbox.
+- Full workspace `npm test` passed outside the socket-restricted sandbox
+  (`@semantix/stx`: 407 tests; `@semantix/control-plane`: 28 tests).
+
+No Phase 1 closeout blocker remains. Deferred limitations are the experimental Codex app-server
+surface, the empty-thread `thread/resume` limitation from the smoke proof, and the pre-materialized
+thread read/turn-list limitations already tracked in `KNOWN_GAPS.md`.

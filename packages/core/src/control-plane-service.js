@@ -450,6 +450,28 @@ function latestSessionTurns(turns) {
   return [...byTurnId.values()].sort((left, right) => left.sequence - right.sequence);
 }
 
+function normalizeSessionInput(input) {
+  if (Array.isArray(input)) {
+    return input;
+  }
+
+  if (typeof input === "string") {
+    return [
+      {
+        type: "text",
+        text: input,
+        text_elements: [],
+      },
+    ];
+  }
+
+  if (input) {
+    return [input];
+  }
+
+  return [];
+}
+
 function findNextReadyNode(plan) {
   return plan.nodes.find((node) => {
     if (node.nodeType === "approval_gate") {
@@ -756,13 +778,20 @@ export class ControlPlaneService {
         session.updatedAt = runtimeEvent.timestamp;
 
         if (runtimeEvent.type === "session.updated") {
-          session.status = runtimeEvent.payload?.status ?? session.status;
+          const nextStatus = runtimeEvent.payload?.status ?? session.status;
+          const preservePausedSession =
+            session.status === "paused" &&
+            nextStatus === "waiting_for_input" &&
+            runtimeEvent.payload?.action !== "session.resumed";
+          session.status = preservePausedSession ? session.status : nextStatus;
           session.preview = runtimeEvent.payload?.thread?.preview ?? session.preview;
         }
 
         if (runtimeEvent.type === "turn.started") {
-          session.status = "running";
-          session.activeTurnId = runtimeEvent.turnId ?? session.activeTurnId;
+          if (!(session.status === "paused" && session.activeTurnId === null)) {
+            session.status = "running";
+            session.activeTurnId = runtimeEvent.turnId ?? session.activeTurnId;
+          }
         }
 
         if (runtimeEvent.type === "turn.completed") {
@@ -1745,19 +1774,7 @@ export class ControlPlaneService {
       }
 
       const createdAt = this.now();
-      const normalizedInput = Array.isArray(input)
-        ? input
-        : typeof input === "string"
-          ? [
-              {
-                type: "text",
-                text: input,
-                text_elements: [],
-              },
-            ]
-          : input
-            ? [input]
-            : [];
+      const normalizedInput = normalizeSessionInput(input);
       const turn = createSessionTurn({
         sessionId,
         runId,
@@ -1845,6 +1862,258 @@ export class ControlPlaneService {
           runtimeTurnId: startedTurn.runtimeTurnId,
           startedAt: startedTurn.turn?.startedAt ?? createdAt,
         },
+      };
+    });
+  }
+
+  async resumeSession({
+    runId,
+    sessionId,
+    actor = "operator",
+    planVersion,
+    graphVersion,
+    artifactHash,
+    nodeId,
+    nodeRevision,
+  }) {
+    return this.withSessionLock(runId, sessionId, async () => {
+      const session = await this.getSessionState(runId, sessionId);
+      const run = await this.getRunState(runId);
+      const artifact = this.requireArtifact(run);
+      const node = this.getExecutableNode(artifact, nodeId ?? session.nodeId);
+
+      ensureFreshness({
+        artifact,
+        planVersion,
+        artifactHash,
+        graphVersion,
+        node,
+        nodeRevision: nodeRevision ?? session.nodeRevision,
+      });
+      this.ensureExecutableApproval(artifact, node);
+
+      if (session.status !== "paused") {
+        throw new ValidationError("Only paused sessions can be resumed through the runtime thread.", {
+          runId,
+          sessionId,
+          status: session.status,
+        });
+      }
+
+      const adapter = this.runtimeRegistry.selectRuntimeForNode(node);
+      adapter.registerSession(session);
+      this.ensureRuntimeRelay({
+        runId,
+        adapter,
+      });
+
+      const resumed = await adapter.resumeSession({
+        runId,
+        session,
+      });
+      const resumedAt = this.now();
+      const runtimeStatus = resumed.thread?.status;
+      const status = runtimeStatus?.type === "active" ? "running" : "waiting_for_input";
+
+      session.status = status;
+      session.runtimeSessionId = resumed.runtimeSessionId ?? session.runtimeSessionId;
+      session.preview = resumed.thread?.preview ?? session.preview;
+      session.updatedAt = resumedAt;
+      session.planVersion = artifact.planVersion;
+      session.artifactHash = artifact.artifactHash;
+      session.nodeRevision = node.revision;
+      await this.store.saveSession(session);
+
+      await this.appendAudit(
+        runId,
+        createAuditRecord({
+          runId,
+          action: "session.resumed",
+          actor,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          nodeId: node.id,
+          details: {
+            sessionId,
+            runtimeSessionId: session.runtimeSessionId,
+          },
+          timestamp: resumedAt,
+        }),
+      );
+
+      await this.emit(
+        runId,
+        makeEvent({
+          runId,
+          type: "session.updated",
+          timestamp: resumedAt,
+          nodeId: node.id,
+          sessionId,
+          runtimeSessionId: session.runtimeSessionId,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          payload: {
+            status,
+            runtimeStatus,
+            thread: resumed.thread,
+            action: "session.resumed",
+          },
+        }),
+      );
+
+      return {
+        session,
+        runtimeThread: resumed.thread,
+      };
+    });
+  }
+
+  async steerSessionTurn({
+    runId,
+    sessionId,
+    actor = "operator",
+    turnId,
+    runtimeTurnId,
+    input,
+    planVersion,
+    graphVersion,
+    artifactHash,
+    nodeId,
+    nodeRevision,
+  }) {
+    return this.withSessionLock(runId, sessionId, async () => {
+      const session = await this.getSessionState(runId, sessionId);
+      const run = await this.getRunState(runId);
+      const artifact = this.requireArtifact(run);
+      const node = this.getExecutableNode(artifact, nodeId ?? session.nodeId);
+
+      ensureFreshness({
+        artifact,
+        planVersion,
+        artifactHash,
+        graphVersion,
+        node,
+        nodeRevision: nodeRevision ?? session.nodeRevision,
+      });
+      this.ensureExecutableApproval(artifact, node);
+
+      if (!session.activeTurnId) {
+        throw new ValidationError("Steering requires an active session turn.", {
+          runId,
+          sessionId,
+        });
+      }
+
+      const turns = latestSessionTurns(await this.store.listSessionTurns(runId, sessionId));
+      const activeTurn = turns.find((turn) => turn.turnId === session.activeTurnId);
+      if (!activeTurn || !["accepted", "running"].includes(activeTurn.status)) {
+        throw new ValidationError("Steering requires an accepted or running active turn.", {
+          runId,
+          sessionId,
+          activeTurnId: session.activeTurnId,
+          activeTurnStatus: activeTurn?.status,
+        });
+      }
+
+      if (turnId && activeTurn.turnId !== turnId) {
+        throw new ValidationError("Steering turn identity does not match the active Semantix turn.", {
+          runId,
+          sessionId,
+          activeTurnId: activeTurn.turnId,
+          turnId,
+        });
+      }
+
+      if (runtimeTurnId && activeTurn.runtimeTurnId !== runtimeTurnId) {
+        throw new ValidationError("Steering runtime turn identity does not match the active Codex turn.", {
+          runId,
+          sessionId,
+          activeRuntimeTurnId: activeTurn.runtimeTurnId,
+          runtimeTurnId,
+        });
+      }
+
+      const normalizedInput = normalizeSessionInput(input);
+      if (normalizedInput.length === 0) {
+        throw new ValidationError("Steering requires replacement input.", {
+          runId,
+          sessionId,
+          turnId: activeTurn.turnId,
+        });
+      }
+
+      const adapter = this.runtimeRegistry.selectRuntimeForNode(node);
+      adapter.registerSession(session);
+      this.ensureRuntimeRelay({
+        runId,
+        adapter,
+      });
+
+      const steered = await adapter.steerSession({
+        runId,
+        session,
+        turn: activeTurn,
+        input: normalizedInput,
+      });
+      const steeredAt = this.now();
+      const steeredTurn = {
+        ...activeTurn,
+        status: "running",
+        input: normalizedInput,
+        runtimeTurnId: steered.runtimeTurnId ?? activeTurn.runtimeTurnId,
+        steeredAt,
+        resultSummary: "steered",
+      };
+
+      session.status = "running";
+      session.activeTurnId = activeTurn.turnId;
+      session.updatedAt = steeredAt;
+      session.planVersion = artifact.planVersion;
+      session.artifactHash = artifact.artifactHash;
+      session.nodeRevision = node.revision;
+      await this.store.saveSession(session);
+      await this.store.appendSessionTurn(runId, sessionId, steeredTurn);
+
+      await this.appendAudit(
+        runId,
+        createAuditRecord({
+          runId,
+          action: "turn.steered",
+          actor,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          nodeId: node.id,
+          details: {
+            sessionId,
+            turnId: activeTurn.turnId,
+            runtimeTurnId: steeredTurn.runtimeTurnId,
+          },
+          timestamp: steeredAt,
+        }),
+      );
+
+      await this.emit(
+        runId,
+        makeEvent({
+          runId,
+          type: "turn.accepted",
+          timestamp: steeredAt,
+          nodeId: node.id,
+          sessionId,
+          turnId: activeTurn.turnId,
+          runtimeSessionId: session.runtimeSessionId,
+          planVersion: artifact.planVersion,
+          artifactHash: artifact.artifactHash,
+          payload: {
+            sequence: activeTurn.sequence,
+            steered: true,
+          },
+        }),
+      );
+
+      return {
+        session,
+        turn: steeredTurn,
       };
     });
   }

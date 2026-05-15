@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Phase 2 proof has been made concrete in tracker: stx-p2-009 now captures stale approval rejection, fresh re-approval, audit replay, and Codex plus mock/second-adapter execution.",
+    "scratchpad": "Phase 1 closed: Codex app-server protocol is revalidated, Semantix-first resume/steer is implemented behind freshness checks, preview/browser-host evidence is current, and full workspace npm test passed. Deferred limitations are explicit and non-blocking for Phase 2.",
     "swimlanes": [
       {
         "id": "contract",
@@ -32,17 +32,20 @@
       {
         "id": "spec-studio-real-evaluator",
         "label": "Spec Studio Real Evaluator",
-        "description": "LLM-backed Semantix alignment evaluator behind /spec-studio/evaluate; JSON probe remains explicit test/probe mode only."
+        "description": "LLM-backed Semantix alignment evaluator behind /spec-studio/evaluate; JSON probe remains explicit test/probe mode only.",
+        "collapsed": true
       },
       {
         "id": "phase-1-closeout",
         "label": "Phase 1 Closeout",
-        "description": "Hardening and evidence needed before declaring Semantix phase 1 closed."
+        "description": "Hardening and evidence needed before declaring Semantix phase 1 closed.",
+        "collapsed": false
       },
       {
         "id": "phase-2-constraint-engine",
         "label": "Phase 2 Constraint Engine",
-        "description": "Compiled constraints, runtime admission, audit, provenance, and replay."
+        "description": "Compiled constraints, runtime admission, audit, provenance, and replay.",
+        "collapsed": false
       }
     ],
     "priorities": [
@@ -63,8 +66,8 @@
         "label": "P3"
       }
     ],
-    "rev": 59,
-    "updatedAt": "2026-05-13T00:30:56.474Z"
+    "rev": 67,
+    "updatedAt": "2026-05-15T22:48:14.998Z"
   },
   "tasks": [
     {
@@ -1330,7 +1333,7 @@
       "id": "stx-p1-002",
       "title": "Settle resume and steering semantics",
       "goal": "Resolve whether the current Codex app-server supports true resume/steer. Implement it if available, or reclassify the gap honestly as an upstream limitation.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-1-closeout",
         "priorityId": "p0"
@@ -1374,10 +1377,35 @@
           "freshness"
         ],
         "roadmap_section": "Phase 1 Closeout Gate",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+          "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "packages/core/src/control-plane-service.js",
+          "packages/stx/src/http/server.js",
+          "control-plane/tests/codex-app-server-connector.test.js",
+          "control-plane/tests/server.test.js",
+          "control-plane/KNOWN_GAPS.md",
+          "control-plane/README.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "verification": [
+          "node --test control-plane/tests/codex-app-server-connector.test.js",
+          "node --test control-plane/tests/control-plane.test.js",
+          "node --test --test-force-exit control-plane/tests/server.test.js",
+          "node --test packages/runtime-codex/tests/strict-compiler.test.js packages/runtime-codex/tests/admitted-code-change-host.test.js",
+          "npm test --workspace @semantix/control-plane",
+          "npm test"
+        ]
       },
-      "comment": "Depends on live protocol evidence so the implementation does not guess at unsupported app-server methods.",
-      "blocker_reason": "Waiting for stx-p1-001 to prove which Codex app-server methods are available."
+      "comment": "Implemented Semantix-first Codex thread resume and turn steering: connector exposes thread/resume and turn/steer, runtime adapter advertises and calls them, control-plane service gates both through artifact/node freshness and active/paused Semantix session state, and HTTP routes/tests/docs cover the behavior.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "traceability": {
+        "execution_report": {
+          "reference": "docs/plans/semantix-phase-1-readiness.md:109"
+        }
+      }
     },
     {
       "dependencies": [],
@@ -1514,7 +1542,7 @@
       "id": "stx-p1-005",
       "title": "Publish Phase 1 readiness record",
       "goal": "Produce the final Phase 1 closeout record after protocol, preview, browser-host, documentation, and test evidence agree.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-1-closeout",
         "priorityId": "p0"
@@ -1555,10 +1583,25 @@
           "readiness"
         ],
         "roadmap_section": "Phase 1 Closeout Gate",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "docs/plans/semantix-phase-1-readiness.md",
+          "control-plane/KNOWN_GAPS.md",
+          "control-plane/README.md",
+          ".llm-tracker/trackers/semantix.json"
+        ],
+        "verification": [
+          "npm test"
+        ]
       },
-      "comment": "Closeout record only happens after all Phase 1 proof tasks complete.",
-      "blocker_reason": "Waiting for all Phase 1 closeout proof tasks to finish."
+      "comment": "Published the Phase 1 readiness record with current Codex protocol proof, resume/steer semantics, preview and browser-host evidence, final test results, and explicit remaining deferred limitations. Full workspace npm test passed on 2026-05-15.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "traceability": {
+        "execution_report": {
+          "reference": "docs/plans/semantix-phase-1-readiness.md:1"
+        }
+      }
     },
     {
       "dependencies": [

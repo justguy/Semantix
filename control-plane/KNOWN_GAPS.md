@@ -2,13 +2,19 @@
 
 This file tracks intentional phase-1 gaps in the current Codex-backed control-plane implementation.
 
-## Multi-Turn Runtime Gaps
+## Multi-Turn Runtime Notes
 
-- Session resume is currently modeled as `turn/interrupt` followed by a fresh next turn. The
-  control plane does not yet use Codex `thread/resume` or `turn/steer`.
-- Revalidation against `codex-cli 0.130.0` confirmed that `turn/steer` accepts
-  `expectedTurnId`, but integrated steering semantics are not settled yet. `thread/resume` did not
-  resolve for a newly created, empty thread in the closeout smoke proof.
+- Active-turn steering now routes through Semantix first: the control plane freshness-checks the
+  current `ReviewArtifact`, verifies the active Semantix and runtime turn identities, and then sends
+  Codex `turn/steer` with `expectedTurnId`.
+- Paused runtime thread resume now routes through Semantix first: interrupted sessions remain
+  Semantix-paused until a fresh `session.resume` request passes artifact, node, and approval checks,
+  then the adapter sends Codex `thread/resume`.
+- `thread/resume` is not a replacement for Semantix checkpoint resume. Workflow resume still uses
+  the persisted `ReviewArtifact`, approval gate, and checkpoint identity as the source of truth.
+- The earlier closeout smoke proof showed `thread/resume` does not resolve for a newly created empty
+  thread. The implemented path only resumes existing runtime threads that belong to a Semantix
+  session.
 - Authority remains the Semantix `ReviewArtifact` and control-plane state. Codex transcript history
   is runtime context, not the authoritative source of review or execution truth.
 - The Codex `app-server` surface is still experimental. The current implementation is effectively
