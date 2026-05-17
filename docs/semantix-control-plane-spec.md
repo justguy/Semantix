@@ -492,6 +492,87 @@ interface ProviderAdapter {
 Provider adapters are not required to ship phase 1, but the control plane should leave room for
 them in the registry model.
 
+### 9.1 Verifier Provider Hook
+
+Verifier providers are direct provider adapters whose only control-plane role is to return advisory
+evidence. They do not select runtime paths, approve work, reject work, or execute work by
+themselves.
+
+```ts
+type VerifierCheckKind =
+  | "contradiction"
+  | "entailment"
+  | "groundedness"
+  | "similarity"
+  | "custom";
+
+interface VerifierInput {
+  runId?: string;
+  nodeId?: string;
+  constraintIrId?: string;
+  target?: object;
+  subject: unknown;
+  reference?: unknown;
+  context?: object;
+  checks: Array<{
+    id: string;
+    kind: VerifierCheckKind;
+    threshold?: number;
+    comparator?: "gte" | "lte";
+    failureSeverity?: "hard" | "soft";
+  }>;
+}
+
+interface VerifierResult {
+  providerId?: string;
+  status?: "available" | "unavailable" | "error";
+  checks?: Array<{
+    id?: string;
+    kind: VerifierCheckKind;
+    score?: number;
+    passed?: boolean;
+    confidence?: number;
+    advisoryState?: "pass" | "concern" | "block" | "review_required";
+    message?: string;
+    evidence?: unknown[];
+  }>;
+  error?: string;
+  latencyMs?: number;
+}
+```
+
+Verifier policy is Semantix-owned:
+
+- contradiction scores default to lower-is-better (`lte`)
+- entailment, groundedness, and similarity scores default to higher-is-better (`gte`)
+- advisory verifier failures become `review_required`
+- required hard verifier failures become `block`
+- unavailable required verifier providers fail closed according to Semantix policy
+- provider `advisoryState` is evidence only; it never directly sets `policyState`
+
+Verifier drift guardrails are fixture-backed and deterministic. The default test suite uses checked-in
+provider results only; live provider sampling is an opt-in diagnostic path and must not run as part
+of default verification. Each verifier drift fixture records the check kind, threshold, comparator,
+provider result, Semantix policy decision, and expected risk flags. The guardrails distinguish these
+drift classes:
+
+- **provider-output drift**: the provider returns a different score, `passed` value,
+  `advisoryState`, status, message, or evidence for the same check. Semantix treats this as input
+  evidence and still derives `policyState` from the recorded policy.
+- **policy-threshold drift**: a Semantix-owned threshold, comparator, mode, or failure severity
+  changes the decision boundary for otherwise identical provider evidence. This is a policy change,
+  not provider authority.
+- **missing-evidence drift**: a configured check is absent from provider output, or the provider is
+  unavailable/error. Required hard checks fail closed; advisory or soft failures require review
+  according to Semantix policy.
+- **expected migration drift**: an intentional Semantix policy migration changes the expected
+  decision for a fixture. The fixture expectation and migration metadata must be updated together so
+  unchanged verifier evidence cannot silently produce a different policy decision.
+
+Provider-only execution remains outside this slice. A provider-backed runtime may call provider
+adapters internally, but the Control Plane still dispatches through a runtime adapter and Semantix
+still decides policy from structured evidence.
+
 ## 10. Runtime Capabilities
 
 ```ts

@@ -9,6 +9,7 @@ function basePacket(sessionId, iteration, originalUserRequest) {
     source: SOURCE_SEMANTIX,
     sessionId,
     iteration,
+    approvalRequired: true,
     originalUserRequest: originalUserRequest || ORIGINAL_REQUEST,
     alignedRequirement: "",
     requirements: [],
@@ -46,14 +47,47 @@ function needsUserPacket(sessionId, iteration, originalUserRequest, {
   };
 }
 
-function readyPacket(sessionId, iteration, originalUserRequest) {
+function readyExistingSystemContext(existingSystemContext) {
+  if (existingSystemContext?.mode !== "update") {
+    return { mode: "new" };
+  }
+
+  return {
+    mode: "update",
+    targetSurfaces: existingSystemContext.targetSurfaces?.length
+      ? existingSystemContext.targetSurfaces
+      : [
+          {
+            id: "surf_expense_reporting_workflow",
+            kind: "workflow",
+            name: "Existing expense reporting workflow",
+          },
+        ],
+    doNotChange: existingSystemContext.doNotChange?.length
+      ? existingSystemContext.doNotChange
+      : ["Do not replace unrelated existing expense-reporting infrastructure."],
+    reuseRequirements: existingSystemContext.reuseRequirements?.length
+      ? existingSystemContext.reuseRequirements
+      : ["Reuse existing expense-reporting surfaces where applicable."],
+    compatibilityRequirements: existingSystemContext.compatibilityRequirements?.length
+      ? existingSystemContext.compatibilityRequirements
+      : ["Preserve compatibility with current expense-reporting users and records."],
+  };
+}
+
+function readyPacket(sessionId, iteration, originalUserRequest, existingSystemContext) {
+  const resolvedContext = readyExistingSystemContext(existingSystemContext);
+  const isUpdate = resolvedContext.mode === "update";
+
   return {
     ...basePacket(sessionId, iteration, originalUserRequest),
     readiness: "ready",
     readinessReason: "All gaps resolved; spec is aligned and ready for planning.",
     blockingReasons: [],
     approvalRequired: true,
-    alignedRequirement: "Expense reporting app: new system, end-user primary, auth deferred.",
+    alignedRequirement: isUpdate
+      ? "Expense reporting app update: end-user primary, auth deferred."
+      : "Expense reporting app: new system, end-user primary, auth deferred.",
     requirements: [
       {
         id: "REQ-001",
@@ -88,7 +122,7 @@ function readyPacket(sessionId, iteration, originalUserRequest) {
       outOfScope: ["Authentication (deferred to later sprint)"],
       negativeRequirements: [],
     },
-    existingSystemContext: { mode: "new" },
+    existingSystemContext: resolvedContext,
     acceptanceSummary: [
       "User can submit an expense report.",
       "User can view the approval status of their submission.",
@@ -158,7 +192,7 @@ export function createSpecStudioMultiTurnProbeEvaluator() {
 
     // T1: answered Q1 → Q2 (user type)
     if (priorTurnId === "T-MT-Q1" && trigger === "user_turn" && turnBody?.kind === "choice") {
-      const mode = turnBody.picked === "OPT-NEW" ? "new" : "existing";
+      const mode = turnBody.picked === "OPT-NEW" ? "new" : "update";
       return {
         packet: needsUserPacket(sessionId, iteration, originalUserRequest, {
           alignmentPct: 35,
@@ -255,7 +289,7 @@ export function createSpecStudioMultiTurnProbeEvaluator() {
     // T5a: confirmed defer → ready
     if (priorTurnId === "T-MT-Q5" && trigger === "user_turn" && turnBody?.kind === "choice" && turnBody.picked === "OPT-DEFER-CONFIRM") {
       return {
-        packet: readyPacket(sessionId, iteration, originalUserRequest),
+        packet: readyPacket(sessionId, iteration, originalUserRequest, prior.existingSystemContext),
         events: [evt("q5-defer-confirmed", sessionId, iteration)],
         contextRequests: [],
       };

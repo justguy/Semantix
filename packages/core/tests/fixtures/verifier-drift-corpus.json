@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 1,
+  "corpusId": "semantix-verifier-drift-v1",
+  "fixtures": [
+    {
+      "id": "provider-output-advisory-block-remains-review",
+      "driftClass": "provider_output_drift",
+      "migration": {
+        "id": "stx-p2-012.initial",
+        "reason": "Initial drift guardrail baseline."
+      },
+      "policy": {
+        "mode": "advisory",
+        "checks": [
+          {
+            "id": "check.contradiction",
+            "kind": "contradiction",
+            "threshold": 0.2,
+            "comparator": "lte",
+            "failureSeverity": "hard"
+          }
+        ]
+      },
+      "providerResult": {
+        "providerId": "verifier.fixture",
+        "status": "available",
+        "checks": [
+          {
+            "id": "check.contradiction",
+            "kind": "contradiction",
+            "score": 0.93,
+            "passed": true,
+            "advisoryState": "block",
+            "message": "Provider advised block despite a Semantix-owned threshold decision.",
+            "evidence": [
+              {
+                "span": "claim-1",
+                "reason": "source contradiction"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "status": "concern",
+        "policyState": "review_required",
+        "riskFlags": [
+          "verifier_concern"
+        ],
+        "evidence": [
+          {
+            "kind": "verifier_check",
+            "source": "verifier",
+            "providerId": "verifier.fixture",
+            "checkId": "check.contradiction",
+            "checkKind": "contradiction",
+            "score": 0.93,
+            "threshold": 0.2,
+            "comparator": "lte",
+            "passed": false,
+            "failureSeverity": "hard",
+            "providerAdvisoryState": "block",
+            "policyState": "review_required",
+            "message": "Provider advised block despite a Semantix-owned threshold decision.",
+            "providerEvidence": [
+              {
+                "span": "claim-1",
+                "reason": "source contradiction"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "policy-threshold-soft-required-remains-review",
+      "driftClass": "policy_threshold_drift",
+      "migration": {
+        "id": "stx-p2-012.initial",
+        "reason": "Initial drift guardrail baseline."
+      },
+      "policy": {
+        "mode": "required",
+        "checks": [
+          {
+            "id": "check.groundedness",
+            "kind": "groundedness",
+            "threshold": 0.85,
+            "comparator": "gte",
+            "failureSeverity": "soft"
+          }
+        ]
+      },
+      "providerResult": {
+        "providerId": "verifier.fixture",
+        "status": "available",
+        "checks": [
+          {
+            "id": "check.groundedness",
+            "kind": "groundedness",
+            "score": 0.84,
+            "advisoryState": "pass",
+            "message": "Provider score is below the Semantix threshold."
+          }
+        ]
+      },
+      "expected": {
+        "status": "concern",
+        "policyState": "review_required",
+        "riskFlags": [
+          "verifier_concern"
+        ],
+        "evidence": [
+          {
+            "kind": "verifier_check",
+            "source": "verifier",
+            "providerId": "verifier.fixture",
+            "checkId": "check.groundedness",
+            "checkKind": "groundedness",
+            "score": 0.84,
+            "threshold": 0.85,
+            "comparator": "gte",
+            "passed": false,
+            "failureSeverity": "soft",
+            "providerAdvisoryState": "pass",
+            "policyState": "review_required",
+            "message": "Provider score is below the Semantix threshold.",
+            "providerEvidence": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-required-hard-evidence-remains-block",
+      "driftClass": "missing_evidence_drift",
+      "migration": {
+        "id": "stx-p2-012.initial",
+        "reason": "Initial drift guardrail baseline."
+      },
+      "policy": {
+        "mode": "required",
+        "checks": [
+          {
+            "id": "check.similarity",
+            "kind": "similarity",
+            "threshold": 0.75,
+            "comparator": "gte",
+            "failureSeverity": "hard"
+          }
+        ]
+      },
+      "providerResult": {
+        "providerId": "verifier.fixture",
+        "status": "available",
+        "checks": []
+      },
+      "expected": {
+        "status": "block",
+        "policyState": "block",
+        "riskFlags": [
+          "verifier_block"
+        ],
+        "evidence": [
+          {
+            "kind": "verifier_check",
+            "source": "verifier",
+            "providerId": "verifier.fixture",
+            "checkId": "check.similarity",
+            "checkKind": "similarity",
+            "threshold": 0.75,
+            "comparator": "gte",
+            "passed": false,
+            "failureSeverity": "hard",
+            "providerAdvisoryState": "concern",
+            "policyState": "block",
+            "message": "Verifier check result was missing.",
+            "providerEvidence": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "unavailable-required-provider-remains-fail-closed",
+      "driftClass": "provider_output_drift",
+      "migration": {
+        "id": "stx-p2-012.initial",
+        "reason": "Initial drift guardrail baseline."
+      },
+      "policy": {
+        "mode": "required",
+        "checks": [
+          {
+            "id": "check.entailment",
+            "kind": "entailment",
+            "threshold": 0.8,
+            "comparator": "gte",
+            "failureSeverity": "hard"
+          }
+        ]
+      },
+      "providerResult": {
+        "providerId": "verifier.fixture",
+        "status": "unavailable",
+        "error": "fixture provider offline"
+      },
+      "expected": {
+        "status": "unavailable",
+        "policyState": "block",
+        "riskFlags": [
+          "verifier_unavailable"
+        ],
+        "evidence": [
+          {
+            "kind": "verifier_unavailable",
+            "source": "verifier",
+            "providerId": "verifier.fixture",
+            "providerStatus": "unavailable",
+            "message": "fixture provider offline",
+            "policyState": "block"
+          }
+        ]
+      }
+    }
+  ]
+}

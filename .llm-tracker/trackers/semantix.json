@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Phase 1 closed: Codex app-server protocol is revalidated, Semantix-first resume/steer is implemented behind freshness checks, preview/browser-host evidence is current, and full workspace npm test passed. Deferred limitations are explicit and non-blocking for Phase 2.",
+    "scratchpad": "Completed Phase 2 tasks stx-p2-011 and stx-p2-012. Audit bundles now default to hash/redacted payload retention with size metadata, and verifier drift is locked by deterministic fixtures. Verification: control-plane workspace tests passed 33/33 with localhost approval; verifier policy tests passed 11/11; git diff --check passed.",
     "swimlanes": [
       {
         "id": "contract",
@@ -66,8 +66,8 @@
         "label": "P3"
       }
     ],
-    "rev": 67,
-    "updatedAt": "2026-05-15T22:48:14.998Z"
+    "rev": 83,
+    "updatedAt": "2026-05-16T23:29:42.738Z"
   },
   "tasks": [
     {
@@ -1658,7 +1658,7 @@
       "title": "Formalize Constraint IR",
       "parent_id": "stx-p2-000",
       "goal": "Define the durable intermediate representation for compiled Semantix constraints and document how `context`, `constraint`, and `~>` lower into it.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p0"
@@ -1699,10 +1699,22 @@
           "constraints"
         ],
         "roadmap_section": "Milestone 1: Constraint IR",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:68-86"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:68-86",
+        "files_touched": [
+          "docs/plans/semantix-phase-2-plan.md",
+          "docs/language-fundamentals.md",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          "packages/core/src/contracts.js"
+        ],
+        "verification": [
+          "node --input-type=module -e import/createConstraintIR smoke",
+          "node --test packages/stx/tests/spec-studio-json-probe-evaluator.test.js packages/stx/tests/spec-studio-llm-evaluator.test.js",
+          "git diff --check"
+        ]
       },
-      "comment": "First Phase 2 implementation task; held until Phase 1 readiness is published.",
-      "blocker_reason": "Waiting for stx-p1-005 to close Phase 1."
+      "comment": "Completed Phase 2 Constraint IR draft after explicit user approval for the public syntax gate. Added ConstraintIR v1 contract/factory/identity helpers, three syntax-to-IR lowering examples, and compatibility notes for IntentContract, ExecutionPlan, StateEffect, and strict compiler envelopes. Verification: ConstraintIR import/factory smoke passed, Spec Studio Semantix tests passed, git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex"
     },
     {
       "dependencies": [
@@ -1712,7 +1724,7 @@
       "title": "Implement deterministic constraint compiler slice",
       "parent_id": "stx-p2-000",
       "goal": "Build the first compiler path that lowers constraint declarations into deterministic validation artifacts without requiring live model calls.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p0"
@@ -1752,10 +1764,24 @@
           "constraints"
         ],
         "roadmap_section": "Milestone 2: Deterministic Constraint Compiler",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:88-100"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:88-100",
+        "notes": "ConstraintIR compiler slice complete. PMO refs: artifact://semantix/stx-p2-002/constraint-bundle-contract-2026-05-16 and evidence://semantix/stx-p2-002/runtime-codex-tests-2026-05-16. Service was not restarted and remains reachable.",
+        "files_touched": [
+          "packages/runtime-codex/src/strict-compiler.js",
+          "packages/runtime-codex/tests/strict-compiler.test.js",
+          "packages/core/src/contracts.js",
+          "docs/plans/semantix-phase-2-plan.md",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          ".llm-tracker/trackers/semantix.json"
+        ],
+        "verification": "node --test packages/runtime-codex/tests/strict-compiler.test.js; node --test packages/runtime-codex/tests/*.test.js; npm test; git diff --check; curl -i -s http://127.0.0.1:4401/spec-studio/mode",
+        "pmo_artifact_ref": "artifact://semantix/stx-p2-002/constraint-bundle-contract-2026-05-16",
+        "pmo_evidence_ref": "evidence://semantix/stx-p2-002/runtime-codex-tests-2026-05-16"
       },
-      "comment": "Compiler implementation starts after the Constraint IR is reviewed.",
-      "blocker_reason": "Waiting for stx-p2-001 to define the Constraint IR."
+      "comment": "Completed ConstraintIR compiler slice after approval for strict compiler envelope changes. Added constraintBundle emission, deterministic artifact refs, fallback hard_validation_schema bundles, and negative validation for unsatisfiable constraints. Verification passed: runtime-codex tests, full npm test, diff check, service probe. PMO shared-flow pointers updated.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "outcome": "partial_slice_landed"
     },
     {
       "dependencies": [
@@ -1765,7 +1791,7 @@
       "title": "Implement runtime admission loop",
       "parent_id": "stx-p2-000",
       "goal": "Route semantic output candidates through compiled constraints before admission into trusted state, including bounded retry and fail-closed behavior.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p0"
@@ -1805,14 +1831,43 @@
       "context": {
         "tags": [
           "phase-2",
-          "runtime",
-          "admission"
+          "runtime-admission",
+          "constraint-engine"
         ],
         "roadmap_section": "Milestone 3: Runtime Admission Loop",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:102-113"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:102-113",
+        "files_touched": [
+          "control-plane/tests/control-plane.test.js",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          "docs/phalanx-spec-studio-integration-contract.md",
+          "docs/plans/semantix-phase-2-plan.md",
+          "packages/core/src/control-plane-service.js",
+          "packages/core/src/v0-artifact.js",
+          "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "packages/runtime-codex/src/strict-compiler.js",
+          "packages/runtime-codex/tests/strict-compiler.test.js"
+        ],
+        "notes": "Implemented compiled-constraint runtime admission with bounded retry, fail-closed hard violations, persisted attempt evidence, and PMO shared-flow artifact pointer.",
+        "pmo_artifact_ref": "artifact://semantix/stx-p2-003/runtime-admission-loop-2026-05-16",
+        "pmo_evidence_refs": [
+          "evidence://semantix/stx-p2-003/control-plane-tests-2026-05-16",
+          "evidence://semantix/stx-p2-003/npm-test-2026-05-16",
+          "evidence://semantix/stx-p2-003/runtime-codex-tests-2026-05-16"
+        ],
+        "verification": [
+          "node --check packages/runtime-codex/src/strict-compiler.js",
+          "node --check packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "node --check packages/core/src/control-plane-service.js",
+          "node --check packages/core/src/v0-artifact.js",
+          "node --test packages/runtime-codex/tests/strict-compiler.test.js",
+          "node --test control-plane/tests/control-plane.test.js",
+          "node --test --test-force-exit control-plane/tests/server.test.js",
+          "npm test"
+        ]
       },
-      "comment": "Runtime admission should build on the deterministic compiler slice.",
-      "blocker_reason": "Waiting for stx-p2-002 to emit executable constraint artifacts."
+      "comment": "Completed runtime admission loop after approved status/retry changes; verified with focused suites and full npm test; Phalanx code untouched.",
+      "blocker_reason": null,
+      "assignee": "codex"
     },
     {
       "dependencies": [
@@ -1822,7 +1877,7 @@
       "title": "Add verifier provider hook contract",
       "parent_id": "stx-p2-000",
       "goal": "Define and implement a narrow verifier/provider hook for advisory semantic checks while preserving Semantix as the decision authority.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p1"
@@ -1863,10 +1918,19 @@
           "provider-contract"
         ],
         "roadmap_section": "Milestone 4: Verifier And Provider Hooks",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:115-126"
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:115-126",
+        "files_touched": [
+          "packages/core/src/contracts.js",
+          "packages/core/src/runtime-registry.js",
+          "packages/core/tests/verifier-policy.test.js",
+          "docs/semantix-control-plane-spec.md"
+        ],
+        "notes": "Provider output is advisory evidence only; Semantix policy selects pass/review_required/block.",
+        "verification": "TPF_LLM_TOOL=codex tpf node --test --test-force-exit control-plane/tests/audit-bundle.test.js control-plane/tests/control-plane.test.js packages/core/tests/verifier-policy.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane; TPF_LLM_TOOL=codex tpf git diff --check"
       },
-      "comment": "Verifier hooks can be designed once the Constraint IR defines policy attachment points.",
-      "blocker_reason": "Waiting for stx-p2-001 to define verifier policy in the Constraint IR."
+      "comment": "Completed approved verifier provider hook slice on 2026-05-16. Added createVerifierInput/applyVerifierPolicy, verifier provider adapter validation, policy-owned verifier evidence tests, and docs that provider-only execution remains out of scope. Verification: node --test packages/core/tests/verifier-policy.test.js passed; combined control-plane/verifier set passed 24/24; control-plane workspace suite passed 32/32 with localhost approval; git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex-worker"
     },
     {
       "dependencies": [
@@ -1935,7 +1999,7 @@
       "title": "Define audit bundle and signed artifact path",
       "parent_id": "stx-p2-000",
       "goal": "Specify the exportable evidence bundle for constraint admission and the path toward signed review artifacts.",
-      "status": "not_started",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p1"
@@ -1979,15 +2043,23 @@
         ],
         "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
         "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-159",
-        "phase2_proof_contract": "Audit replay must show exactly what was seen, approved, changed, rejected as stale, re-approved, resumed, and executed."
+        "phase2_proof_contract": "Audit replay must show exactly what was seen, approved, changed, rejected as stale, re-approved, resumed, and executed.",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "control-plane/tests/audit-bundle.test.js",
+          "docs/Semantix Control Plane UI.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "notes": "Signing remains an unsigned deterministic envelope with production key provisioning, rotation, KMS/HSM, timestamp authority, and certificate transparency explicitly out of scope.",
+        "verification": "TPF_LLM_TOOL=codex tpf node --test --test-force-exit control-plane/tests/audit-bundle.test.js control-plane/tests/control-plane.test.js packages/core/tests/verifier-policy.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane; TPF_LLM_TOOL=codex tpf git diff --check"
       },
-      "comment": "Audit bundle work must support replay of the concrete stale-approval proof, including exactly what was shown, approved, invalidated, and executed.",
-      "blocker_reason": "Waiting for stx-p2-001 to define compiled constraint identity."
+      "comment": "Completed approved audit bundle/signing-path slice on 2026-05-16. Added getAuditBundle with reviewed artifact identity, compiled constraint identities, candidate metadata, admission/verifier/retry/final outcome evidence, shown previews, replay timeline, and unsigned detached-signature path. Verification: audit-bundle test passed; combined control-plane/verifier set passed 24/24; control-plane workspace suite passed 32/32 with localhost approval; git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex"
     },
     {
       "dependencies": [
-        "stx-p2-003",
-        "stx-p2-006"
+        "stx-p2-011"
       ],
       "id": "stx-p2-007",
       "title": "Implement provenance and replay foundation",
@@ -2049,7 +2121,10 @@
       "dependencies": [
         "stx-p2-005",
         "stx-p2-007",
-        "stx-p2-009"
+        "stx-p2-009",
+        "stx-p2-010",
+        "stx-p2-011",
+        "stx-p2-012"
       ],
       "id": "stx-p2-008",
       "title": "Run Phase 2 readiness review",
@@ -2103,9 +2178,8 @@
     },
     {
       "dependencies": [
-        "stx-p2-003",
-        "stx-p2-006",
-        "stx-p2-007"
+        "stx-p2-007",
+        "stx-p2-010"
       ],
       "id": "stx-p2-009",
       "title": "Prove stale side-effect approval across adapters",
@@ -2164,6 +2238,168 @@
         "Adding live-service tests to the default test suite",
         "Introducing a non-mock second runtime adapter as a default dependency"
       ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-007"
+      ],
+      "id": "stx-p2-010",
+      "title": "Add audit replay drift sentinels",
+      "goal": "Build deterministic fixtures that tell us when replay no longer reproduces the same admission, freshness, approval, and state-effect decisions from the same recorded audit bundle.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:272-289",
+        "docs/Semantix Control Plane UI.md:676-716"
+      ],
+      "definition_of_done": [
+        "Golden audit bundles replay to the same final policy state, artifact identity, state-effect preview fidelity, and approval timeline on repeated runs.",
+        "A fixture intentionally mutating artifact hash, graph version, node revision, preview content, or constraint identity fails with a named drift reason.",
+        "The drift report distinguishes expected version migration from unexpected replay drift.",
+        "Tests run without live services and fail closed when replay evidence is missing or ambiguous."
+      ],
+      "constraints": [
+        "No live provider calls in the default drift sentinel suite.",
+        "Do not persist additional raw model output or context payloads for this task."
+      ],
+      "expected_changes": [
+        "control-plane/tests/**",
+        "packages/core/src/control-plane-service.js",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "control-plane/**",
+        "packages/core/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "drift",
+          "audit-replay"
+        ],
+        "notes": "Detects replay drift by comparing deterministic bundle-derived decisions against stable golden fixtures."
+      }
+    },
+    {
+      "dependencies": [
+        "stx-p2-006"
+      ],
+      "id": "stx-p2-011",
+      "title": "Define audit payload redaction and size guardrails",
+      "goal": "Set the retention, redaction, and size-budget policy for audit bundles before provenance/replay starts persisting broader model or context evidence.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:272-289",
+        "docs/Semantix Control Plane UI.md:676-716"
+      ],
+      "definition_of_done": [
+        "Audit bundle fields are classified as required, hash-only, redacted, optional, or disallowed for default persistence.",
+        "Bundle generation emits deterministic size metadata and redaction reasons for preview content, verifier evidence, context, and admitted output references.",
+        "Tests prove oversized or disallowed payloads fail closed or redact deterministically before export.",
+        "Docs explain what evidence can be replayed from hashes and what requires explicit operator-approved retention."
+      ],
+      "constraints": [
+        "Do not add new default persistence of raw model output or raw context payloads in this task.",
+        "Prefer hashes, references, and redacted fixture payloads over raw content when replay does not require content."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "control-plane/tests/**",
+        "docs/Semantix Control Plane UI.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "redaction",
+          "audit-bundle"
+        ],
+        "notes": "Default audit export strips raw preview bodies, verifier/provider payloads, semantic context, admitted output, and model-derived summaries; replay binds through deterministic hashes and explicit retention policy metadata.",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "control-plane/tests/audit-bundle.test.js",
+          "docs/Semantix Control Plane UI.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "verification": "TPF_LLM_TOOL=codex tpf node --test control-plane/tests/audit-bundle.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane (rerun with localhost approval) passed 33/33; TPF_LLM_TOOL=codex tpf git diff --check passed."
+      },
+      "assignee": "codex",
+      "blocker_reason": null,
+      "comment": "Completed audit redaction/size guardrails. Added payload classifications, hash-only refs, redaction reasons, deterministic size metadata, disallowed raw-payload fail-closed scan, audit bundle tests, and docs. Verification: audit-bundle focused tests passed; control-plane workspace tests passed 33/33 with localhost approval; git diff --check passed.",
+      "outcome": "partial_slice_landed"
+    },
+    {
+      "dependencies": [
+        "stx-p2-004"
+      ],
+      "id": "stx-p2-012",
+      "title": "Calibrate verifier drift guardrails",
+      "goal": "Define how Semantix detects unexpected verifier behavior changes without letting provider scores become direct authority.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/semantix-control-plane-spec.md:495-560",
+        "docs/plans/semantix-phase-2-plan.md:272-289"
+      ],
+      "definition_of_done": [
+        "A deterministic verifier fixture corpus records check kind, threshold, comparator, provider result, Semantix policy decision, and expected risk flags.",
+        "Tests fail when the same verifier evidence produces a different Semantix policy decision without an explicit fixture migration.",
+        "Docs define drift classes for provider-output drift, policy-threshold drift, missing-evidence drift, and expected migration drift.",
+        "Live verifier/provider sampling remains opt-in and cannot run in the default test suite."
+      ],
+      "constraints": [
+        "Provider output remains advisory evidence only.",
+        "No live provider calls in default tests.",
+        "Do not change runtime/provider defaults while calibrating drift guardrails."
+      ],
+      "expected_changes": [
+        "packages/core/tests/**",
+        "packages/core/src/contracts.js",
+        "docs/semantix-control-plane-spec.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "drift",
+          "verifier"
+        ],
+        "notes": "Fixture corpus records check kind, threshold, comparator, provider result, Semantix policy decision, expected risk flags, and migration metadata. Provider output remains advisory; live provider sampling is not in default tests.",
+        "files_touched": [
+          "packages/core/tests/verifier-policy.test.js",
+          "packages/core/tests/fixtures/verifier-drift-corpus.json",
+          "docs/semantix-control-plane-spec.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "verification": "TPF_LLM_TOOL=codex tpf node --test packages/core/tests/verifier-policy.test.js passed 11/11; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane (rerun with localhost approval) passed 33/33; TPF_LLM_TOOL=codex tpf git diff --check passed."
+      },
+      "assignee": "codex",
+      "blocker_reason": null,
+      "comment": "Completed verifier drift calibration. Added deterministic verifier drift corpus, snapshot tests for Semantix policy decisions, and docs defining drift classes and opt-in live sampling boundary. Verification: verifier-policy tests passed 11/11; control-plane workspace tests passed 33/33; git diff --check passed.",
+      "outcome": "partial_slice_landed"
     }
   ]
 }

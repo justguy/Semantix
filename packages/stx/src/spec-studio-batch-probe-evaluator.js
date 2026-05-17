@@ -12,6 +12,7 @@ function basePacket(sessionId, iteration, originalUserRequest) {
     source: SOURCE_SEMANTIX,
     sessionId,
     iteration,
+    approvalRequired: true,
     originalUserRequest: originalUserRequest || ORIGINAL_REQUEST,
     alignedRequirement: "",
     requirements: [],
@@ -51,6 +52,28 @@ function needsUser(sessionId, iteration, originalUserRequest, {
 
 function readyPacket(sessionId, iteration, originalUserRequest, { mode, coreAction, findings = [] }) {
   const isIntegration = mode === "new-integration";
+  const isUpdate = mode === "update";
+  const existingSystemContext = isUpdate
+    ? {
+        mode: "update",
+        targetSurfaces: [
+          {
+            id: "surf_expense_reporting_workflow",
+            kind: "workflow",
+            name: "Existing expense reporting workflow",
+          },
+        ],
+        doNotChange: [
+          "Do not replace unrelated existing expense-reporting infrastructure.",
+        ],
+        reuseRequirements: [
+          "Reuse the existing approval-routing integration where available.",
+        ],
+        compatibilityRequirements: [
+          "Preserve compatibility with current expense-reporting users and records.",
+        ],
+      }
+    : { mode: "new" };
   return {
     ...basePacket(sessionId, iteration, originalUserRequest),
     readiness: "ready",
@@ -59,7 +82,9 @@ function readyPacket(sessionId, iteration, originalUserRequest, { mode, coreActi
     approvalRequired: true,
     alignedRequirement: isIntegration
       ? "New expense reporting app integrating with existing backend infrastructure."
-      : "Update to existing expense reporting system.",
+      : isUpdate
+        ? "Update to existing expense reporting system."
+        : "New expense reporting app.",
     requirements: [
       {
         id: "REQ-001",
@@ -94,7 +119,7 @@ function readyPacket(sessionId, iteration, originalUserRequest, { mode, coreActi
       outOfScope: ["Building a new auth or approval engine from scratch"],
       negativeRequirements: [],
     },
-    existingSystemContext: { mode: isIntegration ? "new" : "existing" },
+    existingSystemContext,
     acceptanceSummary: [
       "User can submit an expense report.",
       "Approval routing delegates to existing backend.",
@@ -174,7 +199,7 @@ export function createSpecStudioBatchProbeEvaluator() {
     if (priorTurnId === "T-BATCH-Q1" && trigger === "user_turn" && turnBody?.kind === "batch") {
       const answers = turnBody.answers ?? [];
       const systemAnswer = answers.find((a) => a.questionId === "Q-SYSTEM-TYPE");
-      const mode = systemAnswer?.picked === "OPT-NEW" ? "new" : "existing";
+      const mode = systemAnswer?.picked === "OPT-NEW" ? "new" : "update";
 
       return {
         packet: needsUser(sessionId, iteration, originalUserRequest, {
@@ -247,7 +272,7 @@ export function createSpecStudioBatchProbeEvaluator() {
 
     // T3: reconcile contradiction
     if (priorTurnId === "T-BATCH-Q3" && trigger === "user_turn" && turnBody?.kind === "choice") {
-      const mode = turnBody.picked === "OPT-NEW-WITH-INTEGRATION" ? "new-integration" : "existing";
+      const mode = turnBody.picked === "OPT-NEW-WITH-INTEGRATION" ? "new-integration" : "update";
       const priorFindings = prior.findings ?? [];
       return {
         packet: readyPacket(sessionId, iteration, originalUserRequest, { mode, findings: priorFindings }),

@@ -85,6 +85,97 @@ Deliverables:
 - compatibility notes for `IntentContract`, `ExecutionPlan`, `StateEffect`, and strict compiler
   envelopes
 
+Milestone 1 draft contract:
+
+```ts
+type ConstraintIR = {
+  id: string;
+  version: 1;
+  sourceRef: string;
+  target: {
+    kind: "semantic_output" | "state_effect" | "tool_call" | "runtime_node";
+    nodeId?: string;
+    outputRef?: string;
+    stateEffectId?: string;
+  };
+  schema?: {
+    format?: "json" | "text" | "markdown" | "code" | "custom";
+    jsonSchema?: object;
+    requiredFields?: string[];
+    forbiddenFields?: string[];
+    parser?: string;
+  };
+  pathPolicy?: {
+    root?: string;
+    allow?: string[];
+    deny?: string[];
+    operations?: string[];
+  };
+  capabilities?: {
+    required?: string[];
+    forbidden?: string[];
+    approvalRequired?: string[];
+  };
+  approval?: {
+    required: boolean;
+    gateId?: string;
+    reason?: string;
+    freshness?: "artifact" | "node" | "state_effect";
+  };
+  retry?: {
+    maxAttempts: number;
+    retryOn?: string[];
+    failOn?: string[];
+    repairInstructions?: string;
+  };
+  verifier?: {
+    mode: "none" | "advisory" | "required";
+    checks?: Array<{
+      id: string;
+      kind: "groundedness" | "entailment" | "contradiction" | "similarity" | "custom";
+      threshold?: number;
+      failureSeverity?: "hard" | "soft";
+    }>;
+  };
+  provenance?: {
+    required: boolean;
+    sources?: string[];
+    evidenceRefs?: string[];
+    attachToOutput?: boolean;
+  };
+  failure?: {
+    defaultSeverity: "hard" | "soft";
+    classes: Array<{
+      code: string;
+      class:
+        | "schema"
+        | "path_policy"
+        | "capability"
+        | "approval"
+        | "verifier"
+        | "provenance"
+        | "runtime";
+      severity: "hard" | "soft";
+      retryable: boolean;
+      message: string;
+    }>;
+  };
+  compiledArtifacts?: {
+    schemaValidatorRef?: string;
+    fieldValidatorRef?: string;
+    pathPolicyRef?: string;
+    approvalMarkerRef?: string;
+    retryPolicyRef?: string;
+    failurePolicyRef?: string;
+    verifierRef?: string;
+    constrainedDecoderRef?: string;
+  };
+};
+```
+
+The IR intentionally carries policy and provenance before executable functions exist. The next
+compiler slice can attach `compiledArtifacts` without changing the language surface again.
+
 ### Milestone 2: Deterministic Constraint Compiler
 
 Implement a first compiler slice that lowers constraint declarations into executable artifacts.
@@ -99,6 +190,19 @@ Minimum artifacts:
 
 The slice should stay narrow enough to test without live model calls.
 
+Delivered compiler slice:
+
+- `compileConstraintBundle` lowers `ConstraintIR` records into deterministic `constraintBundle`
+  entries for strict compiler envelopes.
+- The bundle records stable identities, compiled artifact refs, and validator groups for schema,
+  required/forbidden fields, path policies, approval markers, retry policies, failure policies, and
+  verifier policy markers.
+- If a semantic node has no explicit `ConstraintIR`, the compiler emits a fallback IR from the
+  node `hard_validation_schema` so existing strict compiler consumers remain compatible.
+- Illegal hard constraints fail deterministically before admission, including required/forbidden
+  field overlap, capability require/forbid overlap, all allowed paths being denied, invalid retry
+  policy, invalid verifier mode, and malformed failure classes.
+
 ### Milestone 3: Runtime Admission Loop
 
 Route semantic outputs through the compiled artifacts before they become trusted program state.
@@ -111,6 +215,16 @@ The loop should:
 - retry within a fixed budget when retry is allowed
 - fail closed when hard constraints remain violated
 - persist admission evidence for audit
+
+Delivered runtime slice:
+
+- The Codex runtime adapter now executes a bounded semantic-admission loop from the compiled
+  `constraintBundle` retry policy.
+- Admission attempts are classified with deterministic reason codes, failure classes, severity,
+  retryability, constraint identity, evidence, and stdout hash.
+- Retryable schema failures can be regenerated inside the fixed budget; exhausted retries and hard
+  path-policy failures fail closed without storing `admittedOutput` or emitting approval gates.
+- Control-plane run state persists admission evidence on both admitted and rejected semantic nodes.
 
 ### Milestone 4: Verifier And Provider Hooks
 
@@ -155,6 +269,47 @@ Minimum contents:
 - final admission or rejection outcome
 - state effects shown to the reviewer
 
+Implemented v1 bundle shape:
+
+- `reviewedArtifact`: artifact id, run id, plan version, graph version, artifact hash, freshness
+  state, and generation timestamp.
+- `compiledConstraintIdentities`: each `ConstraintIR` id, version, target, verifier policy,
+  provenance policy, failure policy, and stable identity hash.
+- `candidateMetadata`: execution nodes with revision, execution/review status, approval
+  requirement, constraint refs, runtime binding, and risk flags.
+- `validationResults`: runtime admission evidence per semantic node, including final attempt,
+  attempts, status, and admitted output hash.
+- `verifierResults`: configured verifier checks and reported results, always labeled as advisory
+  evidence unless a Semantix policy consumes the result.
+- `shownStateEffects`: reviewer-visible effect metadata plus preview content, preview source,
+  fidelity, and synthetic-preview marker.
+- `reviewEvents` and `replayTimeline`: persisted audit records in sequence, including approval,
+  stale rejection, intervention, resume, and completion events.
+- `signature`: an unsigned deterministic envelope with canonical payload hash and a detached
+  signature path. Production key provisioning, rotation, KMS/HSM integration, certificate
+  transparency, and timestamp authority integration remain out of scope for this slice.
+
+Implemented audit redaction and size guardrails:
+
+- Default audit export classifies bundle fields as required, optional, hash-only, redacted, or
+  disallowed.
+- Raw preview content, verifier/provider payloads, semantic frame context, admitted model output,
+  and model-derived summaries are represented by deterministic hashes, byte sizes, safe summaries
+  where available, and explicit redaction reasons.
+- Bundle generation emits size metadata for preview content, verifier evidence, semantic context,
+  admitted output, and redacted review-event details.
+- The default export fails closed if a disallowed raw payload key remains in the bundle.
+- Replay from a default bundle proves identity and policy decisions from hashes; reconstructing raw
+  payload bodies requires separate operator-approved retention.
+
+Implemented verifier drift guardrails:
+
+- A deterministic fixture corpus records check kind, threshold, comparator, provider result,
+  Semantix policy decision, expected risk flags, and fixture migration metadata.
+- Default tests lock Semantix-owned verifier policy decisions against provider-output drift,
+  policy-threshold drift, missing-evidence drift, and unavailable-provider fail-closed behavior.
+- Live verifier/provider sampling remains opt-in and is not part of the default test suite.
+
 Replay does not need to reproduce model tokens. It must reproduce the deterministic admission
 decision from the recorded candidate and compiled constraints.
 
@@ -192,6 +347,10 @@ Phase 2 tasks:
 - `stx-p2-006`: define audit bundle and signed review artifact path.
 - `stx-p2-007`: implement provenance and replay foundation.
 - `stx-p2-008`: run Phase 2 readiness review and decide runtime expansion.
+- `stx-p2-009`: run provider-bound proof matrix and readiness checks.
+- `stx-p2-010`: add audit replay drift sentinels.
+- `stx-p2-011`: define audit payload redaction and size guardrails.
+- `stx-p2-012`: calibrate verifier drift guardrails.
 
 ## Risks
 

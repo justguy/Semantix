@@ -5,6 +5,7 @@ import {
   ValidationError,
   NotFoundError,
   createAuditRecord,
+  createArtifactHash,
   createCheckpoint,
   createIntentContract,
   createRuntimeSession,
@@ -19,6 +20,7 @@ import {
   markArtifactSuperseded,
   isCheckpointFresh,
   cloneJson,
+  stableStringify,
 } from "./contracts.js";
 import { HostFunctionRegistry } from "./host-function-registry.js";
 import {
@@ -65,6 +67,57 @@ function createLockKey(runId, sessionId) {
   return sessionId ? `${runId}:${sessionId}` : runId;
 }
 
+const AUDIT_PAYLOAD_LIMITS = {
+  maxInlinePreviewContentBytes: 0,
+  maxInlineVerifierEvidenceBytes: 0,
+  maxInlineContextBytes: 0,
+  maxInlineAdmittedOutputBytes: 0,
+};
+
+const AUDIT_PAYLOAD_CLASSIFICATIONS = {
+  reviewedArtifact: "required",
+  compiledConstraintIdentities: "required",
+  candidateMetadata: {
+    executionMetadata: "required",
+    runtimeBinding: "optional",
+    semanticFrameContext: "hash-only",
+  },
+  validationResults: {
+    statusAndAttempts: "required",
+    admittedOutputReference: "hash-only",
+    attemptEvidence: "hash-only",
+    rawModelOutput: "disallowed",
+  },
+  verifierResults: {
+    configuredChecks: "required",
+    providerEvidenceReference: "hash-only",
+    rawVerifierPayload: "disallowed",
+  },
+  shownStateEffects: {
+    reviewerVisibleMetadata: "required",
+    previewContent: "hash-only",
+  },
+  reviewEvents: {
+    eventIdentity: "required",
+    details: "redacted",
+  },
+  replayTimeline: "required",
+};
+
+const AUDIT_DISALLOWED_EXPORT_KEYS = new Set([
+  "admittedOutput",
+  "body",
+  "content",
+  "context",
+  "providerEvidence",
+  "raw",
+  "reference",
+  "stderr",
+  "stdout",
+  "subject",
+  "text",
+]);
+
 function queueExclusive(map, key, work) {
   const previous = map.get(key) ?? Promise.resolve();
   const next = previous
@@ -78,6 +131,176 @@ function queueExclusive(map, key, work) {
 
   map.set(key, next);
   return next;
+}
+
+function stableJsonSizeBytes(value) {
+  return Buffer.byteLength(stableStringify(value), "utf8");
+}
+
+function textSizeBytes(value) {
+  return Buffer.byteLength(String(value ?? ""), "utf8");
+}
+
+function createAuditRedactionContext() {
+  return {
+    redactions: [],
+    sizeMetadata: {
+      previewContentBytes: 0,
+      verifierEvidenceBytes: 0,
+      contextBytes: 0,
+      admittedOutputBytes: 0,
+      reviewEventDetailsBytes: 0,
+    },
+  };
+}
+
+function recordAuditRedaction(context, redaction) {
+  context.redactions.push({
+    path: redaction.path,
+    classification: redaction.classification,
+    reason: redaction.reason,
+    originalSizeBytes: redaction.originalSizeBytes,
+    retainedHash: redaction.retainedHash,
+  });
+}
+
+function createHashOnlyAuditReference({
+  value,
+  path,
+  classification = "hash-only",
+  reason,
+  context,
+  sizeBucket,
+}) {
+  const originalSizeBytes = stableJsonSizeBytes(value);
+  const retainedHash = createArtifactHash(value);
+  if (sizeBucket) {
+    context.sizeMetadata[sizeBucket] = (context.sizeMetadata[sizeBucket] ?? 0) + originalSizeBytes;
+  }
+  recordAuditRedaction(context, {
+    path,
+    classification,
+    reason,
+    originalSizeBytes,
+    retainedHash,
+  });
+  return {
+    hash: retainedHash,
+    originalSizeBytes,
+    retention: "hash_only",
+    redactionReason: reason,
+  };
+}
+
+function createHashOnlyTextAuditReference({
+  value,
+  path,
+  reason,
+  context,
+  sizeBucket,
+}) {
+  const text = String(value ?? "");
+  const originalSizeBytes = textSizeBytes(text);
+  const retainedHash = createArtifactHash(text);
+  if (sizeBucket) {
+    context.sizeMetadata[sizeBucket] = (context.sizeMetadata[sizeBucket] ?? 0) + originalSizeBytes;
+  }
+  recordAuditRedaction(context, {
+    path,
+    classification: "hash-only",
+    reason,
+    originalSizeBytes,
+    retainedHash,
+  });
+  return {
+    hash: retainedHash,
+    originalSizeBytes,
+    retention: "hash_only",
+    redactionReason: reason,
+  };
+}
+
+function summarizeAuditDetails(details = {}) {
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+
+  const summary = {};
+  for (const key of [
+    "checkpointId",
+    "reason",
+    "targetSymbol",
+    "sessionId",
+    "runtimeSessionId",
+    "currentPlanVersion",
+    "currentGraphVersion",
+    "currentArtifactHash",
+    "currentNodeRevision",
+    "nodeId",
+    "graphVersion",
+  ]) {
+    if (details[key] !== undefined) {
+      summary[key] = cloneJson(details[key]);
+    }
+  }
+
+  if (Array.isArray(details.affectedNodes)) {
+    summary.affectedNodes = cloneJson(details.affectedNodes);
+  }
+
+  return Object.keys(summary).length > 0 ? summary : null;
+}
+
+function redactAuditRecord(record, context, index) {
+  const detailsRef =
+    record.details == null
+      ? null
+      : createHashOnlyAuditReference({
+          value: record.details,
+          path: `reviewEvents[${index}].details`,
+          classification: "redacted",
+          reason: "Audit record details can contain operator annotations, admission evidence, or change payloads; default bundles retain a hash and safe summary only.",
+          context,
+          sizeBucket: "reviewEventDetailsBytes",
+        });
+
+  return {
+    id: record.id,
+    runId: record.runId,
+    action: record.action,
+    actor: record.actor,
+    planVersion: record.planVersion,
+    artifactHash: record.artifactHash,
+    nodeId: record.nodeId,
+    gateId: record.gateId,
+    timestamp: record.timestamp,
+    detailsSummary: summarizeAuditDetails(record.details),
+    detailsRef,
+  };
+}
+
+function assertNoDisallowedAuditPayloads(value, path = "bundle") {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoDisallowedAuditPayloads(item, `${path}[${index}]`));
+    return;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (AUDIT_DISALLOWED_EXPORT_KEYS.has(key)) {
+      throw new ValidationError(
+        `Audit bundle default export contains a disallowed raw payload field at ${path}.${key}.`,
+        {
+          path: `${path}.${key}`,
+          field: key,
+        },
+      );
+    }
+    assertNoDisallowedAuditPayloads(entry, `${path}.${key}`);
+  }
 }
 
 function stringifyPreviewValue(value) {
@@ -381,6 +604,358 @@ function collectDeterministicExecutionReview(artifact, node) {
     stateEffects,
     ...collectDeterministicReviewMetadata(stateEffects),
   };
+}
+
+function collectAuditConstraintIdentities(artifact) {
+  return (artifact?.plan?.constraintIRs ?? []).map((ir) => ({
+    id: ir.id,
+    version: ir.version,
+    target: cloneJson(ir.target),
+    identityHash: createArtifactHash(ir),
+    verifierPolicy: cloneJson(ir.verifier ?? { mode: "none" }),
+    provenancePolicy: cloneJson(ir.provenance ?? { required: false }),
+    failurePolicy: cloneJson(ir.failure ?? null),
+  }));
+}
+
+function collectAuditCandidateMetadata(artifact, redactionContext) {
+  const frameById = new Map((artifact?.semantic_frames ?? []).map((frame) => [frame.frame_id, frame]));
+  return (artifact?.plan?.nodes ?? []).map((node) => ({
+    nodeId: node.id,
+    nodeType: node.nodeType,
+    revision: node.revision,
+    executionStatus: node.executionStatus,
+    reviewStatus: node.reviewStatus,
+    approvalRequired: Boolean(node.approvalRequired),
+    constraintIrRefs: cloneJson(node.constraintIrRefs ?? []),
+    runtimeBinding: cloneJson(node.runtimeBinding ?? null),
+    riskFlags: cloneJson(node.riskFlags ?? []),
+    contextRef:
+      node.semanticFrameId && frameById.has(node.semanticFrameId)
+        ? {
+            semanticFrameId: node.semanticFrameId,
+            ...createHashOnlyAuditReference({
+              value: frameById.get(node.semanticFrameId)?.context ?? {},
+              path: `candidateMetadata.${node.id}.semanticFrameContext`,
+              reason: "Raw semantic frame context is not persisted in default audit bundles; replay can prove identity from the context hash unless an operator approves retention.",
+              context: redactionContext,
+              sizeBucket: "contextBytes",
+            }),
+          }
+        : null,
+  }));
+}
+
+function sanitizeAuditAdmissionAttempt(attempt, path, redactionContext) {
+  const evidence = attempt?.evidence ?? [];
+  const evidenceRef = createHashOnlyAuditReference({
+    value: evidence,
+    path: `${path}.evidence`,
+    reason: "Admission attempt evidence may contain raw verifier or context excerpts; default bundles retain only count, size, and hash.",
+    context: redactionContext,
+    sizeBucket: "verifierEvidenceBytes",
+  });
+
+  const messageRef =
+    attempt?.message == null
+      ? null
+      : createHashOnlyTextAuditReference({
+          value: attempt.message,
+          path: `${path}.message`,
+          reason: "Admission attempt messages can summarize raw model output; default audit bundles retain them as hash-only references.",
+          context: redactionContext,
+        });
+
+  return {
+    attemptNumber: attempt?.attemptNumber,
+    status: attempt?.status,
+    reasonCode: attempt?.reasonCode,
+    failureClass: attempt?.failureClass,
+    severity: attempt?.severity,
+    retryable: Boolean(attempt?.retryable),
+    constraintId: attempt?.constraintId ?? null,
+    messageRef,
+    stdoutSha256: attempt?.stdoutSha256 ?? null,
+    evidenceCount: Array.isArray(evidence) ? evidence.length : 0,
+    evidenceRef,
+  };
+}
+
+function collectAuditAdmissionEvidence(artifact, redactionContext) {
+  return (artifact?.plan?.nodes ?? [])
+    .filter((node) => node.admissionEvidence)
+    .map((node, nodeIndex) => {
+      const admittedOutputRef =
+        node.admittedOutput == null
+          ? null
+          : createHashOnlyAuditReference({
+              value: node.admittedOutput,
+              path: `validationResults[${nodeIndex}].admittedOutput`,
+              reason: "Raw admitted model output is disallowed in default audit persistence; replay can bind to the output hash unless operator-approved retention exists.",
+              context: redactionContext,
+              sizeBucket: "admittedOutputBytes",
+            });
+      const attempts = (node.admissionEvidence.attempts ?? []).map((attempt, attemptIndex) =>
+        sanitizeAuditAdmissionAttempt(
+          attempt,
+          `validationResults[${nodeIndex}].attempts[${attemptIndex}]`,
+          redactionContext,
+        ),
+      );
+
+      return {
+        nodeId: node.id,
+        status: node.admissionEvidence.status,
+        retryPolicy: cloneJson(node.admissionEvidence.retryPolicy ?? null),
+        finalAttempt: attempts.at(-1) ?? null,
+        attempts,
+        admittedOutputHash: admittedOutputRef?.hash ?? null,
+        admittedOutputRef,
+      };
+    });
+}
+
+function collectAuditRetryEvidence(admissionEvidence) {
+  return admissionEvidence.flatMap((entry) =>
+    (entry.attempts ?? [])
+      .filter((attempt) => attempt.status === "retry_scheduled" || attempt.retryable === true)
+      .map((attempt) => ({
+        nodeId: entry.nodeId,
+        attempt: attempt.attemptNumber,
+        status: attempt.status,
+        reasonCode: attempt.reasonCode,
+        failureClass: attempt.failureClass,
+        retryable: attempt.retryable,
+      })),
+  );
+}
+
+function collectAuditVerifierEvidence(artifact, redactionContext) {
+  const configuredChecks = (artifact?.plan?.constraintIRs ?? []).flatMap((ir) =>
+    (ir.verifier?.checks ?? []).map((check) => ({
+      constraintIrId: ir.id,
+      verifierMode: ir.verifier.mode,
+      check: cloneJson(check),
+    })),
+  );
+  const reportedResults = (artifact?.plan?.nodes ?? []).flatMap((node) =>
+    (node.admissionEvidence?.attempts ?? []).flatMap((attempt) =>
+      (attempt.verifierResults ?? attempt.verifier_results ?? []).map((result, resultIndex) => ({
+        nodeId: node.id,
+        attempt: attempt.attempt ?? attempt.attemptNumber,
+        resultSummary: {
+          status: result?.status,
+          policyState: result?.policyState,
+          advisory: result?.advisory,
+          riskFlags: cloneJson(result?.riskFlags ?? []),
+        },
+        resultRef: createHashOnlyAuditReference({
+          value: result,
+          path: `verifierResults.reportedResults.${node.id}.${attempt.attempt ?? attempt.attemptNumber}.${resultIndex}`,
+          reason: "Verifier provider evidence may include raw context, references, or model excerpts; default bundles retain an advisory summary plus hash-only payload reference.",
+          context: redactionContext,
+          sizeBucket: "verifierEvidenceBytes",
+        }),
+      })),
+    ),
+  );
+
+  return {
+    configuredChecks,
+    reportedResults,
+    authority: "advisory_evidence_only",
+  };
+}
+
+function collectAuditShownStateEffects(artifact, previewIndex, redactionContext) {
+  return (artifact?.plan?.stateEffects ?? []).map((effect) => {
+    const previewRecord = effect.previewRef ? previewIndex[effect.previewRef] : null;
+    const previewContentRef = previewRecord
+      ? createHashOnlyTextAuditReference({
+          value: previewRecord.content,
+          path: `shownStateEffects.${effect.id}.preview.content`,
+          reason: "Preview content is hash-only in default audit bundles; exact visual replay requires operator-approved preview retention.",
+          context: redactionContext,
+          sizeBucket: "previewContentBytes",
+        })
+      : null;
+    return {
+      id: effect.id,
+      kind: effect.kind,
+      operation: effect.operation,
+      target: effect.target,
+      summary: effect.summary,
+      policyState: effect.policyState,
+      riskFlags: cloneJson(effect.riskFlags ?? []),
+      reversibility: cloneJson(effect.reversibility ?? null),
+      enforcement: cloneJson(effect.enforcement ?? null),
+      constraintIrRefs: cloneJson(effect.constraintIrRefs ?? []),
+      preview: previewRecord
+        ? {
+            previewRef: previewRecord.previewRef,
+            mediaType: previewRecord.mediaType,
+            source: previewRecord.source,
+            sourceLabel: previewRecord.sourceLabel,
+            fidelity: previewRecord.fidelity,
+            contentIsSynthetic: Boolean(previewRecord.contentIsSynthetic),
+            contentHash: previewContentRef.hash,
+            contentSizeBytes: previewContentRef.originalSizeBytes,
+            contentRetention: previewContentRef.retention,
+            redactionReason: previewContentRef.redactionReason,
+          }
+        : null,
+    };
+  });
+}
+
+function summarizeAuditOutcome(artifact, redactionContext) {
+  const finalNode = (artifact?.plan?.nodes ?? []).find((node) => node.executionStatus === "failed") ??
+    (artifact?.plan?.nodes ?? [])
+      .slice()
+      .reverse()
+      .find((node) => node.executionStatus === "succeeded") ??
+    null;
+
+  const outputSummaryRef =
+    finalNode?.outputSummary == null
+      ? null
+      : createHashOnlyTextAuditReference({
+          value: finalNode.outputSummary,
+          path: "finalOutcome.outputSummary",
+          reason: "Final output summaries can contain raw model output; default audit bundles retain summary identity as a hash-only reference.",
+          context: redactionContext,
+        });
+
+  return {
+    planStatus: artifact?.plan?.status ?? null,
+    finalNodeId: finalNode?.id ?? null,
+    finalNodeStatus: finalNode?.executionStatus ?? null,
+    finalReviewStatus: finalNode?.reviewStatus ?? null,
+    outputSummaryRef,
+  };
+}
+
+function buildAuditReplayTimeline(auditRecords, artifact, redactionContext) {
+  return auditRecords.map((record, index) => ({
+    sequence: index + 1,
+    timestamp: record.timestamp,
+    action: record.action,
+    actor: record.actor,
+    nodeId: record.nodeId,
+    gateId: record.gateId,
+    planVersion: record.planVersion,
+    graphVersion: artifact?.graphVersion,
+    artifactHash: record.artifactHash,
+    checkpointId: record.details?.checkpointId,
+    reason: record.details?.reason,
+    staleDetails:
+      record.action === "approval.stale" && record.details
+        ? {
+            summary: summarizeAuditDetails(record.details),
+            ref: createHashOnlyAuditReference({
+              value: record.details,
+              path: `replayTimeline[${index}].staleDetails`,
+              classification: "redacted",
+              reason: "Stale approval details are replayable from a hash and safe summary by default; raw details require explicit retention.",
+              context: redactionContext,
+              sizeBucket: "reviewEventDetailsBytes",
+            }),
+          }
+        : null,
+    source: "audit_record",
+  }));
+}
+
+function buildAuditBundle({ run, auditRecords, generatedAt }) {
+  const artifact = run.artifact;
+  const redactionContext = createAuditRedactionContext();
+  const previewIndex = buildPreviewIndex(artifact, run.previewIndex);
+  const constraintIdentities = collectAuditConstraintIdentities(artifact);
+  const candidateMetadata = collectAuditCandidateMetadata(artifact, redactionContext);
+  const admissionEvidence = collectAuditAdmissionEvidence(artifact, redactionContext);
+  const verifierEvidence = collectAuditVerifierEvidence(artifact, redactionContext);
+  const shownStateEffects = collectAuditShownStateEffects(artifact, previewIndex, redactionContext);
+  const reviewEvents = auditRecords.map((record, index) => redactAuditRecord(record, redactionContext, index));
+  const replayTimeline = buildAuditReplayTimeline(auditRecords, artifact, redactionContext);
+  const finalOutcome = summarizeAuditOutcome(artifact, redactionContext);
+  const reviewedArtifact = {
+    artifactId: artifact.artifactId,
+    runId: artifact.runId,
+    planVersion: artifact.planVersion,
+    graphVersion: artifact.graphVersion,
+    artifactHash: artifact.artifactHash,
+    freshnessState: artifact.freshnessState,
+    generatedAt: artifact.generatedAt,
+  };
+  const payloadPolicy = {
+    schemaVersion: 1,
+    defaultRetention: "hash_reference_redacted",
+    classifications: cloneJson(AUDIT_PAYLOAD_CLASSIFICATIONS),
+    limits: cloneJson(AUDIT_PAYLOAD_LIMITS),
+    operatorApprovedRetentionRequiredFor: [
+      "raw preview content replay",
+      "raw verifier provider evidence replay",
+      "raw semantic frame context replay",
+      "raw admitted model output replay",
+    ],
+  };
+  const sizeMetadata = {
+    ...redactionContext.sizeMetadata,
+    redactionCount: redactionContext.redactions.length,
+  };
+  const canonicalPayload = {
+    reviewedArtifact,
+    constraintIdentities,
+    candidateMetadata,
+    admissionEvidence,
+    verifierEvidence,
+    shownStateEffects,
+    finalOutcome,
+    reviewEvents,
+    replayTimeline,
+    payloadPolicy,
+    sizeMetadata,
+    redactions: redactionContext.redactions,
+  };
+  const canonicalPayloadHash = createArtifactHash(canonicalPayload);
+
+  const bundle = {
+    schemaVersion: 1,
+    bundleId: `audit-bundle.${run.runId}.${artifact.planVersion}.${generatedAt}`,
+    generatedAt,
+    reviewedArtifact,
+    compiledConstraintIdentities: constraintIdentities,
+    candidateMetadata,
+    validationResults: admissionEvidence,
+    verifierResults: verifierEvidence,
+    retries: collectAuditRetryEvidence(admissionEvidence),
+    finalOutcome,
+    shownStateEffects,
+    reviewEvents,
+    replayTimeline,
+    payloadPolicy,
+    sizeMetadata,
+    redactions: redactionContext.redactions,
+    signature: {
+      status: "unsigned",
+      canonicalPayloadHash,
+      envelope: "semantix-audit-bundle-v1",
+      signingPath: {
+        hashAlgorithm: "sha256",
+        signatureFormat: "detached_signature",
+        signerIdentityRef: "semantix.review_artifact_signer",
+        keyManagement: "external_or_operator_supplied",
+        productionHardeningOutOfScope: [
+          "key provisioning",
+          "key rotation",
+          "hardware or cloud KMS integration",
+          "certificate transparency or timestamp authority integration",
+        ],
+      },
+    },
+  };
+  assertNoDisallowedAuditPayloads(bundle);
+  return bundle;
 }
 
 function buildRunSummary(run, sessions = []) {
@@ -1095,6 +1670,22 @@ export class ControlPlaneService {
       graphVersion: artifact.graphVersion,
       artifactHash: artifact.artifactHash,
     };
+  }
+
+  async getAuditBundle({ runId } = {}) {
+    const run = await this.getRunState(runId);
+    const artifact = this.requireArtifact(run);
+    const auditRecords =
+      typeof this.store.listAuditRecords === "function"
+        ? await this.store.listAuditRecords(runId)
+        : [];
+
+    return buildAuditBundle({
+      run,
+      artifact,
+      auditRecords,
+      generatedAt: this.now(),
+    });
   }
 
   async bootstrapRun({
@@ -2537,10 +3128,19 @@ export class ControlPlaneService {
         executionStatus: "failed",
         reviewStatus: "blocked",
         outputSummary: result.outputSummary ?? "Runtime execution failed before semantic admission.",
-        riskFlags: mergeRiskFlags(node.riskFlags, ["runtime_connector_failure"]),
+        admissionEvidence: cloneJson(result.admissionEvidence ?? node.admissionEvidence ?? null),
+        riskFlags: mergeRiskFlags(node.riskFlags, [
+          result.admissionEvidence ? "semantic_admission_rejected" : "runtime_connector_failure",
+        ]),
       }));
       artifact.plan.status = "failed";
       run.inspectors = buildDeterministicInspectorPayloadMap(artifact);
+      if (result.inspectorPatch) {
+        run.inspectors[executableNode.id] = mergeInspectorPayload(
+          run.inspectors[executableNode.id],
+          result.inspectorPatch,
+        );
+      }
       await this.saveRunState(run);
 
       await this.appendAudit(
@@ -2554,6 +3154,7 @@ export class ControlPlaneService {
           nodeId: executableNode.id,
           details: {
             message: result.outputSummary ?? "Runtime execution failed before semantic admission.",
+            admissionEvidence: result.admissionEvidence,
           },
           timestamp: failedAt,
         }),
@@ -2570,14 +3171,16 @@ export class ControlPlaneService {
           artifactHash: artifact.artifactHash,
           payload: {
             message: result.outputSummary ?? "Runtime execution failed before semantic admission.",
+            admissionEvidence: result.admissionEvidence,
           },
         }),
       );
 
-      throw new ValidationError("Runtime execution failed before semantic admission.", {
+      throw new ValidationError(result.outputSummary ?? "Runtime execution failed before semantic admission.", {
         runId,
         nodeId: executableNode.id,
         outputSummary: result.outputSummary,
+        admissionEvidence: result.admissionEvidence,
       });
     }
 
@@ -2599,6 +3202,7 @@ export class ControlPlaneService {
       reviewStatus: "approved",
       outputSummary: result.outputSummary ?? node.outputSummary,
       admittedOutput,
+      admissionEvidence: cloneJson(result.admissionEvidence ?? null),
     }));
 
     const deterministicNode = artifact.plan.nodes.find(
