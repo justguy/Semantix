@@ -36,6 +36,7 @@ import {
   normalizeSemantixEvaluateRequest,
   validateSemantixEvaluateRequest,
   validateSemantixEvaluateResponse,
+  withSemantixTurnLogEntry,
 } from "./spec-studio-evaluator.js";
 import {
   createDegradedPacket,
@@ -67,6 +68,8 @@ export function describeSemantixCapabilities() {
     capabilities: {
       stableIdContinuity: true,
       negativeRequirementsAreFirstClass: true,
+      turnLogEntry: true,
+      retryDiagnostics: "events + turnLogEntry.diagnostics + optional llmResponses",
       degradedReporting: "semantix-side; phalanx-degraded fallback is Phalanx-owned",
       hoplonAccess: "via phalanx broker only",
       lockAuthority: "phalanx",
@@ -100,6 +103,37 @@ function fixtureLookup(fixtureResponses, request) {
   return null;
 }
 
+function describeDegradedRequestContext(request) {
+  const trigger =
+    isPlainObject(request) && isNonEmptyString(request.trigger)
+      ? request.trigger
+      : "unknown";
+  const userTurnKind =
+    isPlainObject(request) &&
+    isPlainObject(request.userTurn) &&
+    isPlainObject(request.userTurn.body) &&
+    isNonEmptyString(request.userTurn.body.kind)
+      ? request.userTurn.body.kind
+      : null;
+  const contextResponseCount =
+    isPlainObject(request) && Array.isArray(request.contextResponses)
+      ? request.contextResponses.length
+      : 0;
+  const details = [`trigger="${trigger}"`];
+  if (userTurnKind) {
+    details.push(`userTurn.body.kind="${userTurnKind}"`);
+  }
+  if (trigger === EVALUATE_TRIGGER.CONTEXT_RESPONSE || contextResponseCount > 0) {
+    details.push(`contextResponses=${contextResponseCount}`);
+  }
+  return {
+    trigger,
+    userTurnKind,
+    contextResponseCount,
+    details: details.join(", "),
+  };
+}
+
 function buildUnavailableResponse(request, reason) {
   const sessionId = isPlainObject(request) && isNonEmptyString(request.sessionId)
     ? request.sessionId
@@ -108,6 +142,8 @@ function buildUnavailableResponse(request, reason) {
     isPlainObject(request) && isPlainObject(request.currentPacket)
       ? request.currentPacket
       : null;
+  const degradedContext = describeDegradedRequestContext(request);
+  const visibleReason = `${reason} Request context: ${degradedContext.details}.`;
   const packet = createDegradedPacket({
     sessionId,
     iteration:
@@ -115,7 +151,7 @@ function buildUnavailableResponse(request, reason) {
         ? priorPacket.iteration + 1
         : 0,
     originalUserRequest: priorPacket?.originalUserRequest,
-    reason,
+    reason: visibleReason,
     priorPacket,
     staleSafe: false,
   });
@@ -126,7 +162,14 @@ function buildUnavailableResponse(request, reason) {
         id: `evt_handshake_unavailable_${sessionId}_${Date.now()}`,
         kind: "semantix.unavailable",
         sessionId,
-        payload: { reason },
+        payload: {
+          reason: visibleReason,
+          trigger: degradedContext.trigger,
+          ...(degradedContext.userTurnKind
+            ? { userTurnKind: degradedContext.userTurnKind }
+            : {}),
+          contextResponseCount: degradedContext.contextResponseCount,
+        },
       },
     ],
     contextRequests: [],
@@ -277,14 +320,14 @@ export function createSemantixHandshakeAdapter(options = {}) {
       }
     }
 
-    return response;
+    return withSemantixTurnLogEntry(normalizedRequest, response);
   }
 
   return {
     describe: describeSemantixCapabilities,
     evaluate,
     isAvailable: () => !unavailable,
-    evaluatorMode: typeof evaluator === "function" && evaluator.evaluatorMode ? evaluator.evaluatorMode : "probe",
+    evaluatorMode: typeof evaluator === "function" && evaluator.evaluatorMode ? evaluator.evaluatorMode : "custom",
     capabilities: describeSemantixCapabilities(),
   };
 }

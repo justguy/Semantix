@@ -15,6 +15,7 @@
 import { ValidationError } from "@semantix/core/contracts";
 
 import {
+  normalizeSemantixAlignmentPacketForContract,
   validateFinding,
   validateSemantixAlignmentPacket,
   validateSemantixContextRequest,
@@ -97,8 +98,53 @@ export const USER_TURN_BODY_KIND_VALUES = Object.freeze([
  * @typedef {{
  *   packet: import("./spec-studio-contracts.js").SemantixAlignmentPacket,
  *   events: SpecEvent[],
- *   contextRequests: Array<import("./spec-studio-contracts.js").SemantixContextRequest>
+ *   contextRequests: Array<import("./spec-studio-contracts.js").SemantixContextRequest>,
+ *   turnLogEntry?: SemantixTurnLogEntry
  * }} SemantixEvaluateResponse
+ */
+
+/**
+ * @typedef {{
+ *   value: number | null,
+ *   label?: string | null
+ * }} SemantixTurnLogScore
+ */
+
+/**
+ * @typedef {{
+ *   confidence: SemantixTurnLogScore,
+ *   alignment: SemantixTurnLogScore,
+ *   effort: SemantixTurnLogScore
+ * }} SemantixTurnLogScores
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   sessionId: string,
+ *   iteration: number | null,
+ *   turnNumber: number | null,
+ *   trigger: string | null,
+ *   at: string,
+ *   readiness: string | null,
+ *   readinessReason: string,
+ *   done: boolean,
+ *   statusMessage: string,
+ *   beginningScores: SemantixTurnLogScores,
+ *   afterTurnScores: SemantixTurnLogScores,
+ *   answersSubmitted: Array<{ id: string, question: string, answer: string }>,
+ *   questionsNowOpen: Array<{ id: string, question: string, options?: Array<{ id: string, label: string }> }>,
+ *   decisionsRecorded: Array<{ id: string, question: string, answer: string, section?: string }>,
+ *   learnings: string[],
+ *   diagnostics: {
+ *     degraded: boolean,
+ *     stalledNeedsUser: boolean,
+ *     llmAttemptCount: number,
+ *     correctiveRetryCount: number,
+ *     retryReasons: string[],
+ *     discrepancy: null | { kind: string, message: string }
+ *   }
+ * }} SemantixTurnLogEntry
  */
 
 // ---- Internal helpers ------------------------------------------------------
@@ -109,6 +155,362 @@ function isPlainObject(value) {
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.length > 0;
+}
+
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null) return [];
+  return [value];
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, value));
+}
+
+function textOf(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isPlainObject(value)) {
+    for (const key of ["text", "question", "q", "label", "summary", "name", "description", "reason"]) {
+      if (typeof value[key] === "string" && value[key].trim().length > 0) {
+        return value[key].trim();
+      }
+    }
+  }
+  return "";
+}
+
+function optionText(option) {
+  if (typeof option === "string") return option.trim();
+  if (!isPlainObject(option)) return "";
+  return textOf(option.label ?? option.text ?? option.description ?? option.id);
+}
+
+function optionId(option, index) {
+  if (isPlainObject(option) && isNonEmptyString(option.id)) return option.id;
+  return `OPT-${index + 1}`;
+}
+
+function turnLogQuestionFromBatchItem(question, index) {
+  const questionText = textOf(question?.q ?? question?.question ?? question);
+  if (!questionText) return null;
+  return {
+    id: isPlainObject(question) && isNonEmptyString(question.id) ? question.id : `Q-${index + 1}`,
+    question: questionText,
+    options: asArray(question?.options)
+      .map((option, optionIndex) => ({
+        id: optionId(option, optionIndex),
+        label: optionText(option),
+      }))
+      .filter((option) => option.label),
+  };
+}
+
+function turnLogQuestions(packet) {
+  const body = packet?.nextTurn?.body;
+  if (!isPlainObject(body)) return [];
+  if (body.kind === "batch") {
+    return asArray(body.questions)
+      .map(turnLogQuestionFromBatchItem)
+      .filter(Boolean);
+  }
+  if (body.kind === "question") {
+    const questionText = textOf(body.q ?? body.question);
+    if (!questionText) return [];
+    return [
+      {
+        id: isNonEmptyString(packet?.nextTurn?.id) ? packet.nextTurn.id : "question",
+        question: questionText,
+        options: asArray(body.options)
+          .map((option, optionIndex) => ({
+            id: optionId(option, optionIndex),
+            label: optionText(option),
+          }))
+          .filter((option) => option.label),
+      },
+    ];
+  }
+  return [];
+}
+
+function openQuestionMap(packet) {
+  const map = new Map();
+  for (const question of [
+    ...turnLogQuestions(packet),
+    ...asArray(packet?.openQuestions).map(turnLogQuestionFromBatchItem).filter(Boolean),
+  ]) {
+    if (!map.has(question.id)) map.set(question.id, question);
+  }
+  return map;
+}
+
+function selectedAnswerText(answer, question) {
+  if (!isPlainObject(answer)) return textOf(answer);
+  if (typeof answer.text === "string" && answer.text.trim().length > 0) {
+    return answer.text.trim();
+  }
+  if (typeof answer.label === "string" && answer.label.trim().length > 0) {
+    return answer.label.trim();
+  }
+  const picked = answer.picked ?? answer.optId ?? answer.optionId;
+  if (picked) {
+    const option = asArray(question?.options).find((candidate) => candidate.id === picked);
+    return option?.label || String(picked);
+  }
+  return "";
+}
+
+function turnLogSubmittedAnswers(request) {
+  const body = request?.userTurn?.body;
+  if (!isPlainObject(body)) return [];
+  if (body.kind === "text") {
+    return [{
+      id: "initial-request",
+      question: "Initial request",
+      answer: typeof body.text === "string" ? body.text : "",
+    }];
+  }
+  const priorQuestions = openQuestionMap(request?.currentPacket);
+  if (body.kind === "batch") {
+    return asArray(body.answers).map((answer, index) => {
+      const questionId = answer?.questionId ?? answer?.questionRef ?? `answer-${index + 1}`;
+      const question = priorQuestions.get(questionId);
+      return {
+        id: questionId,
+        question: question?.question || questionId,
+        answer: selectedAnswerText(answer, question) || "No answer submitted",
+      };
+    });
+  }
+  if (body.kind === "choice" || body.kind === "free") {
+    const questionId =
+      body.questionTurnId ??
+      body.questionId ??
+      body.questionRef ??
+      request?.currentPacket?.nextTurn?.id ??
+      [...priorQuestions.keys()][0] ??
+      "answer";
+    const question = priorQuestions.get(questionId);
+    return [{
+      id: questionId,
+      question: question?.question || questionId,
+      answer: selectedAnswerText(body, question) || "No answer submitted",
+    }];
+  }
+  if (body.kind === "skip" || body.kind === "delegate" || body.kind === "reconsider") {
+    return [{
+      id: body.questionTurnId ?? body.priorTurnId ?? request?.userTurn?.id ?? "turn",
+      question: body.questionTurnId ?? body.priorTurnId ?? body.kind,
+      answer: body.reason ?? body.note ?? body.kind,
+    }];
+  }
+  return [];
+}
+
+function answerFromDecision(decision) {
+  const answer = decision?.answer;
+  if (!isPlainObject(answer)) return textOf(answer);
+  return textOf(answer.text ?? answer.label ?? answer.optId ?? answer.optionId ?? answer);
+}
+
+function turnLogDecisions(request, response) {
+  const priorIds = new Set(asArray(request?.currentPacket?.userDecisions)
+    .map((decision) => decision?.id)
+    .filter(isNonEmptyString));
+  return asArray(response?.packet?.userDecisions)
+    .filter((decision) => isPlainObject(decision) && isNonEmptyString(decision.id) && !priorIds.has(decision.id))
+    .map((decision) => ({
+      id: decision.id,
+      question: textOf(decision.question ?? decision.questionRef ?? decision),
+      answer: answerFromDecision(decision),
+      ...(isNonEmptyString(decision.section) ? { section: decision.section } : {}),
+    }));
+}
+
+function alignmentScore(packet) {
+  const parsed = Number(packet?.coverage?.alignmentPct);
+  return clampPercent(parsed);
+}
+
+function unresolvedFindings(packet) {
+  return asArray(packet?.findings).filter((finding) => isPlainObject(finding) && finding.resolved !== true);
+}
+
+function turnLogIsDegraded(response) {
+  if (asArray(response?.events).some((event) => /degraded/i.test(event?.kind ?? ""))) return true;
+  if (/degraded/i.test(response?.packet?.readinessReason ?? "")) return true;
+  return asArray(response?.packet?.findings).some((finding) => /DEGRADED/i.test(finding?.id ?? ""));
+}
+
+function effortScore(packet, response = null) {
+  if (!isPlainObject(packet)) return { value: null, label: null };
+  const findings = unresolvedFindings(packet);
+  const blockers = Number.isFinite(Number(packet.coverage?.openBlockers))
+    ? Number(packet.coverage.openBlockers)
+    : findings.filter((finding) => finding.sev === "blocker").length;
+  const concerns = Number.isFinite(Number(packet.coverage?.openConcerns))
+    ? Number(packet.coverage.openConcerns)
+    : findings.filter((finding) => finding.sev === "concern").length;
+  const attempts = asArray(response?.llmResponses).length;
+  const value = clampPercent(
+    18 +
+    (turnLogQuestions(packet).length * 7) +
+    (blockers * 12) +
+    (concerns * 5) +
+    (Math.max(0, attempts - 1) * 8) +
+    (response && turnLogIsDegraded(response) ? 18 : 0),
+  );
+  const label = value == null ? null : value >= 70 ? "high" : value >= 36 ? "medium" : "low";
+  return { value, label };
+}
+
+function turnLogScores(packet, response = null) {
+  const effort = effortScore(packet, response);
+  return {
+    confidence: { value: null, label: null },
+    alignment: { value: alignmentScore(packet), label: null },
+    effort: { value: effort.value, label: effort.label },
+  };
+}
+
+function uniqueTexts(values) {
+  return [...new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean))];
+}
+
+function isMissingQuestionReason(reason) {
+  return /visible clarifying question|next_turn_question_missing_text|next_turn_batch_missing_questions|missing_next_turn|next_turn_missing_body/i.test(
+    reason ?? "",
+  );
+}
+
+function turnLogDiagnostics(response) {
+  const retryEvents = asArray(response?.events).filter((event) => event?.kind === "llm.evaluator.corrective_retry");
+  const retryReasons = uniqueTexts([
+    ...retryEvents.map((event) => event?.payload?.reason),
+    ...asArray(response?.llmResponses).map((trace) => trace?.retryReason),
+  ]);
+  const degraded = turnLogIsDegraded(response);
+  const stalledNeedsUser =
+    response?.packet?.readiness === "needs_user" && turnLogQuestions(response.packet).length === 0;
+  const discrepancy = (!degraded && stalledNeedsUser) || retryReasons.some(isMissingQuestionReason)
+    ? {
+        kind: "needs_user_without_answerable_question",
+        message:
+          "Semantix needs user input, but one evaluator attempt did not provide an answerable next question.",
+      }
+    : null;
+  return {
+    degraded,
+    stalledNeedsUser,
+    llmAttemptCount: asArray(response?.llmResponses).length,
+    correctiveRetryCount: retryEvents.length,
+    retryReasons,
+    discrepancy,
+  };
+}
+
+function turnLogLearnings(response, diagnostics) {
+  const packet = response?.packet;
+  const items = [];
+  if (isNonEmptyString(packet?.readinessReason)) {
+    items.push(`Readiness: ${packet.readinessReason}`);
+  }
+  if (diagnostics.discrepancy) {
+    items.push(`Discrepancy: ${diagnostics.discrepancy.message}`);
+  }
+  for (const reason of asArray(packet?.blockingReasons)) {
+    const text = textOf(reason);
+    if (text) items.push(`Blocking: ${text}`);
+  }
+  for (const finding of unresolvedFindings(packet)) {
+    const text = textOf(finding);
+    if (text) items.push(`${finding.sev ?? "finding"}: ${text}`);
+  }
+  for (const assumption of asArray(packet?.assumptions)) {
+    const text = textOf(assumption);
+    if (text) items.push(`Assumption: ${text}`);
+  }
+  for (const risk of asArray(packet?.risks)) {
+    const text = textOf(risk);
+    if (text) items.push(`Risk: ${text}`);
+  }
+  for (const reason of diagnostics.retryReasons) {
+    items.push(`Retry: ${reason}`);
+  }
+  return uniqueTexts(items).slice(0, 12);
+}
+
+function turnLogStatusMessage(packet, diagnostics) {
+  if (packet?.readiness === "ready") {
+    return "Done: alignment is ready and compile is available.";
+  }
+  if (diagnostics.degraded) {
+    return "Not done: evaluator degraded and needs another alignment attempt.";
+  }
+  if (diagnostics.stalledNeedsUser) {
+    return "Not done: blockers remain, but no usable next question was returned.";
+  }
+  if (packet?.readiness === "blocked") {
+    return "Not done: alignment is blocked.";
+  }
+  return "Not done: alignment still needs user input.";
+}
+
+/**
+ * Build a compact, user-facing turn-log entry from a Semantix evaluation.
+ *
+ * The API stays stateless: callers append this entry to their persisted
+ * session log to render the full chronological Turn log.
+ *
+ * @param {SemantixEvaluateRequest} request
+ * @param {SemantixEvaluateResponse} response
+ * @returns {SemantixTurnLogEntry}
+ */
+export function buildSemantixTurnLogEntry(request, response) {
+  const packet = response?.packet ?? {};
+  const diagnostics = turnLogDiagnostics(response);
+  const iteration = Number.isFinite(Number(packet.iteration)) ? Number(packet.iteration) : null;
+  const sessionId = isNonEmptyString(packet.sessionId)
+    ? packet.sessionId
+    : isNonEmptyString(request?.sessionId)
+      ? request.sessionId
+      : "spec_unknown_session";
+  return {
+    id: `turnlog:${sessionId}:${request?.trigger ?? "unknown"}:${iteration ?? "unknown"}`,
+    sessionId,
+    iteration,
+    turnNumber: iteration == null ? null : iteration + 1,
+    trigger: isNonEmptyString(request?.trigger) ? request.trigger : null,
+    at: new Date().toISOString(),
+    readiness: isNonEmptyString(packet.readiness) ? packet.readiness : null,
+    readinessReason: isNonEmptyString(packet.readinessReason) ? packet.readinessReason : "",
+    done: packet.readiness === "ready",
+    statusMessage: turnLogStatusMessage(packet, diagnostics),
+    beginningScores: turnLogScores(request?.currentPacket ?? null),
+    afterTurnScores: turnLogScores(packet, response),
+    answersSubmitted: turnLogSubmittedAnswers(request),
+    questionsNowOpen: turnLogQuestions(packet),
+    decisionsRecorded: turnLogDecisions(request, response),
+    learnings: turnLogLearnings(response, diagnostics),
+    diagnostics,
+  };
+}
+
+/**
+ * Attach the per-response turn-log entry without changing the canonical
+ * packet/events/contextRequests contract.
+ *
+ * @param {SemantixEvaluateRequest} request
+ * @param {SemantixEvaluateResponse} response
+ * @returns {SemantixEvaluateResponse}
+ */
+export function withSemantixTurnLogEntry(request, response) {
+  if (!isPlainObject(response)) return response;
+  return {
+    ...response,
+    turnLogEntry: buildSemantixTurnLogEntry(request, response),
+  };
 }
 
 function pushError(errors, path, code, message) {
@@ -159,6 +561,9 @@ export function normalizeSemantixEvaluateRequest(request) {
         : Array.isArray(request.contextResponses)
           ? request.contextResponses.map(normalizeContextResponse)
           : request.contextResponses,
+    currentPacket: isPlainObject(request.currentPacket)
+      ? normalizeSemantixAlignmentPacketForContract(request.currentPacket)
+      : request.currentPacket,
   };
 }
 
@@ -501,7 +906,13 @@ export function createSemantixEvaluator(impl) {
     const normalizedRequest = normalizeSemantixEvaluateRequest(request);
     assertSemantixEvaluateRequest(normalizedRequest);
     const response = await impl(normalizedRequest);
-    assertSemantixEvaluateResponse(response);
-    return response;
+    const normalizedResponse = isPlainObject(response) && isPlainObject(response.packet)
+      ? {
+          ...response,
+          packet: normalizeSemantixAlignmentPacketForContract(response.packet),
+        }
+      : response;
+    assertSemantixEvaluateResponse(normalizedResponse);
+    return withSemantixTurnLogEntry(normalizedRequest, normalizedResponse);
   };
 }

@@ -32,6 +32,34 @@ Phalanx owns:
 - Spec lock ceremony and immutable artifact storage.
 - Staff planning, feature decomposition, execution, audit, and integration map.
 
+## Terminology and Decision Discipline
+
+Spec Studio should include a documentation-grill style alignment loop:
+Semantix challenges fuzzy user language against existing project facts,
+asks one targeted question at a time when human clarification is needed,
+and requests Phalanx-brokered context when the codebase or existing docs
+can answer the question.
+
+Semantix should not mutate repository documentation during an unlocked
+discussion. It should record resolved language and decisions in the
+typed alignment packet first. After the user locks the spec, Phalanx can
+persist approved knowledge into its canonical decision log, glossary,
+ADR files, Staff handoff, or audit records.
+
+Terminology conflicts are alignment problems, not copy-editing issues.
+If user wording conflicts with grounded facts, prior decisions, or the
+current packet, Semantix must surface the conflict as a finding and
+block or request clarification before lock when the conflict affects
+scope, acceptance, reuse, migration, or authority boundaries.
+
+Semantix should propose durable decision records sparingly. A decision
+candidate is warranted only when the choice is hard to reverse,
+surprising without context, and the result of a real trade-off. Phalanx
+still owns canonical decision IDs and persistence.
+
+See `docs/plans/spec-studio-doc-grill-loop.md` for the adaptation of the
+lightweight documentation-grill pattern into Semantix and Phalanx.
+
 ## Capability Matrix
 
 | Capability | Semantix support | Phalanx dependency | Notes |
@@ -46,6 +74,8 @@ Phalanx owns:
 | Context request generation | Supported | Phalanx brokers tools | Semantix emits typed requests. Phalanx decides whether to query Hoplon, repo indexes, uploaded artifacts, traces, or other tools. |
 | Hoplon-grounded facts | Supported as inputs | Phalanx/Hoplon provide evidence refs | Hoplon facts become `groundedFacts`; they do not become spec authority by themselves. |
 | Grounded facts separate from assumptions/recommendations | Supported | Schema validation should enforce this | `groundedFacts` hold evidence-backed facts only. Semantix interpretation belongs in assumptions, risks, findings, recommendations, or requirements. |
+| Turn log entry | Supported | Phalanx persists and renders chronology | Semantix returns one `turnLogEntry` per evaluation response. Phalanx appends entries to the session `turnLog` and renders them beside the question interface. |
+| Retry/discrepancy diagnostics | Supported | Phalanx surfaces user-visible status | Semantix exposes corrective retry events and `turnLogEntry.diagnostics`, including `needs_user` without an answerable question. |
 | `readiness = ready` | Supported | Phalanx recomputes lock eligibility | Semantix can recommend ready; Phalanx remains the lock authority. |
 | `readiness = needs_user` | Supported | UI must prompt for input | Used for ambiguity, missing target surface, missing acceptance, unknown new-vs-update, or unresolved non-blocking decisions. |
 | `readiness = blocked` | Supported | UI must show blocker and prevent lock | Used for contradictions, impossible constraints, unsafe replacement/duplication, or policy conflicts. |
@@ -65,10 +95,11 @@ Phalanx owns:
 4. User answers by selecting an option or entering free text.
 5. Phalanx appends the user turn and asks Semantix to re-evaluate the full current session state.
 6. Semantix returns updated findings, decisions, sections, coverage, and next turn.
-7. Loop continues until Semantix reports readiness `ready`.
-8. User explicitly locks the spec.
-9. Phalanx mints an immutable `SpecArtifact`.
-10. Phalanx starts a run from the locked artifact. Staff reads the artifact, not the raw transcript.
+7. Phalanx appends `turnLogEntry` to the persisted session Turn log and renders it beside the question interface.
+8. Loop continues until Semantix reports readiness `ready`.
+9. User explicitly locks the spec.
+10. Phalanx mints an immutable `SpecArtifact`.
+11. Phalanx starts a run from the locked artifact. Staff reads the artifact, not the raw transcript.
 
 ## Readiness Semantics
 
@@ -91,6 +122,13 @@ Lock requirements:
 - open blocker count is 0
 - user explicitly clicks lock
 - backend recomputes coverage and blockers before accepting lock
+
+Runtime admission is stricter than conversational readiness. Semantix may recommend `ready`, but
+compiled admission still owns whether a semantic candidate becomes trusted state. A hard admission
+failure must stay structural: Phalanx should surface the reason code and block lock or run start,
+not collapse the failure into assistant prose. Retryable admission failures may be regenerated only
+within the fixed Semantix retry budget, and exhausted retries remain blocked until the user or
+operator changes the inputs.
 
 ## Core Packet
 
@@ -624,8 +662,90 @@ export type SemantixEvaluateResponse = {
   packet: SemantixAlignmentPacket;
   events: SpecEvent[];
   contextRequests: SemantixContextRequest[];
+  turnLogEntry: SemantixTurnLogEntry;
+  llmResponses?: LlmResponseTrace[];
 };
 ```
+
+Semantix returns `packet`, `events`, and `contextRequests` as the canonical machine contract. It also returns `turnLogEntry` as a per-response user-visible audit entry. The Semantix API is stateless; Phalanx must append `turnLogEntry` to the session's persisted `turnLog` array after each successful evaluate call.
+
+`llmResponses` is optional diagnostic evidence from the LLM-backed evaluator. Phalanx may store it in operator/debug evidence, but the user-facing Turn log should use `turnLogEntry`, not raw model output.
+
+## Turn Log and Retry Diagnostics
+
+Phalanx must render the Turn log beside the question interface, in chronological order. The Turn log is part of the alignment UX, not an operator-only trace. It lets the user review what was asked, what they answered, what decisions were recorded, what Semantix learned, and whether alignment is actually done.
+
+```ts
+export type SemantixTurnLogEntry = {
+  id: string;
+  sessionId: string;
+  iteration: number | null;
+  turnNumber: number | null;
+  trigger: EvaluateTrigger | null;
+  at: string;
+
+  readiness: Readiness | null;
+  readinessReason: string;
+  done: boolean;
+  statusMessage: string;
+
+  beginningScores: {
+    confidence: { value: number | null; label?: string | null };
+    alignment: { value: number | null; label?: string | null };
+    effort: { value: number | null; label?: "low" | "medium" | "high" | null };
+  };
+  afterTurnScores: {
+    confidence: { value: number | null; label?: string | null };
+    alignment: { value: number | null; label?: string | null };
+    effort: { value: number | null; label?: "low" | "medium" | "high" | null };
+  };
+
+  answersSubmitted: Array<{ id: string; question: string; answer: string }>;
+  questionsNowOpen: Array<{
+    id: string;
+    question: string;
+    options?: Array<{ id: string; label: string }>;
+  }>;
+  decisionsRecorded: Array<{
+    id: string;
+    question: string;
+    answer: string;
+    section?: string;
+  }>;
+  learnings: string[];
+
+  diagnostics: {
+    degraded: boolean;
+    stalledNeedsUser: boolean;
+    llmAttemptCount: number;
+    correctiveRetryCount: number;
+    retryReasons: string[];
+    discrepancy: null | {
+      kind: "needs_user_without_answerable_question";
+      message: string;
+    };
+  };
+};
+```
+
+Phalanx Turn log rendering requirements:
+
+- Show the beginning and after-turn scores using the same Confidence, Alignment, and Effort bars as the Spec Studio header.
+- Show submitted answers for the turn. If none were submitted, say so explicitly.
+- Show currently open questions after the turn. If readiness is not `ready` and no usable question was returned, show a visible "alignment is not complete" message.
+- Show decisions recorded on the turn. If none were recorded, say "No decisions recorded on this turn."
+- Show learnings after each turn: readiness reason, blockers, unresolved findings, assumptions, risks, retry diagnostics, and discrepancy notices.
+- Treat `turnLogEntry.done === true` as display-only. Lock eligibility still requires recomputing readiness, blockers, alignment, and the explicit user lock action.
+
+Retry and discrepancy handling:
+
+- `events[].kind === "llm.evaluator.corrective_retry"` means Semantix rejected a model packet and asked the LLM to try again with corrective instructions.
+- `turnLogEntry.diagnostics.correctiveRetryCount > 0` means the user should see that multiple agent tries happened.
+- `turnLogEntry.diagnostics.discrepancy.kind === "needs_user_without_answerable_question"` means one evaluator attempt said `needs_user` but failed to provide a question. Semantix should retry internally; Phalanx should still surface the discrepancy in the Turn log.
+- `packet.readiness === "needs_user"` plus `questionsNowOpen.length === 0` or `turnLogEntry.diagnostics.stalledNeedsUser === true` is not done. Phalanx must block lock/Staff start, notify the user, and offer another alignment attempt.
+- `events[].kind` containing `degraded` or `turnLogEntry.diagnostics.degraded === true` must block lock/Staff start.
+
+If Phalanx is integrated against an older Semantix build that does not return `turnLogEntry`, it can infer a degraded/stalled state from `packet`, `events`, and `llmResponses`, but new integrations should require `turnLogEntry` in capability verification.
 
 ## Degraded and Unavailable Behavior
 

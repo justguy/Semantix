@@ -30,8 +30,8 @@ import {
   validateSemantixAlignmentPacket,
 } from "./spec-studio-contracts.js";
 import { withDegradationFallback } from "./spec-studio-degraded.js";
+import { withSemantixTurnLogEntry } from "./spec-studio-evaluator.js";
 import { checkIdContinuity } from "./spec-studio-id-continuity.js";
-import { createSpecStudioJsonProbeEvaluator } from "./spec-studio-json-probe-evaluator.js";
 import {
   applyUserBatchTurn,
   applyUserChoiceTurn,
@@ -80,6 +80,7 @@ export function buildEvaluatorSystemPrompt() {
     `- requirement.type values: ${REQUIREMENT_TYPE_VALUES.join(", ")}.`,
     `- requirement.priority values: ${REQUIREMENT_PRIORITY_VALUES.join(", ")}.`,
     `- requirement.status values: ${REQUIREMENT_STATUS_VALUES.join(", ")}.`,
+    "- Every requirement must include sourceRef and acceptance.",
     `- finding.kind values: ${FINDING_KIND_VALUES.join(", ")}.`,
     `- finding.sev values: ${FINDING_SEVERITY_VALUES.join(", ")}.`,
     `- finding.raisedBy values: ${FINDING_RAISED_BY_VALUES.join(", ")}.`,
@@ -411,7 +412,7 @@ function isLowQualityClarificationQuestion(text) {
   ].some((pattern) => pattern.test(normalized));
 }
 
-function validateClarificationQuality(packet) {
+function validateClarificationQuality(packet, request) {
   if (packet?.readiness !== READINESS.NEEDS_USER) {
     return { ok: true };
   }
@@ -429,10 +430,48 @@ function validateClarificationQuality(packet) {
       reason: `needs_user packet used a generic clarification question: ${genericQuestion}`,
     };
   }
+  const requestText = initialUserText(request, packet);
+  if (isGenericWebsiteCreationRequest(requestText) && packetReducedToModeOnlyQuestion(packet)) {
+    return {
+      ok: false,
+      reason: "needs_user packet only asked whether an underspecified website request is new or existing",
+    };
+  }
   return { ok: true };
 }
 
-function buildCorrectiveRetryPrompt({ systemPrompt, userMessage, reason }) {
+function isNeedsUserQuestionRetryReason(reason) {
+  return /visible clarifying question|next_turn_question_missing_text|next_turn_batch_missing_questions|missing_next_turn|next_turn_missing_body/i.test(
+    reason ?? "",
+  );
+}
+
+function summarizeRejectedPacketGaps(rawText) {
+  const packet = extractJsonFromLlmOutput(rawText);
+  if (!isPlainObject(packet)) return [];
+  return [
+    ...asArray(packet.blockingReasons).map((reason) => `Blocking reason: ${textOf(reason)}`),
+    ...asArray(packet.findings)
+      .filter((finding) => isPlainObject(finding) && finding.resolved !== true)
+      .map((finding) => `Finding (${finding.sev ?? "unknown"}): ${textOf(finding)}`),
+  ].filter((line) => line.trim().length > 0).slice(0, 8);
+}
+
+function correctiveRetryGuidance({ reason, rawText }) {
+  if (!isNeedsUserQuestionRetryReason(reason)) return [];
+  const gaps = summarizeRejectedPacketGaps(rawText);
+  return [
+    "Discrepancy detected: the packet still needs user input, but it did not provide an answerable next question.",
+    "If blockers or unresolved findings remain, readiness must stay needs_user and nextTurn must contain a concrete question or batch.",
+    "If no user input is needed, readiness must be ready, nextTurn must be null, blocker findings must be resolved, and coverage.alignmentPct must be 100.",
+    "Ask questions that directly resolve the remaining blockers or findings; do not repeat a stale question that was just answered.",
+    gaps.length ? "Remaining unresolved items to convert into next questions:" : "",
+    ...gaps.map((gap) => `- ${gap}`),
+  ].filter(Boolean);
+}
+
+function buildCorrectiveRetryPrompt({ systemPrompt, userMessage, reason, rawText }) {
+  const guidance = correctiveRetryGuidance({ reason, rawText });
   return [
     systemPrompt,
     "",
@@ -447,6 +486,7 @@ function buildCorrectiveRetryPrompt({ systemPrompt, userMessage, reason }) {
     "The corrected packet must include concrete, user-facing clarifying questions specific to the original request.",
     "Do not use generic meta-questions, schema placeholders, angle-bracket placeholders, or TBD text.",
     "If readiness is needs_user, nextTurn.body must be kind=\"question\" or kind=\"batch\" with concrete q text and useful option labels.",
+    ...guidance,
     "",
     "Respond with corrected JSON only.",
   ].join("\n");
@@ -503,36 +543,6 @@ function attachLlmResponsesToError(error, llmResponses) {
     error.llmResponses = llmResponses;
   }
   return error;
-}
-
-async function evaluateWithDeterministicFallback(request, reason) {
-  const fallback = createSpecStudioJsonProbeEvaluator();
-  const fallbackRequest = { ...request };
-  if (
-    fallbackRequest.trigger === "initial" &&
-    !isNonEmptyString(fallbackRequest.originalUserRequest)
-  ) {
-    const requestText = initialRequestText(fallbackRequest);
-    if (requestText) {
-      fallbackRequest.originalUserRequest = requestText;
-    }
-  }
-  const response = await fallback(fallbackRequest);
-  return {
-    ...response,
-    events: [
-      {
-        id: `evt_llm_empty_output_fallback_${request?.sessionId ?? "unknown"}_${Date.now()}`,
-        kind: "llm.evaluator.empty_output_fallback",
-        sessionId: request?.sessionId,
-        payload: {
-          reason,
-          fallbackMode: "deterministic_probe",
-        },
-      },
-      ...asArray(response.events),
-    ],
-  };
 }
 
 function extractPacketFromParsedValue(value, depth = 0) {
@@ -634,97 +644,6 @@ function initialRequestText(request) {
   return typeof request?.originalUserRequest === "string"
     ? request.originalUserRequest.trim()
     : "";
-}
-
-function buildMissingInitialRequestResponse(sessionId, iteration, request) {
-  const at = new Date().toISOString();
-  const packet = {
-    contractVersion: CONTRACT_VERSION,
-    source: SOURCE_SEMANTIX,
-    sessionId,
-    iteration,
-    readiness: READINESS.NEEDS_USER,
-    readinessReason: "No feature or change request was provided for Spec Studio alignment.",
-    blockingReasons: [
-      {
-        id: "BR-INTENT-EMPTY-001",
-        text: "Spec Studio needs the user request before it can evaluate alignment.",
-      },
-    ],
-    approvalRequired: true,
-    originalUserRequest: "",
-    alignedRequirement: "",
-    requirements: [],
-    flow: { pages: [], states: [], transitions: [], dataNeeded: [] },
-    scope: { inScope: [], outOfScope: [], negativeRequirements: [] },
-    assumptions: [],
-    openQuestions: [
-      {
-        id: "Q-INTENT-EMPTY-001",
-        section: "intent",
-        question: "What feature, change, or outcome should Semantix align?",
-        options: [],
-      },
-    ],
-    risks: [],
-    userDecisions: [],
-    acceptanceSummary: [],
-    existingSystemContext: { mode: EXISTING_SYSTEM_MODE.UNKNOWN },
-    contextSources: [],
-    groundedFacts: [],
-    findings: [
-      {
-        id: "F-INTENT-EMPTY-001",
-        kind: "gap",
-        sev: "blocker",
-        section: "intent",
-        ref: "Q-INTENT-EMPTY-001",
-        text: "The initial Spec Studio request is empty.",
-        resolved: false,
-        raisedBy: "semantix",
-      },
-    ],
-    coverage: {
-      alignmentPct: 0,
-      sections: [],
-      openBlockers: 1,
-      openConcerns: 0,
-      openFYI: 0,
-    },
-    nextTurn: {
-      id: "T-INTENT-EMPTY-001",
-      side: "semantix",
-      at,
-      phase: "crisp",
-      target: "intent",
-      body: {
-        kind: "question",
-        q: "What feature, change, or outcome should Semantix align?",
-      },
-    },
-  };
-
-  const validation = validateSemantixAlignmentPacket(packet);
-  if (!validation.ok) {
-    const codes = validation.errors.map((error) => error.code).join(", ");
-    throw new Error(`Missing-request fallback produced an invalid packet: ${codes}`);
-  }
-
-  return {
-    packet,
-    events: [
-      {
-        id: `evt_llm_missing_request_${sessionId}_${iteration}_${Date.now()}`,
-        kind: "llm.evaluator.missing_request",
-        sessionId,
-        payload: {
-          trigger: request.trigger,
-          reason: "empty_initial_request",
-        },
-      },
-    ],
-    contextRequests: [],
-  };
 }
 
 function asArray(value) {
@@ -865,6 +784,13 @@ function normalizeRequirementStatus(value, readiness) {
   );
 }
 
+function fallbackRequirementAcceptance(text, readiness) {
+  if (readiness === READINESS.READY) {
+    return `Verified acceptance for this requirement: ${text}`;
+  }
+  return `Acceptance remains pending until this proposed requirement is confirmed: ${text}`;
+}
+
 function normalizeRequirements(value, request, readiness) {
   return asArray(value)
     .map((item, index) => {
@@ -876,14 +802,14 @@ function normalizeRequirements(value, request, readiness) {
           ...item,
           id: isNonEmptyString(item.id) ? item.id : numberedId("REQ-LLM", index),
           type: normalizeRequirementType(item.type ?? item.kind ?? item.category),
-          text: text || `Requirement ${index + 1}`,
+          text,
           priority: normalizeRequirementPriority(item.priority ?? item.importance),
           sourceRef: isNonEmptyString(item.sourceRef) ? item.sourceRef : sourceRef,
           acceptance: isNonEmptyString(item.acceptance)
             ? item.acceptance
             : isNonEmptyString(item.acceptanceCriteria)
               ? item.acceptanceCriteria
-              : text || `Requirement ${index + 1} is satisfied.`,
+              : fallbackRequirementAcceptance(text, readiness),
           status: normalizeRequirementStatus(item.status, readiness),
         };
       }
@@ -895,7 +821,7 @@ function normalizeRequirements(value, request, readiness) {
         text,
         priority: "must",
         sourceRef,
-        acceptance: text,
+        acceptance: fallbackRequirementAcceptance(text, readiness),
         status: readiness === READINESS.READY ? "confirmed" : "proposed",
       };
     })
@@ -1261,11 +1187,8 @@ function normalizeGroundedFacts(value, request) {
             : fallbackEvidenceRef(request),
       };
       const confidence = normalizeGroundedFactConfidence(fact.confidence);
-      if (confidence) {
-        normalizedFact.confidence = confidence;
-      } else {
-        delete normalizedFact.confidence;
-      }
+      if (!confidence) return null;
+      normalizedFact.confidence = confidence;
       return normalizedFact;
     })
     .filter(Boolean);
@@ -1402,54 +1325,34 @@ function packetReducedToModeOnlyQuestion(packet) {
   return questions.length === 0 || questions.every(isModeOnlyNewUpdateQuestion);
 }
 
-function findingLooksModeOnly(finding) {
-  if (!isPlainObject(finding)) return false;
-  const text = `${finding.text ?? ""} ${finding.ref ?? ""}`.toLowerCase();
-  return (
-    /\b(target surface|new|existing|update|updating)\b/.test(text) &&
-    !PRODUCT_GAP_PATTERN.test(text)
-  );
-}
-
-function reasonLooksModeOnly(reason) {
-  const text = textOf(reason).toLowerCase();
-  return (
-    /\b(target surface|new|existing|update|updating)\b/.test(text) &&
-    !PRODUCT_GAP_PATTERN.test(text)
-  );
-}
-
-function fallbackQuestionForPacket(packet) {
-  const openQuestion = asArray(packet.openQuestions).find((question) => questionText(question));
-  if (openQuestion) return questionText(openQuestion);
-  const blockingReason = asArray(packet.blockingReasons).find((reason) => textOf(reason));
-  if (blockingReason) return textOf(blockingReason);
-  const finding = asArray(packet.findings).find((item) => textOf(item));
-  if (finding) return textOf(finding);
-  return "";
+function turnQuestionFromOpenQuestion(question, index) {
+  const q = questionText(question);
+  if (!q) return null;
+  const turnQuestion = {
+    ...(isPlainObject(question) ? question : {}),
+    id: isNonEmptyString(question?.id) ? question.id : numberedId("Q-LLM", index),
+    q,
+  };
+  delete turnQuestion.question;
+  delete turnQuestion.text;
+  const options = normalizeTurnOptions(question?.options);
+  if (options.length > 0) {
+    turnQuestion.options = options;
+  } else {
+    delete turnQuestion.options;
+  }
+  return turnQuestion;
 }
 
 function openQuestionsAsTurnQuestions(packet) {
   return asArray(packet.openQuestions)
-    .map((question, index) => {
-      const q = questionText(question);
-      if (!q) return null;
-      const turnQuestion = {
-        id: isNonEmptyString(question?.id) ? question.id : numberedId("Q-LLM", index),
-        q,
-      };
-      const options = normalizeTurnOptions(question?.options);
-      if (options.length > 0) turnQuestion.options = options;
-      return turnQuestion;
-    })
+    .map(turnQuestionFromOpenQuestion)
     .filter(Boolean);
 }
 
-function repairNeedsUserNextTurn(packet, request) {
+function repairNeedsUserNextTurn(packet) {
   if (packet.readiness !== READINESS.NEEDS_USER) {
-    if (!Object.prototype.hasOwnProperty.call(packet, "nextTurn")) {
-      packet.nextTurn = null;
-    }
+    packet.nextTurn = null;
     return;
   }
 
@@ -1466,20 +1369,33 @@ function repairNeedsUserNextTurn(packet, request) {
 
   let body = existingBody;
   if (body.kind === "batch") {
-    const questions = asArray(body.questions).filter((question) => questionText(question));
-    body.questions = questions.length > 0
-      ? questions
-      : openQuestionsAsTurnQuestions(packet);
-    if (body.questions.length === 0) {
-      body = {
-        kind: "question",
-        q: fallbackQuestionForPacket(packet),
-      };
-    }
+    const questions = asArray(body.questions)
+      .map((question, index) => {
+        const q = questionText(question);
+        if (!q) return null;
+        const turnQuestion = {
+          ...(isPlainObject(question) ? question : {}),
+          id: isNonEmptyString(question?.id) ? question.id : numberedId("Q-LLM", index),
+          q,
+        };
+        const options = normalizeTurnOptions(question?.options);
+        if (options.length > 0) {
+          turnQuestion.options = options;
+        } else {
+          delete turnQuestion.options;
+        }
+        return turnQuestion;
+      })
+      .filter(Boolean);
+    body.questions = questions.length > 0 ? questions : openQuestionsAsTurnQuestions(packet);
   } else {
     body.kind = "question";
     if (!isNonEmptyString(body.q)) {
-      body.q = fallbackQuestionForPacket(packet);
+      const [fallbackQuestion] = openQuestionsAsTurnQuestions(packet);
+      if (fallbackQuestion) {
+        body.q = fallbackQuestion.q;
+        body.options = fallbackQuestion.options;
+      }
     }
     const options = normalizeTurnOptions(body.options);
     if (options.length > 0) {
@@ -1520,169 +1436,17 @@ function repairRequiredPacketFields(packet, request) {
     }
   }
   if (typeof packet.alignedRequirement !== "string" || isPlaceholderLiteral(packet.alignedRequirement)) {
-    if (typeof packet.originalUserRequest === "string") {
-      packet.alignedRequirement = packet.originalUserRequest || textOf(packet.requirements?.[0]) || "";
+    const priorAlignedRequirement = request?.currentPacket?.alignedRequirement;
+    if (isNonEmptyString(priorAlignedRequirement)) {
+      packet.alignedRequirement = priorAlignedRequirement;
     } else {
-      delete packet.alignedRequirement;
+      packet.alignedRequirement = "";
     }
-  }
-  if (typeof packet.readinessReason !== "string") {
-    packet.readinessReason =
-      packet.readiness === READINESS.READY
-        ? "Alignment is complete enough to lock."
-        : packet.readiness === READINESS.BLOCKED
-          ? "Alignment is blocked."
-          : "Additional user input is needed before locking alignment.";
   }
   if (typeof packet.approvalRequired !== "boolean") {
     packet.approvalRequired = packet.readiness !== READINESS.READY;
   }
-  repairNeedsUserNextTurn(packet, request);
-}
-
-function genericWebsiteQuestions() {
-  return [
-    {
-      id: "Q-WEB-INTENT",
-      q: "What is the website for, and who is it for?",
-      options: [
-        { id: "OPT-WEB-BUSINESS", label: "Business/service site" },
-        { id: "OPT-WEB-PORTFOLIO", label: "Portfolio/personal site" },
-        { id: "OPT-WEB-PRODUCT", label: "Product landing page" },
-        { id: "OPT-WEB-UNKNOWN", label: "Not sure yet" },
-      ],
-    },
-    {
-      id: "Q-WEB-CONTENT",
-      q: "Which pages or sections should the first version include?",
-      options: [
-        { id: "OPT-WEB-SINGLE", label: "Single landing page" },
-        { id: "OPT-WEB-BASIC", label: "Home, About, Contact" },
-        { id: "OPT-WEB-MULTI", label: "Multiple product/service pages" },
-        { id: "OPT-WEB-CONTENT-UNKNOWN", label: "Need recommendation" },
-      ],
-    },
-    {
-      id: "Q-WEB-BUTTONS",
-      q: "What should the buttons do?",
-      options: [
-        { id: "OPT-WEB-NAV", label: "Navigate between sections" },
-        { id: "OPT-WEB-CONTACT", label: "Open contact/signup flow" },
-        { id: "OPT-WEB-ACTIONS", label: "Trigger app actions" },
-        { id: "OPT-WEB-PLACEHOLDER", label: "Placeholder buttons for now" },
-      ],
-    },
-    {
-      id: "Q-WEB-STYLE",
-      q: "What visual direction or brand constraints should guide it?",
-      options: [
-        { id: "OPT-WEB-MODERN", label: "Clean modern" },
-        { id: "OPT-WEB-BOLD", label: "Bold/playful" },
-        { id: "OPT-WEB-BRAND", label: "Match existing brand" },
-        { id: "OPT-WEB-STYLE-UNKNOWN", label: "No preference" },
-      ],
-    },
-    {
-      id: "Q-WEB-SUCCESS",
-      q: "What should count as done for the first version?",
-      options: [
-        { id: "OPT-WEB-STATIC", label: "Static responsive mockup" },
-        { id: "OPT-WEB-FRONTEND", label: "Interactive frontend" },
-        { id: "OPT-WEB-CONNECTED", label: "Connected forms/API" },
-        { id: "OPT-WEB-SUCCESS-UNKNOWN", label: "Need recommendation" },
-      ],
-    },
-  ];
-}
-
-function appendUniqueById(items, item) {
-  const existing = asArray(items).filter(Boolean);
-  if (existing.some((entry) => entry?.id === item.id)) return existing;
-  return [...existing, item];
-}
-
-function repairGenericWebsiteModeOnlyClarification(packet, request) {
-  const requestText = initialUserText(request, packet);
-  if (!isGenericWebsiteCreationRequest(requestText)) return packet;
-  if (!packetReducedToModeOnlyQuestion(packet)) return packet;
-  if (request?.currentPacket) return packet;
-
-  const questions = genericWebsiteQuestions();
-  const sourceRef = request?.userTurn?.id ?? "initial-user-request";
-  const at = isNonEmptyString(packet.nextTurn?.at)
-    ? packet.nextTurn.at
-    : new Date().toISOString();
-  const preservedFindings = asArray(packet.findings).filter((finding) => !findingLooksModeOnly(finding));
-  const findings = appendUniqueById(preservedFindings, {
-    id: "F-WEB-AMBIG-001",
-    kind: "gap",
-    sev: "blocker",
-    section: "intent",
-    ref: "Q-WEB-INTENT",
-    text:
-      "Website purpose, target audience, content structure, button behavior, visual direction, and success criteria are undefined.",
-    resolved: false,
-    raisedBy: "semantix",
-  });
-  const preservedReasons = asArray(packet.blockingReasons).filter((reason) => !reasonLooksModeOnly(reason));
-  const blockingReasons = appendUniqueById(preservedReasons, {
-    id: "BR-WEB-AMBIG-001",
-    text:
-      "The request is too generic to lock: website purpose, content, button behavior, visual direction, and success criteria are unresolved.",
-  });
-  const assumptions = appendUniqueById(packet.assumptions, {
-    id: "A-WEB-NEW-001",
-    text:
-      "Interpreting the request as a new website because it uses creation wording and does not reference an existing surface.",
-    section: "scope",
-    sourceRef,
-  });
-  const openQuestions = questions.map((question) => ({
-    id: question.id,
-    section:
-      question.id === "Q-WEB-BUTTONS" || question.id === "Q-WEB-SUCCESS"
-        ? "success"
-        : question.id === "Q-WEB-STYLE"
-          ? "constraints"
-          : "intent",
-    question: question.q,
-    options: question.options.map((option) => option.label),
-  }));
-  const blockerCount = findings.filter(
-    (finding) => isPlainObject(finding) && finding.sev === "blocker" && finding.resolved !== true,
-  ).length;
-
-  packet.readiness = READINESS.NEEDS_USER;
-  packet.readinessReason =
-    "The request is a highly underspecified website creation prompt; Semantix must clarify the independent product and design gaps together.";
-  packet.blockingReasons = blockingReasons;
-  packet.openQuestions = openQuestions;
-  packet.findings = findings;
-  packet.assumptions = assumptions;
-  packet.existingSystemContext = {
-    ...(isPlainObject(packet.existingSystemContext) ? packet.existingSystemContext : {}),
-    mode: EXISTING_SYSTEM_MODE.NEW,
-  };
-  packet.coverage = {
-    ...(isPlainObject(packet.coverage) ? packet.coverage : {}),
-    alignmentPct: Math.min(Math.max(Number(packet.coverage?.alignmentPct ?? 0), 10), 25),
-    sections: Array.isArray(packet.coverage?.sections) ? packet.coverage.sections : [],
-    openBlockers: blockerCount,
-    openConcerns: Math.max(Number(packet.coverage?.openConcerns ?? 0) || 0, questions.length - 1),
-    openFYI: Number(packet.coverage?.openFYI ?? 0) || 0,
-  };
-  packet.nextTurn = {
-    id: isNonEmptyString(packet.nextTurn?.id) ? packet.nextTurn.id : "T-WEB-AMBIG-001",
-    side: "semantix",
-    at,
-    phase: "socratic",
-    target: "intent",
-    body: {
-      kind: "batch",
-      questions,
-    },
-  };
-  return packet;
+  repairNeedsUserNextTurn(packet);
 }
 
 function normalizeCoverage(value, readiness) {
@@ -2196,7 +1960,6 @@ function canonicalizeLlmPacket(packet, request) {
   packet.coverage = normalizeCoverage(packet.coverage, packet.readiness);
   preserveStableIds(packet, request);
   packet.groundedFacts = normalizeGroundedFacts(packet.groundedFacts, request);
-  repairGenericWebsiteModeOnlyClarification(packet, request);
   repairRequiredPacketFields(packet, request);
   return packet;
 }
@@ -2314,9 +2077,9 @@ export function parseEvaluatorOutput(sessionId, iteration, rawText, request) {
 export function createLlmSpecStudioEvaluator({
   connector,
   model = process.env.SEMANTIX_SPEC_STUDIO_MODEL ?? process.env.SEMANTIX_CODEX_MODEL,
-  timeoutMs = Number(process.env.SEMANTIX_SPEC_STUDIO_TIMEOUT_MS ?? 60000),
+  timeoutMs = Number(process.env.SEMANTIX_SPEC_STUDIO_TIMEOUT_MS ?? 300000),
   maxClarificationRetries = Number(process.env.SEMANTIX_SPEC_STUDIO_CLARIFICATION_RETRIES ?? 1),
-  allowDeterministicFallback = process.env.SEMANTIX_SPEC_STUDIO_ALLOW_DETERMINISTIC_FALLBACK === "true",
+  maxMissingQuestionRetries = Number(process.env.SEMANTIX_SPEC_STUDIO_MISSING_QUESTION_RETRIES ?? 1),
 } = {}) {
   if (!connector || typeof connector.execute !== "function") {
     throw new Error("createLlmSpecStudioEvaluator requires a connector with execute().");
@@ -2330,7 +2093,7 @@ export function createLlmSpecStudioEvaluator({
     const iteration = (priorPacket?.iteration ?? -1) + 1;
 
     if (request.trigger === "initial" && !initialRequestText(request)) {
-      return buildMissingInitialRequestResponse(sessionId, iteration, request);
+      throw new Error("Spec Studio initial request is empty; LLM evaluator was not called.");
     }
 
     const userMessage = synthesizeEvaluatorInput(request);
@@ -2342,8 +2105,14 @@ export function createLlmSpecStudioEvaluator({
       Number.isFinite(maxClarificationRetries) && maxClarificationRetries > 0
         ? Math.floor(maxClarificationRetries)
         : 0;
+    const missingQuestionRetryLimit =
+      Number.isFinite(maxMissingQuestionRetries) && maxMissingQuestionRetries > 0
+        ? Math.floor(maxMissingQuestionRetries)
+        : 0;
+    const maxAttempts = retryLimit + missingQuestionRetryLimit;
+    let missingQuestionRetriesUsed = 0;
 
-    for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    for (let attempt = 0; attempt <= maxAttempts; attempt += 1) {
       const controller = new AbortController();
       const timeout =
         Number.isFinite(timeoutMs) && timeoutMs > 0
@@ -2389,8 +2158,17 @@ export function createLlmSpecStudioEvaluator({
           throw new Error(describeEmptyConnectorResult(result, { model }));
         }
         const response = parseEvaluatorOutput(sessionId, iteration, rawText, request);
-        const quality = validateClarificationQuality(response.packet);
-        if (!quality.ok && attempt < retryLimit) {
+        const quality = validateClarificationQuality(response.packet, request);
+        const canRetryQuality =
+          attempt < retryLimit ||
+          (
+            isNeedsUserQuestionRetryReason(quality.reason) &&
+            missingQuestionRetriesUsed < missingQuestionRetryLimit
+          );
+        if (!quality.ok && canRetryQuality) {
+          if (attempt >= retryLimit && isNeedsUserQuestionRetryReason(quality.reason)) {
+            missingQuestionRetriesUsed += 1;
+          }
           currentTrace.retryReason = quality.reason;
           retryEvents.push(correctiveRetryEvent(request, attempt + 1, quality.reason));
           prompt = buildCorrectiveRetryPrompt({
@@ -2410,7 +2188,19 @@ export function createLlmSpecStudioEvaluator({
         response.llmResponses = llmResponses;
         return response;
       } catch (error) {
-        if (attempt < retryLimit && shouldRetryEvaluatorError(error)) {
+        const canRetryError =
+          shouldRetryEvaluatorError(error) &&
+          (
+            attempt < retryLimit ||
+            (
+              isNeedsUserQuestionRetryReason(error.message) &&
+              missingQuestionRetriesUsed < missingQuestionRetryLimit
+            )
+          );
+        if (canRetryError) {
+          if (attempt >= retryLimit && isNeedsUserQuestionRetryReason(error.message)) {
+            missingQuestionRetriesUsed += 1;
+          }
           currentTrace.retryReason = error.message;
           retryEvents.push(correctiveRetryEvent(request, attempt + 1, error.message));
           prompt = buildCorrectiveRetryPrompt({
@@ -2420,11 +2210,6 @@ export function createLlmSpecStudioEvaluator({
             rawText,
           });
           continue;
-        }
-        if (isEmptyLlmOutputError(error) && allowDeterministicFallback) {
-          const fallbackResponse = await evaluateWithDeterministicFallback(request, error.message);
-          fallbackResponse.llmResponses = llmResponses;
-          return fallbackResponse;
         }
         throw attachLlmResponsesToError(error, llmResponses);
       }
@@ -2436,7 +2221,7 @@ export function createLlmSpecStudioEvaluator({
     );
   };
 
-  const evaluate = withDegradationFallback(rawEvaluator, {
+  const evaluateWithFallback = withDegradationFallback(rawEvaluator, {
     buildEvent: ({ request, error }) => ({
       id: `evt_llm_degraded_${request?.sessionId ?? "unknown"}_${Date.now()}`,
       kind: "llm.evaluator.degraded",
@@ -2445,6 +2230,10 @@ export function createLlmSpecStudioEvaluator({
     }),
   });
 
+  const evaluate = async (request) => {
+    const response = await evaluateWithFallback(request);
+    return withSemantixTurnLogEntry(request, response);
+  };
   evaluate.evaluatorMode = "llm";
   return evaluate;
 }

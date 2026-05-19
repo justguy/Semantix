@@ -62,6 +62,8 @@ test("describeSemantixCapabilities reports the contract version and supported be
   assert.equal(summary.capabilities.lockAuthority, "phalanx");
   assert.equal(summary.capabilities.decisionIdAuthority, "phalanx");
   assert.equal(summary.capabilities.hoplonAccess, "via phalanx broker only");
+  assert.equal(summary.capabilities.turnLogEntry, true);
+  assert.match(summary.capabilities.retryDiagnostics, /turnLogEntry\.diagnostics/);
 });
 
 // ---- Fixture-mode adapter ------------------------------------------------
@@ -130,6 +132,9 @@ test("evaluator that throws does not surface as opaque failure", async () => {
   const response = await adapter.evaluate(buildInitialRequest());
   assert.equal(response.packet.readiness, READINESS.NEEDS_USER);
   assert.ok(response.events.some((event) => event.kind.startsWith("evaluator.degraded") || event.kind === "semantix.degraded"));
+  assert.equal(response.turnLogEntry.done, false);
+  assert.equal(response.turnLogEntry.diagnostics.degraded, true);
+  assert.match(response.turnLogEntry.statusMessage, /Not done/);
 });
 
 test("strict continuity rejects reissued context request ids from prior responses", async () => {

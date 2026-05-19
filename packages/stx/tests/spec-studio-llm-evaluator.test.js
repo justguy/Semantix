@@ -450,6 +450,39 @@ test("parseEvaluatorOutput normalizes invalid nextTurn target values for Phalanx
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
+test("parseEvaluatorOutput repairs live LLM requirements missing acceptance", () => {
+  const sessionId = "spec_live_missing_requirement_acceptance";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.requirements = [
+    {
+      id: "REQ-NOTES",
+      type: "functional",
+      text: "Users can create notes.",
+      priority: "must",
+      sourceRef: "u1",
+      status: "proposed",
+    },
+    "Users can search notes.",
+  ];
+
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
+  });
+
+  assert.equal(
+    result.packet.requirements[0].acceptance,
+    "Acceptance remains pending until this proposed requirement is confirmed: Users can create notes.",
+  );
+  assert.equal(
+    result.packet.requirements[1].acceptance,
+    "Acceptance remains pending until this proposed requirement is confirmed: Users can search notes.",
+  );
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
 test("parseEvaluatorOutput normalizes invalid nextTurn phase and body kind values", () => {
   const sessionId = "spec_bad_next_phase";
   const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
@@ -492,6 +525,12 @@ test("parseEvaluatorOutput normalizes invalid grounded fact confidence", () => {
       evidenceRef: "u1",
       confidence: "Medium",
     },
+    {
+      id: "GF-004",
+      source: "user",
+      text: "The user wants exports.",
+      evidenceRef: "u1",
+    },
   ];
 
   const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
@@ -500,9 +539,16 @@ test("parseEvaluatorOutput normalizes invalid grounded fact confidence", () => {
     userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app with search." } },
   });
 
-  assert.equal(result.packet.groundedFacts[0].confidence, undefined);
-  assert.equal(result.packet.groundedFacts[1].confidence, "high");
-  assert.equal(result.packet.groundedFacts[2].confidence, "medium");
+  assert.deepEqual(
+    result.packet.groundedFacts.map((fact) => fact.id),
+    ["GF-002", "GF-003"],
+  );
+  assert.equal(result.packet.groundedFacts[0].confidence, "high");
+  assert.equal(result.packet.groundedFacts[1].confidence, "medium");
+  assert.equal(
+    result.packet.groundedFacts.every((fact) => ["high", "medium", "low"].includes(fact.confidence)),
+    true,
+  );
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
@@ -624,7 +670,7 @@ test("parseEvaluatorOutput strips schema placeholder literals before UI display"
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
-test("parseEvaluatorOutput repairs placeholder required fields into a visible question turn", () => {
+test("parseEvaluatorOutput repairs placeholder nextTurn from concrete openQuestions", () => {
   const sessionId = "spec_placeholder_required_repair";
   const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   packet.originalUserRequest = "<string>";
@@ -653,21 +699,205 @@ test("parseEvaluatorOutput repairs placeholder required fields into a visible qu
     userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
   });
 
-  assert.equal(result.packet.originalUserRequest, "Build a notes app.");
-  assert.equal(result.packet.alignedRequirement, "Build a notes app.");
-  assert.equal(result.packet.nextTurn.id, "T-LLM-001");
-  assert.equal(result.packet.nextTurn.side, "semantix");
-  assert.equal(result.packet.nextTurn.phase, "socratic");
-  assert.equal(result.packet.nextTurn.target, "scope");
-  assert.match(result.packet.nextTurn.at, /^\d{4}-\d{2}-\d{2}T/);
-  assert.equal(result.packet.nextTurn.body.kind, "question");
   assert.equal(result.packet.nextTurn.body.q, "Where should notes be stored?");
+  assert.deepEqual(result.packet.nextTurn.body.options, [
+    { id: "OPT-001", label: "Local browser storage" },
+    { id: "OPT-002", label: "Cloud sync" },
+  ]);
   assert.equal(JSON.stringify(result.packet).includes("<string>"), false);
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
-test("parseEvaluatorOutput repairs follow-up required fields from currentPacket", () => {
+test("parseEvaluatorOutput rejects question nextTurn missing live body.q", () => {
+  const sessionId = "spec_question_missing_q_repair";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.openQuestions = [];
+  packet.blockingReasons = [];
+  packet.findings = [];
+  packet.nextTurn.body = { kind: "question" };
+
+  assert.throws(
+    () => parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+      sessionId,
+      trigger: "initial",
+      userTurn: {
+        id: "u1",
+        body: { kind: "text", text: "Add an advisory intake flow for project triage." },
+      },
+    }),
+    {
+      message: /next_turn_question_missing_text/,
+    },
+  );
+});
+
+test("parseEvaluatorOutput rejects batch nextTurn without live questions", () => {
+  const sessionId = "spec_batch_missing_questions_repair";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.openQuestions = [];
+  packet.blockingReasons = [];
+  packet.findings = [];
+  packet.nextTurn.body = {
+    kind: "batch",
+    questions: [{ id: "Q-MISSING" }],
+  };
+
+  assert.throws(
+    () => parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+      sessionId,
+      trigger: "initial",
+      userTurn: {
+        id: "u1",
+        body: { kind: "text", text: "Add an advisory intake flow for project triage." },
+      },
+    }),
+    {
+      message: /next_turn_batch_missing_questions/,
+    },
+  );
+});
+
+test("parseEvaluatorOutput clears stale nextTurn for ready packets", () => {
+  const sessionId = "spec_ready_stale_next_turn_clear";
+  const packet = JSON.parse(buildReadyPacketJson(sessionId, 1));
+  packet.nextTurn = {
+    id: "T-STALE-READY",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "scope",
+    body: { kind: "choice", q: "Stale invalid outgoing choice?" },
+  };
+
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
+  });
+
+  assert.equal(result.packet.readiness, "ready");
+  assert.equal(result.packet.nextTurn, null);
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput clears stale nextTurn for blocked packets", () => {
+  const sessionId = "spec_blocked_stale_next_turn_clear";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.readiness = "blocked";
+  packet.readinessReason = "Semantix cannot continue until repository context is available.";
+  packet.blockingReasons = [{ id: "BR-CONTEXT", text: "Repository context is unavailable." }];
+  packet.nextTurn = {
+    id: "T-STALE-BLOCKED",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "scope",
+    body: { kind: "question", q: "Should this blocked packet ask a question?" },
+  };
+
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
+  });
+
+  assert.equal(result.packet.readiness, "blocked");
+  assert.equal(result.packet.nextTurn, null);
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput repairs missing needs_user nextTurn from openQuestions", () => {
+  const sessionId = "spec_needs_user_missing_next_turn_repair";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  delete packet.nextTurn;
+  packet.openQuestions = [
+    {
+      id: "Q-APPROVALS",
+      section: "scope",
+      question: "Which approval roles should the advisory intake flow support?",
+    },
+  ];
+
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: {
+      id: "u1",
+      body: { kind: "text", text: "Add an advisory intake flow for project triage." },
+    },
+  });
+
+  assert.equal(
+    result.packet.nextTurn.body.q,
+    "Which approval roles should the advisory intake flow support?",
+  );
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput normalizes body.question alias into body.q", () => {
+  const sessionId = "spec_next_turn_question_alias";
+  const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  packet.nextTurn.body = {
+    kind: "question",
+    question: "Which intake states should Phalanx display?",
+  };
+
+  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+    sessionId,
+    trigger: "initial",
+    userTurn: {
+      id: "u1",
+      body: { kind: "text", text: "Add an advisory intake flow for project triage." },
+    },
+  });
+
+  assert.equal(result.packet.nextTurn.body.q, "Which intake states should Phalanx display?");
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput does not reintroduce malformed currentPacket nextTurn on follow-up", () => {
+  const sessionId = "spec_followup_malformed_current_next_turn";
+  const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  priorPacket.nextTurn = {
+    id: "T-MALFORMED-PRIOR",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "scope",
+    body: { kind: "question" },
+  };
+  const nextPacket = JSON.parse(buildReadyPacketJson(sessionId, 1));
+  nextPacket.nextTurn = {
+    id: "T-STALE-NEXT",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "scope",
+    body: { kind: "question", q: "Stale question after follow-up?" },
+  };
+
+  const result = parseEvaluatorOutput(sessionId, 1, JSON.stringify(nextPacket), {
+    sessionId,
+    trigger: "user_turn",
+    currentPacket: priorPacket,
+    userTurn: {
+      id: "u2",
+      body: { kind: "free", text: "Use manager and finance approver roles." },
+    },
+  });
+
+  assert.equal(result.packet.readiness, "ready");
+  assert.equal(result.packet.nextTurn, null);
+  const validation = validateSemantixAlignmentPacket(result.packet);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+});
+
+test("parseEvaluatorOutput carries follow-up original request without synthesizing aligned requirement", () => {
   const sessionId = "spec_followup_required_repair";
   const priorPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   priorPacket.originalUserRequest = "Build a notes app.";
@@ -689,12 +919,12 @@ test("parseEvaluatorOutput repairs follow-up required fields from currentPacket"
   });
 
   assert.equal(result.packet.originalUserRequest, "Build a notes app.");
-  assert.equal(result.packet.alignedRequirement, "Build a notes app.");
+  assert.equal(result.packet.alignedRequirement, "");
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
-test("parseEvaluatorOutput repairs generic website prompts reduced to mode-only clarification", () => {
+test("createLlmSpecStudioEvaluator degrades generic website mode-only clarification", async () => {
   const sessionId = "spec_generic_website_mode_only";
   const packet = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   packet.originalUserRequest = "create a website with buttons";
@@ -725,25 +955,31 @@ test("parseEvaluatorOutput repairs generic website prompts reduced to mode-only 
     { id: "OPT-UPDATE", label: "Update existing site" },
     { id: "OPT-NEW", label: "Create a new site" },
   ];
+  const connector = mockConnector([
+    { exitCode: 0, stdout: JSON.stringify(packet), stderr: "" },
+    { exitCode: 0, stdout: JSON.stringify(packet), stderr: "" },
+  ]);
+  const evaluator = createLlmSpecStudioEvaluator({
+    connector,
+    maxClarificationRetries: 1,
+  });
 
-  const result = parseEvaluatorOutput(sessionId, 0, JSON.stringify(packet), {
+  const result = await evaluator({
     sessionId,
     trigger: "initial",
     userTurn: { id: "u1", body: { kind: "text", text: "create a website with buttons" } },
+    decisions: [],
+    findings: [],
+    contextResponses: [],
   });
 
-  assert.equal(result.packet.readiness, "needs_user");
-  assert.equal(result.packet.existingSystemContext.mode, "new");
-  assert.equal(result.packet.nextTurn.body.kind, "batch");
-  assert.equal(result.packet.nextTurn.body.questions.length, 5);
-  assert.ok(result.packet.nextTurn.body.questions.some((question) => question.id === "Q-WEB-BUTTONS"));
-  assert.ok(result.packet.openQuestions.some((question) => question.id === "Q-WEB-STYLE"));
-  assert.ok(result.packet.findings.some((finding) => finding.id === "F-WEB-AMBIG-001"));
-  assert.equal(
-    result.packet.nextTurn.body.questions.some((question) => /existing site/i.test(question.q)),
-    false,
-  );
-
+  assert.ok(isDegradedPacket(result.packet));
+  assert.equal(result.events[0].kind, "llm.evaluator.degraded");
+  assert.match(result.events[0].payload.reason, /only asked whether an underspecified website request is new or existing/);
+  assert.equal(result.packet.nextTurn, null);
+  assert.equal(result.llmResponses.length, 2);
+  assert.match(result.llmResponses[0].retryReason, /only asked whether an underspecified website request/);
+  assert.match(result.llmResponses[1].rawText, /Should this update an existing site/);
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
@@ -1335,7 +1571,7 @@ test("createLlmSpecStudioEvaluator retries when the LLM returns a generic repair
     at: "<string>",
     phase: "clarification",
     target: "scope",
-    body: { kind: "question", q: "<string>" },
+    body: { kind: "question", q: "What additional information is needed?" },
   };
   const goodPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   goodPacket.originalUserRequest = "Add an invoice approval dashboard.";
@@ -1393,12 +1629,157 @@ test("createLlmSpecStudioEvaluator retries when the LLM returns a generic repair
   assert.equal(result.packet.nextTurn.body.q, "Which roles should be allowed to approve invoices from the dashboard?");
 });
 
+test("createLlmSpecStudioEvaluator gives needs_user/no-question packets an extra targeted retry", async () => {
+  const sessionId = "spec_llm_retry_missing_question_extra";
+  const badPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  badPacket.openQuestions = [];
+  badPacket.blockingReasons = [
+    { id: "BR-AUDIENCE", text: "Target audience is still unresolved." },
+  ];
+  badPacket.findings = [
+    {
+      id: "F-AUDIENCE",
+      kind: "gap",
+      sev: "blocker",
+      section: "stakeholders",
+      ref: "u1",
+      text: "Target audience is missing.",
+      resolved: false,
+      raisedBy: "semantix",
+    },
+  ];
+  badPacket.nextTurn.body = { kind: "question" };
+
+  const goodPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  goodPacket.nextTurn = {
+    id: "T-AUDIENCE-001",
+    side: "semantix",
+    at: "2026-05-01T00:00:00.000Z",
+    phase: "socratic",
+    target: "stakeholders",
+    body: {
+      kind: "question",
+      q: "Who is the primary audience for the security posture platform?",
+      options: [
+        { id: "OPT-SOC", label: "SOC analysts" },
+        { id: "OPT-CISO", label: "Security leaders" },
+      ],
+    },
+  };
+
+  const calls = [];
+  const connector = {
+    execute: async ({ input }) => {
+      calls.push(input);
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify(calls.length < 3 ? badPacket : goodPacket),
+        stderr: "",
+      };
+    },
+  };
+  const evaluator = createLlmSpecStudioEvaluator({
+    connector,
+    maxClarificationRetries: 1,
+    maxMissingQuestionRetries: 1,
+  });
+
+  const result = await evaluator({
+    sessionId,
+    trigger: "user_turn",
+    currentPacket: JSON.parse(buildNeedsUserPacketJson(sessionId, 0)),
+    userTurn: { id: "u2", body: { kind: "free", text: "Risk Posture Studio" } },
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+
+  assert.equal(calls.length, 3);
+  assert.match(calls[2], /Discrepancy detected/i);
+  assert.match(calls[2], /Target audience is still unresolved/i);
+  assert.equal(result.llmResponses.length, 3);
+  assert.equal(result.events[0].kind, "llm.evaluator.corrective_retry");
+  assert.equal(result.events[1].kind, "llm.evaluator.corrective_retry");
+  assert.equal(result.events[2].kind, "llm.evaluator.user_turn");
+  assert.equal(
+    result.packet.nextTurn.body.q,
+    "Who is the primary audience for the security posture platform?",
+  );
+  assert.equal(isDegradedPacket(result.packet), false);
+  assert.equal(result.turnLogEntry.sessionId, sessionId);
+  assert.equal(result.turnLogEntry.trigger, "user_turn");
+  assert.equal(result.turnLogEntry.diagnostics.llmAttemptCount, 3);
+  assert.equal(result.turnLogEntry.diagnostics.correctiveRetryCount, 2);
+  assert.equal(result.turnLogEntry.diagnostics.discrepancy.kind, "needs_user_without_answerable_question");
+  assert.equal(result.turnLogEntry.beginningScores.alignment.value, 20);
+  assert.equal(result.turnLogEntry.afterTurnScores.alignment.value, 20);
+  assert.ok(result.turnLogEntry.afterTurnScores.effort.value > 0);
+  assert.deepEqual(result.turnLogEntry.answersSubmitted, [
+    {
+      id: "T-001",
+      question: "Is this a new system or an update?",
+      answer: "Risk Posture Studio",
+    },
+  ]);
+  assert.deepEqual(result.turnLogEntry.questionsNowOpen.map((question) => question.question), [
+    "Who is the primary audience for the security posture platform?",
+  ]);
+  assert.ok(result.turnLogEntry.learnings.some((learning) => /Discrepancy/.test(learning)));
+});
+
 test("createLlmSpecStudioEvaluator degrades rather than showing generic clarification after retries", async () => {
   const sessionId = "spec_llm_reject_generic_after_retry";
   const badPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
   badPacket.originalUserRequest = "<string>";
   badPacket.alignedRequirement = "<string>";
   badPacket.openQuestions = [];
+  badPacket.nextTurn = {
+    id: "<string>",
+    side: "semantix",
+    at: "<string>",
+    phase: "clarification",
+    target: "scope",
+    body: { kind: "question", q: "What additional information is needed?" },
+  };
+  const connector = mockConnector([
+    { exitCode: 0, stdout: JSON.stringify(badPacket), stderr: "" },
+    { exitCode: 0, stdout: JSON.stringify(badPacket), stderr: "" },
+  ]);
+  const evaluator = createLlmSpecStudioEvaluator({
+    connector,
+    maxClarificationRetries: 1,
+  });
+
+  const result = await evaluator({
+    sessionId,
+    trigger: "initial",
+    userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+
+  assert.ok(isDegradedPacket(result.packet));
+  assert.equal(result.events[0].kind, "llm.evaluator.degraded");
+  assert.match(result.events[0].payload.reason, /next_turn_question_missing_text|low-quality clarification/i);
+  assert.equal(result.llmResponses.length, 2);
+  assert.match(result.llmResponses[1].rawText, /What additional information is needed/);
+  assert.equal(result.packet.nextTurn, null);
+});
+
+test("createLlmSpecStudioEvaluator repairs placeholder nextTurn from openQuestions", async () => {
+  const sessionId = "spec_llm_placeholder_next_turn_degraded";
+  const badPacket = JSON.parse(buildNeedsUserPacketJson(sessionId, 0));
+  badPacket.originalUserRequest = "<string>";
+  delete badPacket.alignedRequirement;
+  badPacket.openQuestions = [
+    {
+      id: "Q-STORAGE",
+      section: "scope",
+      question: "Where should notes be stored?",
+      options: ["Local browser storage", "Cloud sync"],
+    },
+  ];
   badPacket.nextTurn = {
     id: "<string>",
     side: "semantix",
@@ -1425,12 +1806,14 @@ test("createLlmSpecStudioEvaluator degrades rather than showing generic clarific
     contextResponses: [],
   });
 
-  assert.ok(isDegradedPacket(result.packet));
-  assert.equal(result.events[0].kind, "llm.evaluator.degraded");
-  assert.match(result.events[0].payload.reason, /next_turn_question_missing_text|low-quality clarification/i);
-  assert.equal(result.llmResponses.length, 2);
-  assert.match(result.llmResponses[1].rawText, /<string>/);
-  assert.equal(result.packet.nextTurn, null);
+  assert.equal(isDegradedPacket(result.packet), false);
+  assert.equal(result.events[0].kind, "llm.evaluator.initial");
+  assert.equal(result.llmResponses.length, 1);
+  assert.equal(result.packet.nextTurn.body.q, "Where should notes be stored?");
+  assert.deepEqual(result.packet.nextTurn.body.options, [
+    { id: "OPT-001", label: "Local browser storage" },
+    { id: "OPT-002", label: "Cloud sync" },
+  ]);
 });
 
 test("createLlmSpecStudioEvaluator returns ready packet after user_turn", async () => {
@@ -1508,28 +1891,6 @@ test("createLlmSpecStudioEvaluator degrades honestly on empty LLM output by defa
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
-test("createLlmSpecStudioEvaluator can opt into deterministic probe fallback for legacy tests", async () => {
-  const sessionId = "spec_llm_empty_output_fallback";
-  const connector = mockConnector([{ exitCode: 0, stdout: "", stderr: "" }]);
-  const evaluator = createLlmSpecStudioEvaluator({
-    connector,
-    allowDeterministicFallback: true,
-  });
-
-  const result = await evaluator({
-    sessionId,
-    trigger: "initial",
-    userTurn: { id: "u1", body: { kind: "text", text: "Build a notes app." } },
-    decisions: [],
-    findings: [],
-    contextResponses: [],
-  });
-
-  assert.equal(result.packet.readiness, "needs_user");
-  assert.equal(isDegradedPacket(result.packet), false);
-  assert.equal(result.events[0].kind, "llm.evaluator.empty_output_fallback");
-});
-
 test("createLlmSpecStudioEvaluator degrades honestly when connector throws", async () => {
   const sessionId = "spec_llm_degrade_throw";
   const connector = {
@@ -1574,7 +1935,7 @@ test("createLlmSpecStudioEvaluator degrades honestly when connector returns nonz
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });
 
-test("createLlmSpecStudioEvaluator returns needs_user without connector call on empty initial request", async () => {
+test("createLlmSpecStudioEvaluator degrades without connector call on empty initial request", async () => {
   const sessionId = "spec_llm_empty_initial";
   let calls = 0;
   const connector = {
@@ -1598,9 +1959,11 @@ test("createLlmSpecStudioEvaluator returns needs_user without connector call on 
   assert.equal(calls, 0);
   assert.equal(result.packet.readiness, "needs_user");
   assert.equal(result.packet.originalUserRequest, "");
-  assert.equal(result.packet.nextTurn.body.kind, "question");
-  assert.equal(result.packet.findings[0].id, "F-INTENT-EMPTY-001");
-  assert.equal(isDegradedPacket(result.packet), false);
+  assert.equal(result.packet.nextTurn, null);
+  assert.equal(result.packet.findings[0].id, "F-DEGRADED-001");
+  assert.match(result.packet.findings[0].text, /initial request is empty/i);
+  assert.equal(result.events[0].kind, "llm.evaluator.degraded");
+  assert.equal(isDegradedPacket(result.packet), true);
   const validation = validateSemantixAlignmentPacket(result.packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 });

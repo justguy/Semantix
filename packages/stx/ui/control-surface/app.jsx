@@ -96,6 +96,29 @@ function deriveScenarioLabel(scenarioKey, artifact, prompt) {
   };
 }
 
+function packetMatchesPrompt(packet, prompt) {
+  return packet?.originalUserRequest === prompt;
+}
+
+function buildPromptWithSpecStudioPacket(prompt, packet) {
+  if (!packet || packet.readiness !== "ready") return prompt;
+  const requirementLines = asArray(packet.requirements)
+    .map((requirement, index) => `${index + 1}. ${compactFlowLine(requirement.text, requirement.id)}`)
+    .filter(Boolean);
+  const acceptanceLines = asArray(packet.acceptanceSummary)
+    .map((item, index) => `${index + 1}. ${compactFlowLine(item)}`)
+    .filter(Boolean);
+  return [
+    prompt,
+    "",
+    "Semantix Spec Studio aligned packet:",
+    `Readiness: ${packet.readiness}`,
+    `Aligned requirement: ${packet.alignedRequirement || "n/a"}`,
+    requirementLines.length ? `Requirements:\n${requirementLines.join("\n")}` : "",
+    acceptanceLines.length ? `Acceptance:\n${acceptanceLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 function nextSelectionState(artifact, selectedNodeRef) {
   const selectedNodeId = selectedNodeRef?.split(":")[0];
   const nextNode = getNodeById(artifact, selectedNodeId) || findFirstAttentionNode(artifact);
@@ -183,6 +206,10 @@ function SemantixApp({
   const [actionError, setActionError] = useAS(null);
   const [actionNotice, setActionNotice] = useAS(null);
   const [busyAction, setBusyAction] = useAS(null);
+  const [specStudioResponse, setSpecStudioResponse] = useAS(null);
+  const [specStudioAnswers, setSpecStudioAnswers] = useAS({});
+  const [specStudioHistory, setSpecStudioHistory] = useAS([]);
+  const [specStudioError, setSpecStudioError] = useAS(null);
   const [prompt, setPrompt] = useAS(DEFAULT_PROMPT);
   const [activeFlowStep, setActiveFlowStep] = useAS(1);
 
@@ -358,6 +385,161 @@ function SemantixApp({
       setActiveFlowStep(recommendedFlowStep({ flow, phase: phaseFromArtifact(artifact) }));
     }
     return decorateArtifact(artifact, previewCache);
+  }
+
+  function applySpecStudioResponse(result, notice = null) {
+    setSpecStudioResponse(result);
+    setSpecStudioAnswers({});
+    setSpecStudioError(null);
+    if (notice) {
+      setActionNotice(notice);
+    }
+    return result?.packet ?? null;
+  }
+
+  async function startSpecStudioIntake(runId) {
+    const trimmedPrompt = prompt.trim();
+    const metricsBefore = specStudioMetricSnapshot(flowProjection, null);
+    setSpecStudioHistory([]);
+    const result = await requestJson(`${getApiBase()}/spec-studio/evaluate`, {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: `spec_${runId}`,
+        trigger: "initial",
+        originalUserRequest: trimmedPrompt,
+        userTurn: {
+          id: `${runId}:spec:intake`,
+          body: {
+            kind: "text",
+            text: trimmedPrompt,
+          },
+        },
+        decisions: [],
+        findings: [],
+        contextResponses: [],
+      }),
+    });
+    const packet = result?.packet ?? null;
+    setSpecStudioHistory([
+      createSpecStudioHistoryEntry({
+        index: 0,
+        trigger: "initial",
+        result,
+        previousPacket: null,
+        userTurnBody: {
+          kind: "text",
+          text: trimmedPrompt,
+        },
+        metricsBefore,
+        metricsAfter: specStudioMetricSnapshot(flowProjection, result),
+      }),
+    ]);
+    return applySpecStudioResponse(
+      result,
+      packet?.readiness === "ready"
+        ? "Spec Studio aligned the request for Semantix execution."
+        : "Spec Studio needs alignment answers before approval.",
+    );
+  }
+
+  function setSpecStudioAnswer(questionId, answer) {
+    setSpecStudioAnswers((current) => ({
+      ...current,
+      [questionId]: answer,
+    }));
+  }
+
+  async function submitSpecStudioAnswers() {
+    const packet = specStudioResponse?.packet;
+    if (!packet?.nextTurn?.body) return;
+
+    const body = packet.nextTurn.body;
+    const turnId = `${packet.sessionId}:turn:${packet.iteration + 1}`;
+    const metricsBefore = specStudioMetricSnapshot(flowProjection, specStudioResponse);
+    const userTurnBody = (() => {
+      if (body.kind === "batch") {
+        return {
+          kind: "batch",
+          answers: asArray(body.questions).map((question) => {
+            const answer = specStudioAnswers[question.id] || {};
+            if (answer.text) {
+              return {
+                questionId: question.id,
+                kind: "free",
+                text: answer.text,
+              };
+            }
+            return {
+              questionId: question.id,
+              kind: "choice",
+              picked: answer.picked,
+              label: answer.label,
+            };
+          }),
+        };
+      }
+
+      const answer = specStudioAnswers[packet.nextTurn.id] || {};
+      if (answer.text) {
+        return {
+          kind: "free",
+          text: answer.text,
+        };
+      }
+      return {
+        kind: "choice",
+        picked: answer.picked,
+        label: answer.label,
+      };
+    })();
+
+    setBusyAction("spec-studio");
+    setActionError(null);
+    setActionNotice(null);
+    setSpecStudioError(null);
+
+    try {
+      const result = await requestJson(`${getApiBase()}/spec-studio/evaluate`, {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: packet.sessionId,
+          trigger: "user_turn",
+          currentPacket: packet,
+          userTurn: {
+            id: turnId,
+            body: userTurnBody,
+          },
+          decisions: [],
+          findings: packet.findings || [],
+          contextResponses: [],
+        }),
+      });
+      const nextPacket = result?.packet ?? null;
+      setSpecStudioHistory((current) => [
+        ...current,
+        createSpecStudioHistoryEntry({
+          index: current.length,
+          trigger: "user_turn",
+          result,
+          previousPacket: packet,
+          userTurnBody,
+          metricsBefore,
+          metricsAfter: specStudioMetricSnapshot(flowProjection, result),
+        }),
+      ]);
+      applySpecStudioResponse(
+        result,
+        nextPacket?.readiness === "ready"
+          ? "Spec Studio packet is ready. Continue to compile when you approve the aligned scope."
+          : "Spec Studio recorded the answers and still needs alignment.",
+      );
+    } catch (error) {
+      const message = error.message || "Failed to submit Spec Studio answers.";
+      setSpecStudioError(message);
+      setActionError(message);
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   function scheduleArtifactRefresh(runId, { syncDisplay } = {}) {
@@ -545,7 +727,6 @@ function SemantixApp({
   }
 
   async function compile() {
-    const intentPayload = deriveIntentFromPrompt(prompt, getScenarioRecordByKey(scenarioKey));
     const currentRunIsCompiled =
       (latestArtifact?.runId === currentRunId && latestArtifact?.artifactHash)
       || runSummaries.some(
@@ -556,13 +737,35 @@ function SemantixApp({
       : ensureRunId(currentRunId || "");
 
     setCurrentRunId(runId);
-    setPhase(PHASES.compiling);
-    setActiveFlowStep(2);
     setActionError(null);
     setActionNotice(null);
-    setBusyAction("compile");
 
     try {
+      let alignedPacket =
+        specStudioResponse?.packet?.readiness === "ready" &&
+        packetMatchesPrompt(specStudioResponse.packet, prompt.trim())
+          ? specStudioResponse.packet
+          : null;
+
+      if (!alignedPacket) {
+        setBusyAction("spec-studio");
+        setActionNotice("Spec Studio is aligning the request before compile.");
+        const packet = await startSpecStudioIntake(runId);
+        if (!packet || packet.readiness !== "ready") {
+          setPhase(PHASES.prompt);
+          setActiveFlowStep(1);
+          return;
+        }
+        alignedPacket = packet;
+      }
+
+      setPhase(PHASES.compiling);
+      setActiveFlowStep(3);
+      setBusyAction("compile");
+      const intentPayload = deriveIntentFromPrompt(
+        buildPromptWithSpecStudioPacket(prompt.trim(), alignedPacket),
+        getScenarioRecordByKey(scenarioKey),
+      );
       const flow = await requestJson(`${getApiBase()}/codex/runs`, {
         method: "POST",
         body: JSON.stringify({
@@ -598,6 +801,7 @@ function SemantixApp({
       } else {
         setPhase(PHASES.prompt);
       }
+      setActionNotice(null);
       setActionError(error.message || "Failed to compile a Semantix artifact.");
     } finally {
       setBusyAction(null);
@@ -983,6 +1187,12 @@ function SemantixApp({
     setSelectedNodeRef(null);
     setFocusChangeId(null);
     setFlowProjection(null);
+    setPlanningHandoffDemo(null);
+    setPlanningHandoffError(null);
+    setSpecStudioResponse(null);
+    setSpecStudioAnswers({});
+    setSpecStudioHistory([]);
+    setSpecStudioError(null);
     setActionError(null);
     setActionNotice(null);
     setInspectorError(null);
@@ -1027,6 +1237,12 @@ function SemantixApp({
         onCompile={compile}
         onApplyFix={applyRecommendedFlowFix}
         onApproveAndRun={approveAndRunFlow}
+        specStudioResponse={specStudioResponse}
+        specStudioAnswers={specStudioAnswers}
+        specStudioHistory={specStudioHistory}
+        specStudioError={specStudioError}
+        onSpecStudioAnswer={setSpecStudioAnswer}
+        onSubmitSpecStudioAnswers={submitSpecStudioAnswers}
         busyAction={busyAction}
         actionError={actionError}
         actionNotice={actionNotice}
@@ -1037,10 +1253,8 @@ function SemantixApp({
 
 const FLOW_STORY_STEPS = [
   { id: 1, label: "Input", caption: "Enter the outcome and start the run." },
-  { id: 2, label: "Classification", caption: "Semantix classifies risk, effort, routing, and constraints first." },
   { id: 3, label: "Review Plan", caption: "The backend compiles the semantic node for this prompt." },
   { id: 4, label: "Issue Detection", caption: "Problems are surfaced before any state change becomes real." },
-  { id: 5, label: "Effort Indicator", caption: "The run reports how much reasoning was required." },
   { id: 6, label: "Why? Explanation", caption: "Evidence and boundaries explain the classification." },
   { id: 7, label: "Fix Issues", caption: "Available when backend issues require intervention." },
   { id: 8, label: "Re-evaluation", caption: "Available after a fix has been applied." },
@@ -1051,6 +1265,7 @@ const FLOW_STORY_STEPS = [
 ];
 
 const FLOW_STORY_STEP_BY_ID = new Map(FLOW_STORY_STEPS.map((step) => [step.id, step]));
+const OMITTED_FLOW_STEP_IDS = new Set([2, 5]);
 
 function flowDisplaySteps(flow) {
   const backendSteps = Array.isArray(flow?.steps) && flow.steps.length > 0 ? flow.steps : FLOW_STORY_STEPS;
@@ -1060,7 +1275,7 @@ function flowDisplaySteps(flow) {
       ...step,
       id: Number(step.id),
     }))
-    .filter((step) => Number.isFinite(step.id))
+    .filter((step) => Number.isFinite(step.id) && !OMITTED_FLOW_STEP_IDS.has(step.id))
     .sort((left, right) => left.id - right.id);
 }
 
@@ -1078,7 +1293,7 @@ function resultStepId(flow) {
 
 function inferMaxReachableFlowStep({ flow, phase }) {
   if (phase === PHASES.prompt) return 1;
-  if (phase === PHASES.compiling) return 2;
+  if (phase === PHASES.compiling) return 3;
   if (!flow) return 1;
   const availableSteps = flowDisplaySteps(flow);
   const availableIds = availableSteps.map((step) => step.id);
@@ -1112,8 +1327,8 @@ function recommendedFlowStep({ flow, phase }) {
 
 function flowStepStatus(flow, phase, stepId) {
   if (stepId === 1) return phase === PHASES.prompt ? "active" : "complete";
-  if (stepId === 2 && phase === PHASES.compiling) return "running";
-  if (stepId === 2 && (flow?.plan?.items || []).some((item) => item.nodeType === "semantic_generation" && item.status === "running")) {
+  if (stepId === 3 && phase === PHASES.compiling) return "running";
+  if (stepId === 3 && (flow?.plan?.items || []).some((item) => item.nodeType === "semantic_generation" && item.status === "running")) {
     return "running";
   }
   return flowStoryStep(flow, stepId)?.status || "pending";
@@ -1134,6 +1349,241 @@ function flowText(...values) {
 function compactFlowLine(value, fallback = "") {
   const text = flowText(value, fallback);
   return text.length > 150 ? `${text.slice(0, 147)}...` : text;
+}
+
+function clampPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function confidencePercent(flow) {
+  const score = flow?.classification?.confidenceScore;
+  if (typeof score !== "number" || !Number.isFinite(score)) return null;
+  return clampPercent(score <= 1 ? score * 100 : score);
+}
+
+function alignmentPercent(specStudioResponse) {
+  return clampPercent(specStudioResponse?.packet?.coverage?.alignmentPct);
+}
+
+function effortPercent(flow) {
+  const signals = flow?.classification?.signals || {};
+  if (Number.isFinite(signals.effortScore)) {
+    return clampPercent((signals.effortScore / 10) * 100);
+  }
+
+  const effort = flow?.classification?.effort;
+  if (effort === "high") return 86;
+  if (effort === "medium") return 52;
+  if (effort === "low") return 18;
+  return null;
+}
+
+function specStudioEffortMetrics(specStudioResponse) {
+  const packet = specStudioResponse?.packet;
+  if (!packet) return { effort: null, effortValue: null };
+
+  const questions = getSpecStudioQuestions(packet).length;
+  const findings = asArray(packet.findings).filter((finding) => finding?.resolved !== true);
+  const blockers = Number.isFinite(Number(packet.coverage?.openBlockers))
+    ? Number(packet.coverage.openBlockers)
+    : findings.filter((finding) => finding.sev === "blocker").length;
+  const concerns = Number.isFinite(Number(packet.coverage?.openConcerns))
+    ? Number(packet.coverage.openConcerns)
+    : findings.filter((finding) => finding.sev === "concern").length;
+  const attempts = asArray(specStudioResponse.llmResponses).length;
+  const degradedPenalty = isSpecStudioDegradedResponse(specStudioResponse) ? 18 : 0;
+  const score = clampPercent(
+    18 +
+    (questions * 7) +
+    (blockers * 12) +
+    (concerns * 5) +
+    (Math.max(0, attempts - 1) * 8) +
+    degradedPenalty,
+  );
+  const effort = score >= 70 ? "high" : score >= 36 ? "medium" : "low";
+  return { effort, effortValue: score };
+}
+
+function specStudioMetricSnapshot(flow, specStudioResponse) {
+  const flowEffort = flow?.classification?.effort || null;
+  const specEffort = specStudioEffortMetrics(specStudioResponse);
+  return {
+    confidence: confidencePercent(flow),
+    alignment: alignmentPercent(specStudioResponse),
+    effort: flowEffort || specEffort.effort,
+    effortValue: effortPercent(flow) ?? specEffort.effortValue,
+  };
+}
+
+function specStudioQuestionMap(packet) {
+  return new Map(getSpecStudioQuestions(packet).map((question) => [question.id, question]));
+}
+
+function describeSpecStudioAnswer(answer, question) {
+  if (!answer) return "";
+  if (answer.text?.trim()) return answer.text.trim();
+  const picked = answer.picked || answer.optId;
+  if (!picked) return "";
+  const option = asArray(question?.options).find((candidate, index) => optionId(candidate, index) === picked);
+  return answer.label || optionLabel(option) || picked;
+}
+
+function specStudioSubmittedAnswers(userTurnBody, previousPacket) {
+  if (!userTurnBody) return [];
+  if (userTurnBody.kind === "text") {
+    return [{
+      id: "initial-request",
+      question: "Initial request",
+      answer: userTurnBody.text || "",
+    }];
+  }
+
+  const questions = specStudioQuestionMap(previousPacket);
+  if (userTurnBody.kind === "batch") {
+    return asArray(userTurnBody.answers).map((answer) => {
+      const questionId = answer.questionId || answer.questionRef;
+      const question = questions.get(questionId) || {};
+      return {
+        id: questionId,
+        question: question.q || questionId || "Question",
+        answer: describeSpecStudioAnswer(answer, question) || "No answer submitted",
+      };
+    });
+  }
+
+  const question = getSpecStudioQuestions(previousPacket)[0] || {};
+  return [{
+    id: question.id || "answer",
+    question: question.q || "Question",
+    answer: describeSpecStudioAnswer(userTurnBody, question) || "No answer submitted",
+  }];
+}
+
+function specStudioNewDecisions(previousPacket, packet) {
+  const previousIds = new Set(asArray(previousPacket?.userDecisions).map((decision) => decision?.id).filter(Boolean));
+  return asArray(packet?.userDecisions).filter((decision) => decision?.id && !previousIds.has(decision.id));
+}
+
+function isSpecStudioDegradedResponse(result) {
+  const packet = result?.packet || {};
+  if (asArray(result?.events).some((event) => /degraded/i.test(event?.kind || ""))) return true;
+  if (/degraded/i.test(packet.readinessReason || "")) return true;
+  return asArray(packet.findings).some((finding) => /DEGRADED/i.test(finding?.id || ""));
+}
+
+function readableSpecStudioDecision(decision) {
+  const answer = decision?.answer || {};
+  const answerText = answer.text || answer.label || answer.optId || "";
+  return compactFlowLine([
+    decision?.question || decision?.questionRef || "Decision",
+    answerText ? `answer: ${answerText}` : "",
+    decision?.section ? `section: ${decision.section}` : "",
+  ].filter(Boolean).join(" - "));
+}
+
+function specStudioPacketInsights(packet) {
+  const items = [];
+  if (packet?.readinessReason) {
+    items.push(`Readiness: ${packet.readinessReason}`);
+  }
+  asArray(packet?.blockingReasons).forEach((reason) => {
+    items.push(`Blocking: ${flowText(reason?.text, reason)}`);
+  });
+  asArray(packet?.findings)
+    .filter((finding) => finding?.resolved !== true)
+    .forEach((finding) => {
+      items.push(`${finding.sev || "finding"}: ${flowText(finding.text)}`);
+    });
+  asArray(packet?.assumptions).forEach((assumption) => {
+    items.push(`Assumption: ${flowText(assumption.text, assumption)}`);
+  });
+  asArray(packet?.risks).forEach((risk) => {
+    items.push(`Risk: ${flowText(risk.text, risk)}`);
+  });
+  return items.map((item) => compactFlowLine(item)).filter(Boolean).slice(0, 8);
+}
+
+function createSpecStudioHistoryEntry({
+  index,
+  trigger,
+  result,
+  previousPacket,
+  userTurnBody,
+  metricsBefore,
+  metricsAfter,
+}) {
+  const packet = result?.packet || {};
+  const apiEntry = result?.turnLogEntry || null;
+  const apiMetricsBefore = turnLogMetricsSnapshot(apiEntry?.beginningScores);
+  const apiMetricsAfter = turnLogMetricsSnapshot(apiEntry?.afterTurnScores);
+  return {
+    id: apiEntry?.id || `${packet.sessionId || "spec"}:${trigger}:${packet.iteration ?? index}:${index}`,
+    turnNumber: apiEntry?.turnNumber || index + 1,
+    trigger: apiEntry?.trigger || trigger,
+    readiness: apiEntry?.readiness || packet.readiness,
+    statusMessage: apiEntry?.statusMessage || "",
+    eventKind: result?.events?.[0]?.kind || "",
+    degraded: apiEntry?.diagnostics?.degraded ?? isSpecStudioDegradedResponse(result),
+    stalled: apiEntry?.diagnostics?.stalledNeedsUser ?? (packet.readiness === "needs_user" && getSpecStudioQuestions(packet).length === 0),
+    metricsBefore: apiMetricsBefore || metricsBefore,
+    metricsAfter: apiMetricsAfter || metricsAfter,
+    answers: apiEntry
+      ? asArray(apiEntry.answersSubmitted).map((answer) => ({
+          id: answer.id,
+          question: answer.question,
+          answer: answer.answer,
+        }))
+      : specStudioSubmittedAnswers(userTurnBody, previousPacket),
+    questions: apiEntry
+      ? asArray(apiEntry.questionsNowOpen).map((question) => ({
+          id: question.id,
+          q: question.question,
+          options: asArray(question.options),
+        }))
+      : getSpecStudioQuestions(packet),
+    decisions: apiEntry
+      ? asArray(apiEntry.decisionsRecorded).map((decision) => ({
+          ...decision,
+          answer: { text: decision.answer },
+        }))
+      : specStudioNewDecisions(previousPacket, packet),
+    insights: apiEntry ? asArray(apiEntry.learnings) : specStudioPacketInsights(packet),
+    llmAttempts: apiEntry?.diagnostics?.llmAttemptCount ?? asArray(result?.llmResponses).length,
+  };
+}
+
+function turnLogScoreValue(score) {
+  if (typeof score === "number") return score;
+  if (score && typeof score.value === "number") return score.value;
+  return null;
+}
+
+function turnLogMetricsSnapshot(scores) {
+  if (!scores) return null;
+  const effortValue = turnLogScoreValue(scores.effort);
+  const effort = typeof scores.effort?.label === "string" ? scores.effort.label : null;
+  return {
+    confidence: turnLogScoreValue(scores.confidence),
+    alignment: turnLogScoreValue(scores.alignment),
+    effort,
+    effortValue,
+  };
+}
+
+function percentTone(percent) {
+  if (percent == null) return "";
+  if (percent >= 80) return "green";
+  if (percent >= 50) return "orange";
+  return "red";
+}
+
+function effortTone(effort) {
+  if (effort === "high") return "red";
+  if (effort === "medium") return "orange";
+  if (effort === "low") return "green";
+  return "";
 }
 
 function readableFlowItem(value) {
@@ -1185,6 +1635,12 @@ function FlowExperience({
   onCompile,
   onApplyFix,
   onApproveAndRun,
+  specStudioResponse,
+  specStudioAnswers,
+  specStudioHistory,
+  specStudioError,
+  onSpecStudioAnswer,
+  onSubmitSpecStudioAnswers,
   busyAction,
   actionError,
   actionNotice,
@@ -1206,6 +1662,16 @@ function FlowExperience({
   const title = step.id === 1
     ? "What would you like Semantix to compile?"
     : step.label;
+  const visibleStepOrdinal = Math.max(1, displaySteps.findIndex((entry) => entry.id === visibleStepId) + 1);
+  const reachableStepIds = displaySteps
+    .filter((entry) => entry.id <= maxReachableStep)
+    .map((entry) => entry.id);
+  const visibleStepIndex = reachableStepIds.indexOf(visibleStepId);
+  const previousStepId = visibleStepIndex > 0 ? reachableStepIds[visibleStepIndex - 1] : visibleStepId;
+  const nextStepId =
+    visibleStepIndex >= 0 && visibleStepIndex < reachableStepIds.length - 1
+      ? reachableStepIds[visibleStepIndex + 1]
+      : visibleStepId;
 
   return (
     <div style={{ minHeight: 0, flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -1254,16 +1720,23 @@ function FlowExperience({
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 8, flexWrap: "wrap" }}>
               <Pill t={t} risk={tone} strong>{formatFlowStatus(status)}</Pill>
-              {flow?.classification?.confidenceScore != null ? (
-                <Pill t={t}>{Math.round(flow.classification.confidenceScore * 100)}% confidence</Pill>
-              ) : null}
               {flow?.artifact?.artifactHash ? <Pill t={t}>hash:{shortHash(flow.artifact.artifactHash)}</Pill> : null}
             </div>
-            <h1 style={{ margin: 0, color: t.text, fontSize: 30, lineHeight: 1.08, letterSpacing: -0.4 }}>
-              {title}
-            </h1>
-            <div style={{ marginTop: 8, color: t.textDim, fontSize: 13.5, lineHeight: 1.5, maxWidth: 760 }}>
-              {step.caption || ""}
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div style={{ minWidth: 260, flex: "1 1 420px" }}>
+                <h1 style={{ margin: 0, color: t.text, fontSize: 30, lineHeight: 1.08, letterSpacing: 0 }}>
+                  {title}
+                </h1>
+                <div style={{ marginTop: 8, color: t.textDim, fontSize: 13.5, lineHeight: 1.5, maxWidth: 760 }}>
+                  {step.caption || ""}
+                </div>
+              </div>
+              <FlowTitleMetrics
+                t={t}
+                flow={flow}
+                phase={phase}
+                specStudioResponse={specStudioResponse}
+              />
             </div>
           </div>
 
@@ -1280,7 +1753,7 @@ function FlowExperience({
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 14, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: t.text }}>
-                <span style={{ color: t.textFaint, marginRight: 4 }}>{step.id}.</span>{step.label}
+                <span style={{ color: t.textFaint, marginRight: 4 }}>{visibleStepOrdinal}.</span>{step.label}
               </div>
               <div style={{ color: t.textFaint, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }}>
                 {step.time || ""}
@@ -1299,7 +1772,12 @@ function FlowExperience({
               onCompile={onCompile}
               onApplyFix={onApplyFix}
               onApproveAndRun={onApproveAndRun}
-              setActiveStep={setActiveStep}
+              specStudioResponse={specStudioResponse}
+              specStudioAnswers={specStudioAnswers}
+              specStudioHistory={specStudioHistory}
+              specStudioError={specStudioError}
+              onSpecStudioAnswer={onSpecStudioAnswer}
+              onSubmitSpecStudioAnswers={onSubmitSpecStudioAnswers}
               busyAction={busyAction}
               status={backendStep?.status || status}
             />
@@ -1309,16 +1787,16 @@ function FlowExperience({
             <Btn
               t={t}
               variant="solid"
-              onClick={() => setActiveStep(Math.max(1, visibleStepId - 1))}
-              disabled={visibleStepId <= 1}
+              onClick={() => setActiveStep(previousStepId)}
+              disabled={previousStepId === visibleStepId}
             >
               Back
             </Btn>
             <Btn
               t={t}
               variant="primary"
-              onClick={() => setActiveStep(Math.min(maxReachableStep, visibleStepId + 1))}
-              disabled={visibleStepId >= maxReachableStep}
+              onClick={() => setActiveStep(nextStepId)}
+              disabled={nextStepId === visibleStepId}
             >
               Next
             </Btn>
@@ -1328,6 +1806,139 @@ function FlowExperience({
           </div>
         </main>
       </div>
+    </div>
+  );
+}
+
+function FlowTitleMetrics({ t, flow, phase, specStudioResponse }) {
+  const confidence = confidencePercent(flow);
+  const alignment = alignmentPercent(specStudioResponse);
+  const specEffort = specStudioEffortMetrics(specStudioResponse);
+  const effort = flow?.classification?.effort || specEffort.effort;
+  const effortValue = effortPercent(flow) ?? specEffort.effortValue;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "flex-end",
+        gap: 10,
+        flex: "0 1 520px",
+        minWidth: 280,
+        flexWrap: "wrap",
+      }}
+    >
+      <MetricScale
+        t={t}
+        label="Confidence"
+        value={confidence}
+        tone={percentTone(confidence)}
+        disabled={confidence == null || phase === PHASES.prompt}
+      />
+      <MetricScale
+        t={t}
+        label="Alignment"
+        value={alignment}
+        tone={percentTone(alignment)}
+        disabled={alignment == null || (phase === PHASES.prompt && !specStudioResponse?.packet)}
+      />
+      <EffortMeter
+        t={t}
+        effort={effort}
+        value={effortValue}
+        disabled={effortValue == null || (phase === PHASES.prompt && !specStudioResponse?.packet)}
+      />
+    </div>
+  );
+}
+
+function MetricScale({ t, label, value, tone, disabled }) {
+  const token = RISK_TOKEN(t, disabled ? "" : tone);
+  const fill = disabled ? 0 : value;
+  return (
+    <div
+      aria-disabled={disabled}
+      style={{
+        width: 152,
+        opacity: disabled ? 0.52 : 1,
+        display: "grid",
+        gap: 5,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+        <span style={{ color: disabled ? t.textFaint : t.textDim, fontSize: 10.5, fontWeight: 850, textTransform: "uppercase", letterSpacing: 0.8 }}>
+          {label}
+        </span>
+        <span style={{ color: disabled ? t.textFaint : token.fg, fontSize: 12, fontWeight: 850, fontFamily: "ui-monospace, Menlo, monospace" }}>
+          {disabled ? "--" : `${fill}%`}
+        </span>
+      </div>
+      <div style={{ height: 7, borderRadius: 999, background: t.panelAlt, border: `1px solid ${t.border}`, overflow: "hidden" }}>
+        <div style={{ width: `${fill}%`, height: "100%", borderRadius: 999, background: disabled ? t.border : token.fg, transition: "width 180ms ease" }} />
+      </div>
+    </div>
+  );
+}
+
+function EffortMeter({ t, effort, value, disabled }) {
+  const token = RISK_TOKEN(t, disabled ? "" : effortTone(effort));
+  const fill = disabled ? 0 : value;
+  const label = disabled ? "pending" : effort || "unknown";
+  return (
+    <div
+      aria-disabled={disabled}
+      style={{
+        width: 170,
+        opacity: disabled ? 0.52 : 1,
+        display: "grid",
+        gap: 5,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+        <span style={{ color: disabled ? t.textFaint : t.textDim, fontSize: 10.5, fontWeight: 850, textTransform: "uppercase", letterSpacing: 0.8 }}>
+          Effort
+        </span>
+        <span style={{ color: disabled ? t.textFaint : token.fg, fontSize: 12, fontWeight: 850 }}>
+          {label}
+        </span>
+      </div>
+      <div style={{ height: 7, borderRadius: 999, position: "relative", background: `linear-gradient(to right, ${t.greenSoft} 0%, ${t.greenSoft} 33%, ${t.yellowSoft} 33%, ${t.yellowSoft} 66%, ${t.redSoft} 66%, ${t.redSoft} 100%)`, border: `1px solid ${t.border}` }}>
+        <div style={{ position: "absolute", left: `${fill}%`, top: -4, width: 13, height: 13, borderRadius: 999, background: disabled ? t.border : token.fg, border: `2px solid ${t.panel}`, transform: "translateX(-50%)", transition: "left 180ms ease" }} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", fontSize: 9.5, color: t.textFaint }}>
+        <span>Low</span>
+        <span style={{ textAlign: "center" }}>Med</span>
+        <span style={{ textAlign: "right" }}>High</span>
+      </div>
+    </div>
+  );
+}
+
+function MetricSnapshotBars({ t, metrics }) {
+  const snapshot = metrics || {};
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <MetricScale
+        t={t}
+        label="Confidence"
+        value={snapshot.confidence}
+        tone={percentTone(snapshot.confidence)}
+        disabled={snapshot.confidence == null}
+      />
+      <MetricScale
+        t={t}
+        label="Alignment"
+        value={snapshot.alignment}
+        tone={percentTone(snapshot.alignment)}
+        disabled={snapshot.alignment == null}
+      />
+      <EffortMeter
+        t={t}
+        effort={snapshot.effort}
+        value={snapshot.effortValue}
+        disabled={snapshot.effortValue == null}
+      />
     </div>
   );
 }
@@ -1448,7 +2059,7 @@ function FlowStepRail({ t, flow, phase, activeStep, maxReachableStep, steps, set
         Flow
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        {displaySteps.map((step) => {
+        {displaySteps.map((step, index) => {
           const locked = step.id > maxReachableStep;
           const active = step.id === activeStep;
           const status = flowStepStatus(flow, phase, step.id);
@@ -1487,7 +2098,7 @@ function FlowStepRail({ t, flow, phase, activeStep, maxReachableStep, steps, set
                   fontWeight: 800,
                 }}
               >
-                {step.id}
+                {index + 1}
               </span>
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: "block", fontSize: 12, fontWeight: active ? 800 : 650, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1517,7 +2128,12 @@ function FlowStepBody({
   onCompile,
   onApplyFix,
   onApproveAndRun,
-  setActiveStep,
+  specStudioResponse,
+  specStudioAnswers,
+  specStudioHistory,
+  specStudioError,
+  onSpecStudioAnswer,
+  onSubmitSpecStudioAnswers,
   busyAction,
   status,
 }) {
@@ -1537,61 +2153,52 @@ function FlowStepBody({
   const advisoryChanges = getAdvisoryProposedChanges(artifact);
   const firstIssue = issues[0] || null;
   const firstRecommendation = recommendations[0] || firstIssue?.fixOptions?.find((option) => option.recommended) || firstIssue?.fixOptions?.[0] || null;
-  const confidence = Math.round((classification.confidenceScore || 0) * 100);
-  const effort = classification.effort || "unknown";
-  const risk = classification.riskLevel || "unknown";
 
   if (stepId === 1) {
     return (
-      <div style={{ display: "grid", gap: 14, maxWidth: 780 }}>
-        <textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          placeholder="Describe the outcome to compile for review."
-          style={{
-            width: "100%",
-            minHeight: 130,
-            border: `1px solid ${t.borderStrong}`,
-            borderRadius: 8,
-            background: t.panelAlt,
-            color: t.text,
-            resize: "vertical",
-            padding: 14,
-            font: "inherit",
-            lineHeight: 1.5,
-            outline: "none",
-          }}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Btn t={t} variant="primary" icon={<Icon.Spark />} onClick={onCompile} disabled={busyAction === "compile" || !prompt.trim()}>
-            Run
-          </Btn>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 780px) minmax(340px, 1fr)", gap: 16, alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 14, minWidth: 0 }}>
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="Describe the outcome to compile for review."
+            style={{
+              width: "100%",
+              minHeight: 130,
+              border: `1px solid ${t.borderStrong}`,
+              borderRadius: 8,
+              background: t.panelAlt,
+              color: t.text,
+              resize: "vertical",
+              padding: 14,
+              font: "inherit",
+              lineHeight: 1.5,
+              outline: "none",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <Btn t={t} variant="primary" icon={<Icon.Spark />} onClick={onCompile} disabled={busyAction != null || !prompt.trim()}>
+              {busyAction === "spec-studio" ? "Aligning..." : busyAction === "compile" ? "Compiling..." : "Run"}
+            </Btn>
+          </div>
+          <SpecStudioPanel
+            t={t}
+            response={specStudioResponse}
+            answers={specStudioAnswers}
+            error={specStudioError}
+            busy={busyAction === "spec-studio"}
+            onAnswer={onSpecStudioAnswer}
+            onSubmit={onSubmitSpecStudioAnswers}
+            onCompile={onCompile}
+          />
         </div>
+        <SpecStudioTimeline
+          t={t}
+          history={specStudioHistory}
+          currentPacket={specStudioResponse?.packet}
+          answers={specStudioAnswers}
+        />
       </div>
-    );
-  }
-
-  if (stepId === 2) {
-    return (
-      <CenteredStep t={t}>
-        <div style={{ fontSize: 13, color: t.textDim }}>
-          {flow ? "Classification complete." : "Analyzing your request..."}
-        </div>
-        <div
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: 999,
-            border: `2px dotted ${t.accent}`,
-            margin: "6px auto",
-          }}
-        />
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-          <Pill t={t} risk={risk === "high" ? "red" : risk === "medium" ? "orange" : "green"}>{risk} risk</Pill>
-          <Pill t={t} risk={effort === "high" ? "red" : effort === "medium" ? "orange" : "green"}>{effort} effort</Pill>
-          {confidence ? <Pill t={t}>{confidence}% confidence</Pill> : null}
-        </div>
-      </CenteredStep>
     );
   }
 
@@ -1647,57 +2254,6 @@ function FlowStepBody({
         items={issues.map((issue) => compactFlowLine(issue.summary, issue.code))}
         empty="The backend did not report blocking issues."
       />
-    );
-  }
-
-  if (stepId === 5) {
-    const thumb = effort === "high" ? "84%" : effort === "medium" ? "50%" : "16%";
-    const signals = classification.signals || {};
-    const effortDetails = [
-      signals.classifierModel
-        ? `Classifier: ${signals.classifier === "llm" ? signals.classifierModel : `${signals.classifier} (${signals.classifierModel})`}`
-        : signals.classifier
-          ? `Classifier: ${signals.classifier}`
-          : "",
-      `Risk: ${risk}`,
-      Number.isFinite(signals.wordCount) ? `Directive words: ${signals.wordCount}` : "",
-      Number.isFinite(signals.hardConstraintCount) ? `Constraint markers: ${signals.hardConstraintCount}` : "",
-      Number.isFinite(signals.effortScore) ? `Effort score: ${signals.effortScore}` : "",
-      Number.isFinite(signals.semanticContradictionSignals ?? signals.contradictionSignals)
-        ? `Semantic contradictions (CT): ${signals.semanticContradictionSignals ?? signals.contradictionSignals}`
-        : "",
-    ].filter(Boolean);
-
-    return (
-      <div style={{ display: "grid", gap: 18, maxWidth: 620 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <Pill t={t} risk={effort === "high" ? "red" : effort === "medium" ? "orange" : "green"} strong>
-            {effort} effort reasoning
-          </Pill>
-          <Btn t={t} variant="solid" onClick={() => setActiveStep(6)}>Why?</Btn>
-        </div>
-        <div>
-          <div style={{ height: 5, borderRadius: 999, position: "relative", background: `linear-gradient(to right, ${t.green} 0%, ${t.green} 33%, ${t.yellow} 33%, ${t.yellow} 66%, ${t.red} 66%, ${t.red} 100%)` }}>
-            <div style={{ position: "absolute", left: thumb, top: -5, width: 15, height: 15, borderRadius: 999, background: t.text, border: `2px solid ${t.yellow}`, transform: "translateX(-50%)" }} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", marginTop: 9, fontSize: 11, color: t.textDim }}>
-            <span>Low</span>
-            <span style={{ textAlign: "center" }}>Medium</span>
-            <span style={{ textAlign: "right" }}>High</span>
-          </div>
-        </div>
-        <div style={{ color: t.textDim }}>
-          Confidence: <span style={{ color: confidence < 70 ? t.orange : t.green, fontWeight: 800 }}>{confidence || "n/a"}%</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {effortDetails.map((item) => (
-            <div key={item} style={{ display: "flex", gap: 8, fontSize: 12.5, lineHeight: 1.45, color: t.textDim }}>
-              <span style={{ color: t.accent }}>•</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     );
   }
 
@@ -2038,6 +2594,393 @@ function ListStep({ t, eyebrow, tone, items, empty }) {
   );
 }
 
+function getSpecStudioQuestions(packet) {
+  const turn = packet?.nextTurn;
+  const body = turn?.body || {};
+  if (body.kind === "batch") {
+    return asArray(body.questions).map((question) => ({
+      id: question.id,
+      q: question.q || question.question,
+      options: asArray(question.options),
+    })).filter((question) => question.id && question.q);
+  }
+  if (body.kind === "question") {
+    return [{
+      id: turn.id,
+      q: body.q || body.question,
+      options: asArray(body.options),
+    }].filter((question) => question.id && question.q);
+  }
+  return [];
+}
+
+function optionId(option, index) {
+  if (typeof option === "string") return `OPT-${index + 1}`;
+  return option?.id || `OPT-${index + 1}`;
+}
+
+function optionLabel(option) {
+  if (typeof option === "string") return option;
+  return option?.label || option?.description || option?.id || "";
+}
+
+function specStudioAnswerReady(question, answer) {
+  if (!answer) return false;
+  if (answer.text?.trim()) return true;
+  return asArray(question.options).length > 0 && Boolean(answer.picked);
+}
+
+function SpecStudioTimeline({ t, history, currentPacket, answers }) {
+  const entries = asArray(history);
+  const currentQuestions = getSpecStudioQuestions(currentPacket);
+  const draftAnswers = currentQuestions
+    .map((question) => ({
+      id: question.id,
+      question: question.q,
+      answer: describeSpecStudioAnswer(answers?.[question.id], question),
+    }))
+    .filter((entry) => entry.answer);
+
+  return (
+    <aside
+      style={{
+        border: `1px solid ${t.border}`,
+        borderRadius: 8,
+        background: t.panelAlt,
+        padding: 12,
+        minWidth: 0,
+        alignSelf: "start",
+        display: "grid",
+        gap: 12,
+      }}
+    >
+      <div>
+        <SectionKicker t={t} tone="info">Turn log</SectionKicker>
+        <div style={{ marginTop: 5, color: t.text, fontWeight: 850 }}>Questions, answers, decisions</div>
+      </div>
+
+      {entries.length === 0 ? (
+        <div style={{ color: t.textDim, lineHeight: 1.5 }}>
+          Run Spec Studio to start the alignment timeline.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {entries.map((entry) => (
+            <SpecStudioTimelineEntry key={entry.id} t={t} entry={entry} />
+          ))}
+        </div>
+      )}
+
+      {draftAnswers.length ? (
+        <MiniPanel t={t} title="Draft answers">
+          <div style={{ display: "grid", gap: 7 }}>
+            {draftAnswers.map((answer) => (
+              <div key={answer.id} style={{ display: "grid", gap: 3 }}>
+                <div style={{ color: t.textDim, fontSize: 12, lineHeight: 1.4 }}>{answer.question}</div>
+                <div style={{ color: t.text, fontSize: 12.5, fontWeight: 750, lineHeight: 1.4 }}>{answer.answer}</div>
+              </div>
+            ))}
+          </div>
+        </MiniPanel>
+      ) : null}
+    </aside>
+  );
+}
+
+function SpecStudioTimelineEntry({ t, entry }) {
+  const readyTone = entry.readiness === "ready" ? "green" : entry.readiness === "blocked" ? "red" : "orange";
+  const statusMessage = entry.statusMessage || (entry.readiness === "ready"
+    ? "Done: alignment is ready and compile is available."
+    : entry.degraded
+      ? "Not done: evaluator degraded and needs another alignment attempt."
+      : entry.stalled
+        ? "Not done: blockers remain, but no usable next question was returned."
+        : "");
+  return (
+    <div style={{ border: `1px solid ${t.border}`, borderRadius: 8, background: t.panel, padding: 11, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ color: t.text, fontWeight: 850 }}>Turn {entry.turnNumber}</div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <Pill t={t} risk={readyTone} strong>{formatFlowStatus(entry.readiness)}</Pill>
+          {entry.llmAttempts > 1 ? <Pill t={t} risk="orange">{entry.llmAttempts} agent tries</Pill> : null}
+        </div>
+      </div>
+
+      {statusMessage ? (
+        <div
+          style={{
+            border: `1px solid ${(entry.readiness === "ready" ? t.green : t.red)}55`,
+            background: entry.readiness === "ready" ? t.greenSoft : t.redSoft,
+            color: entry.readiness === "ready" ? t.green : t.red,
+            borderRadius: 8,
+            padding: "8px 9px",
+            fontSize: 12.5,
+            fontWeight: 800,
+            lineHeight: 1.45,
+          }}
+        >
+          {statusMessage}
+        </div>
+      ) : null}
+
+      <MiniPanel t={t} title="Beginning scores">
+        <MetricSnapshotBars t={t} metrics={entry.metricsBefore} />
+      </MiniPanel>
+
+      <MiniPanel t={t} title="After turn scores">
+        <MetricSnapshotBars t={t} metrics={entry.metricsAfter} />
+      </MiniPanel>
+
+      <SpecStudioTimelineList
+        t={t}
+        title="Answers submitted"
+        items={entry.answers.map((answer) => `${answer.question}: ${answer.answer}`)}
+        empty="No answers submitted on this turn."
+      />
+
+      <SpecStudioTimelineList
+        t={t}
+        title="Questions now open"
+        items={entry.questions.map((question) => question.q)}
+        empty={entry.readiness === "ready"
+          ? "No open questions after this turn."
+          : "No usable next question was returned; alignment is not complete."}
+      />
+
+      <SpecStudioTimelineList
+        t={t}
+        title="Decisions recorded"
+        items={entry.decisions.map(readableSpecStudioDecision)}
+        empty="No decisions recorded on this turn."
+      />
+
+      <SpecStudioTimelineList
+        t={t}
+        title="Learnings"
+        items={entry.insights}
+        empty="No additional learnings recorded."
+      />
+    </div>
+  );
+}
+
+function SpecStudioTimelineList({ t, title, items, empty }) {
+  return (
+    <MiniPanel t={t} title={title}>
+      <div style={{ display: "grid", gap: 6 }}>
+        {items.length ? items.map((item, index) => (
+          <div key={`${title}:${index}`} style={{ color: t.textDim, fontSize: 12.5, lineHeight: 1.45 }}>
+            {compactFlowLine(item, "n/a")}
+          </div>
+        )) : (
+          <div style={{ color: t.textFaint, fontSize: 12.5 }}>{empty}</div>
+        )}
+      </div>
+    </MiniPanel>
+  );
+}
+
+function SpecStudioPanel({
+  t,
+  response,
+  answers,
+  error,
+  busy,
+  onAnswer,
+  onSubmit,
+  onCompile,
+}) {
+  if (!response && !error && !busy) return null;
+
+  if (error) {
+    return (
+      <div style={{ border: `1px solid ${t.red}55`, borderRadius: 8, background: t.redSoft, padding: 12, color: t.red }}>
+        <SectionKicker t={t} tone="red">Spec Studio</SectionKicker>
+        <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.5 }}>{error}</div>
+      </div>
+    );
+  }
+
+  if (busy && !response) {
+    return (
+      <div style={{ border: `1px solid ${t.info}55`, borderRadius: 8, background: t.infoSoft, padding: 12, color: t.info, display: "grid", gap: 8 }}>
+        <SectionKicker t={t} tone="info">Spec Studio</SectionKicker>
+        <div style={{ color: t.text, fontWeight: 800 }}>Aligning request</div>
+        <div style={{ color: t.textDim, fontSize: 12.5, lineHeight: 1.5 }}>
+          Waiting for the evaluator response before compiling the semantic artifact.
+        </div>
+      </div>
+    );
+  }
+
+  const packet = response?.packet || {};
+  const questions = getSpecStudioQuestions(packet);
+  const unresolvedFindings = asArray(packet.findings).filter((finding) => finding?.resolved !== true);
+  const blockingReasons = asArray(packet.blockingReasons);
+  const ready = packet.readiness === "ready";
+  const complete = questions.length > 0 && questions.every((question) => specStudioAnswerReady(question, answers[question.id]));
+  const tone = ready ? "green" : packet.readiness === "blocked" ? "red" : "orange";
+  const degraded = isSpecStudioDegradedResponse(response);
+  const stalled = packet.readiness === "needs_user" && questions.length === 0;
+
+  return (
+    <div style={{ border: `1px solid ${t.accent}55`, borderRadius: 8, background: t.panelAlt, padding: 14, display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <SectionKicker t={t} tone={tone}>Spec Studio</SectionKicker>
+          <div style={{ marginTop: 5, color: t.text, fontWeight: 800 }}>
+            {ready ? "Aligned packet ready" : "Alignment needed"}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
+          <Pill t={t} risk={tone} strong>{formatFlowStatus(packet.readiness)}</Pill>
+          <Pill t={t} risk={packet.coverage?.openBlockers ? "red" : "green"}>
+            {packet.coverage?.openBlockers ?? 0} blockers
+          </Pill>
+          <Pill t={t} risk={packet.coverage?.openConcerns ? "orange" : "green"}>
+            {packet.coverage?.openConcerns ?? 0} concerns
+          </Pill>
+        </div>
+      </div>
+
+      {packet.readinessReason ? (
+        <div style={{ color: t.textDim, lineHeight: 1.5 }}>{packet.readinessReason}</div>
+      ) : null}
+
+      {ready ? (
+        <div style={{ border: `1px solid ${t.green}55`, borderRadius: 8, background: t.greenSoft, color: t.green, padding: "10px 12px", fontWeight: 850, lineHeight: 1.45 }}>
+          Alignment is complete. No more user alignment questions remain, and compile is available.
+        </div>
+      ) : stalled || degraded ? (
+        <div style={{ border: `1px solid ${t.red}55`, borderRadius: 8, background: t.redSoft, color: t.red, padding: "10px 12px", display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 850 }}>Alignment is not complete.</div>
+          <div style={{ color: t.textDim, lineHeight: 1.45 }}>
+            Blockers or concerns remain, but the evaluator did not return an answerable next question. This state is not ready for compile.
+          </div>
+          <div>
+            <Btn t={t} variant="solid" onClick={onCompile} disabled={busy}>
+              Run alignment again
+            </Btn>
+          </div>
+        </div>
+      ) : null}
+
+      {blockingReasons.length || unresolvedFindings.length ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+          {blockingReasons.length ? (
+            <MiniPanel t={t} title="Blocking reasons">
+              <div style={{ display: "grid", gap: 6 }}>
+                {blockingReasons.map((reason, index) => (
+                  <div key={reason.id || index} style={{ color: t.textDim, lineHeight: 1.45 }}>
+                    {compactFlowLine(reason.text || reason)}
+                  </div>
+                ))}
+              </div>
+            </MiniPanel>
+          ) : null}
+          {unresolvedFindings.length ? (
+            <MiniPanel t={t} title="Findings">
+              <div style={{ display: "grid", gap: 6 }}>
+                {unresolvedFindings.map((finding, index) => (
+                  <div key={finding.id || index} style={{ color: t.textDim, lineHeight: 1.45 }}>
+                    <span style={{ color: finding.sev === "blocker" ? t.red : t.orange, fontWeight: 800 }}>
+                      {finding.sev || "finding"}
+                    </span>
+                    {" - "}{compactFlowLine(finding.text)}
+                  </div>
+                ))}
+              </div>
+            </MiniPanel>
+          ) : null}
+        </div>
+      ) : null}
+
+      {ready ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          <MiniPanel t={t} title="Aligned requirement">
+            <div style={{ color: t.text, lineHeight: 1.55 }}>{packet.alignedRequirement || "No aligned requirement recorded."}</div>
+          </MiniPanel>
+          {asArray(packet.requirements).length ? (
+            <MiniPanel t={t} title="Requirements">
+              <div style={{ display: "grid", gap: 7 }}>
+                {asArray(packet.requirements).slice(0, 5).map((requirement) => (
+                  <div key={requirement.id} style={{ color: t.textDim, lineHeight: 1.45 }}>
+                    {compactFlowLine(requirement.text)}
+                  </div>
+                ))}
+              </div>
+            </MiniPanel>
+          ) : null}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn t={t} variant="primary" onClick={onCompile} disabled={busy}>
+              {busy ? "Compiling..." : "Continue to compile aligned scope"}
+            </Btn>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {questions.map((question) => {
+            const selected = answers[question.id] || {};
+            const options = asArray(question.options);
+            return (
+              <MiniPanel key={question.id} t={t} title={question.id}>
+                <div style={{ color: t.text, fontWeight: 750, lineHeight: 1.45, marginBottom: 9 }}>{question.q}</div>
+                {options.length ? (
+                  <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                    {options.map((option, index) => {
+                      const id = optionId(option, index);
+                      const label = optionLabel(option);
+                      const active = selected.picked === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => onAnswer(question.id, { picked: id, label })}
+                          style={{
+                            border: `1px solid ${active ? t.accent : t.border}`,
+                            background: active ? t.accentSoft : t.panel,
+                            color: active ? t.accentText : t.text,
+                            borderRadius: 8,
+                            padding: "7px 9px",
+                            font: "inherit",
+                            fontSize: 12,
+                            cursor: "pointer",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <input
+                  value={selected.text || ""}
+                  onChange={(event) => onAnswer(question.id, { text: event.target.value })}
+                  placeholder={options.length ? "Free text override" : "Answer"}
+                  style={{
+                    width: "100%",
+                    marginTop: 9,
+                    border: `1px solid ${t.border}`,
+                    borderRadius: 8,
+                    background: t.panel,
+                    color: t.text,
+                    padding: "8px 9px",
+                    outline: "none",
+                  }}
+                />
+              </MiniPanel>
+            );
+          })}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn t={t} variant="primary" onClick={onSubmit} disabled={!complete || busy}>
+              {busy ? "Submitting..." : "Submit alignment answers"}
+            </Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionKicker({ t, tone, children }) {
   const token = RISK_TOKEN(t, tone);
   return (
@@ -2109,9 +3052,6 @@ function summarizeFlowStep(flow, step) {
   if (step.id === 1) {
     return firstFlowText(flow?.input?.primaryDirective, "Request captured.");
   }
-  if (step.id === 2) {
-    return `${classification.effort || "unknown"} effort, ${classification.riskLevel || "unknown"} risk.`;
-  }
   if (step.id === 3) {
     return firstPlanItem
       ? firstFlowText(firstPlanItem.title, firstPlanItem.id)
@@ -2121,9 +3061,6 @@ function summarizeFlowStep(flow, step) {
     return firstIssue
       ? firstFlowText(firstIssue.summary, firstIssue.code)
       : `${analysis.metrics?.issueCount ?? 0} backend issue records.`;
-  }
-  if (step.id === 5) {
-    return firstFlowText(analysis.summary, "No backend analysis summary recorded.");
   }
   if (step.id === 6) {
     return firstFlowText(
@@ -2174,7 +3111,6 @@ function summarizeFlowStep(flow, step) {
 }
 
 function FlowStatusStrip({ t, flow }) {
-  const classification = flow?.classification || {};
   const steps = flow?.steps || [];
   const issueCount = flow?.issues?.length || 0;
   const approval = flow?.approval || {};
@@ -2195,10 +3131,6 @@ function FlowStatusStrip({ t, flow }) {
           Run flow
         </div>
         <Pill t={t} risk={phaseTone} strong>{formatFlowStatus(flow.phase)}</Pill>
-        <Pill t={t} risk={classification.riskLevel === "high" ? "red" : classification.riskLevel === "medium" ? "orange" : "green"}>
-          {classification.effort || "unknown"} effort
-        </Pill>
-        <Pill t={t}>{Math.round((classification.confidenceScore || 0) * 100)}% confidence</Pill>
         <Pill t={t} risk={issueCount > 0 ? "red" : "green"}>{issueCount} issue{issueCount === 1 ? "" : "s"}</Pill>
         {approval.required ? (
           <Pill t={t} risk={approval.approved ? "green" : approval.blocked ? "red" : approval.ready ? "orange" : "orange"}>
@@ -2223,7 +3155,7 @@ function FlowStatusStrip({ t, flow }) {
           paddingBottom: 2,
         }}
       >
-        {steps.map((step) => {
+        {steps.map((step, index) => {
           const tone = flowStepTone(step.status);
           const token = RISK_TOKEN(t, tone);
           return (
@@ -2242,7 +3174,7 @@ function FlowStatusStrip({ t, flow }) {
               }}
             >
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: token.fg }}>{step.id}.</span>
+                <span style={{ fontSize: 11, fontWeight: 800, color: token.fg }}>{index + 1}.</span>
                 <span style={{ fontSize: 12, fontWeight: 750, color: t.text, lineHeight: 1.2 }}>
                   {step.label}
                 </span>
