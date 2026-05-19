@@ -37,7 +37,7 @@ async function loadUiGlobals() {
   return sandbox.window;
 }
 
-test("buildUi emits the bundled Semantix demo-flow assets", async (t) => {
+test("buildUi emits the bundled Semantix control-surface assets", async (t) => {
   const uiDistDir = await mkdtemp(join(tmpdir(), "semantix-stx-ui-build-"));
 
   t.after(async () => {
@@ -52,7 +52,7 @@ test("buildUi emits the bundled Semantix demo-flow assets", async (t) => {
   assert.equal(result.uiDistDir, uiDistDir);
 
   const indexHtml = await readFile(join(uiDistDir, "index.html"), "utf8");
-  assert.match(indexHtml, /Semantix - Demo Flow/);
+  assert.match(indexHtml, /Semantix Control Surface/);
   assert.match(indexHtml, /assets\/app\.js/);
 
   const bundle = await readFile(join(uiDistDir, "assets", "app.js"), "utf8");

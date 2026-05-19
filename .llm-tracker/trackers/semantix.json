@@ -1,0 +1,2405 @@
+{
+  "meta": {
+    "name": "Semantix",
+    "slug": "semantix",
+    "scratchpad": "Completed Phase 2 tasks stx-p2-011 and stx-p2-012. Audit bundles now default to hash/redacted payload retention with size metadata, and verifier drift is locked by deterministic fixtures. Verification: control-plane workspace tests passed 33/33 with localhost approval; verifier policy tests passed 11/11; git diff --check passed.",
+    "swimlanes": [
+      {
+        "id": "contract",
+        "label": "Contract",
+        "description": "Semantix-side packet contracts, fixtures, and validator parity."
+      },
+      {
+        "id": "evaluator",
+        "label": "Evaluator",
+        "description": "Alignment evaluation, readiness, stable IDs, and user-turn semantics."
+      },
+      {
+        "id": "integration",
+        "label": "Integration",
+        "description": "Phalanx-facing handshake, context requests, and degraded behavior."
+      },
+      {
+        "id": "proof",
+        "label": "Proof",
+        "description": "End-to-end fixtures, reports, and review handoff evidence."
+      },
+      {
+        "id": "spec-studio-json-probe",
+        "label": "Spec Studio JSON Probe",
+        "description": "Semantix-only manual JSON discussion loop before live Phalanx wiring."
+      },
+      {
+        "id": "spec-studio-real-evaluator",
+        "label": "Spec Studio Real Evaluator",
+        "description": "LLM-backed Semantix alignment evaluator behind /spec-studio/evaluate; JSON probe remains explicit test/probe mode only.",
+        "collapsed": true
+      },
+      {
+        "id": "phase-1-closeout",
+        "label": "Phase 1 Closeout",
+        "description": "Hardening and evidence needed before declaring Semantix phase 1 closed.",
+        "collapsed": false
+      },
+      {
+        "id": "phase-2-constraint-engine",
+        "label": "Phase 2 Constraint Engine",
+        "description": "Compiled constraints, runtime admission, audit, provenance, and replay.",
+        "collapsed": false
+      }
+    ],
+    "priorities": [
+      {
+        "id": "p0",
+        "label": "P0"
+      },
+      {
+        "id": "p1",
+        "label": "P1"
+      },
+      {
+        "id": "p2",
+        "label": "P2"
+      },
+      {
+        "id": "p3",
+        "label": "P3"
+      }
+    ],
+    "rev": 83,
+    "updatedAt": "2026-05-16T23:29:42.738Z"
+  },
+  "tasks": [
+    {
+      "id": "stx-spec-packet-contract-module",
+      "title": "Implement Semantix Spec Studio packet contract module",
+      "goal": "Add Semantix-side typed contract definitions and validation helpers for the Phalanx Spec Studio alignment packet, context request, context response, and degraded packet shapes.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "contract",
+        "priorityId": "p0"
+      },
+      "dependencies": [],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:85",
+        "docs/phalanx-spec-studio-integration-contract.md:101",
+        "docs/phalanx-spec-studio-integration-contract.md:246",
+        "docs/phalanx-spec-studio-integration-contract.md:255",
+        "docs/phalanx-spec-studio-integration-contract.md:269",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:64"
+      ],
+      "definition_of_done": [
+        "Repo-native named exports exist for SemantixAlignmentPacket, SemantixContextRequest, SemantixContextResponse, readiness values ready/needs_user/blocked, existingSystemContext modes new/update/unknown, contextSources, groundedFacts, findings, and nextTurn.",
+        "Validation rejects malformed readiness, missing existingSystemContext, ready+unknown mode, ready update without targetSurfaces, ready update without non-change/reuse/compatibility boundaries, grounded facts without evidenceRef, and Staff-owned output fields.",
+        "Validation accepts the upstream sample packet semantics for greenfield ready, update ready, ambiguous needs_user, duplicate/replacement blocked, Hoplon-grounded update, and degraded packets.",
+        "No Phalanx runtime code is modified from the Semantix repo."
+      ],
+      "constraints": [
+        "Do not treat Semantix as Staff or planner authority.",
+        "Do not emit Staff design docs, feature puzzles, verify commands, implementation plans, or file-change instructions from the packet.",
+        "Keep groundedFacts evidence-backed and separate from assumptions, risks, recommendations, findings, and requirements.",
+        "Use targeted tests only."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-contracts.js: validators + asserters for SemantixAlignmentPacket / SemantixContextRequest / SemantixContextResponse / contextSources / groundedFacts / findings / nextTurn, plus READINESS, EXISTING_SYSTEM_MODE, FINDING_*, CONTEXT_SOURCE_*, CONTEXT_REQUEST enums, STAFF_OWNED_FIELDS. 6 upstream samples transcribed in tests/fixtures/spec-studio-samples.js. 63 tests pass; full repo green.",
+      "context": {
+        "claude_brief": "Read docs/phalanx-spec-studio-integration-contract.md and implement only the Semantix-owned packet contract surface. Keep exports named and add narrow tests.",
+        "suggested_tests": [
+          "npm run test --workspace @semantix/stx -- --runInBand or an equivalent targeted package test command if available"
+        ]
+      },
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-evaluator-interface",
+      "title": "Define Semantix evaluation request and response interface",
+      "goal": "Create the Semantix-side evaluation seam Phalanx can call or simulate: raw directive plus prior packet/session state in, alignment packet plus events/contextRequests out.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:56",
+        "docs/phalanx-spec-studio-integration-contract.md:600",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:150",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:90"
+      ],
+      "definition_of_done": [
+        "SemantixEvaluateRequest supports trigger initial/user_turn/reconsider/context_response/decide_all/skip.",
+        "Every non-initial request requires currentPacket, decisions, findings, and contextResponses arrays so stable IDs can be preserved.",
+        "SemantixEvaluateResponse returns packet, events, and contextRequests.",
+        "The seam can be called in tests without starting a long-running Semantix service."
+      ],
+      "constraints": [
+        "Do not hardcode a Project-Phalanx repo path as the only integration mode.",
+        "Do not query Hoplon directly from Semantix code.",
+        "Do not create a live server in this slice unless explicitly approved."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-evaluator.js: EVALUATE_TRIGGER constants for initial/user_turn/reconsider/context_response/decide_all/skip, validateSemantixEvaluateRequest enforcing currentPacket on non-initial triggers and array shape of decisions/findings/contextResponses, validateSemantixEvaluateResponse covering packet+events+contextRequests, and createSemantixEvaluator(impl) seam runnable in tests without a server. 35 targeted tests pass; full repo 123 + 27 green.",
+      "context": {
+        "claude_brief": "Implement the evaluator interface as a dormant adapter/helper with tests. Do not start services or wire runtime launch paths.",
+        "blocked_until": "stx-spec-packet-contract-module"
+      },
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-stable-id-continuity",
+      "title": "Preserve stable IDs across Spec Studio turns",
+      "goal": "Make Semantix preserve requirement, finding, decision, grounded-fact, and context-request IDs across multi-turn evaluation when Phalanx passes prior session state.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:36",
+        "docs/phalanx-spec-studio-integration-contract.md:135",
+        "docs/phalanx-spec-studio-integration-contract.md:1098",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:54"
+      ],
+      "definition_of_done": [
+        "A follow-up evaluation carries forward unchanged requirement and finding IDs.",
+        "Changed requirements/findings are represented through supersession rather than silent same-ID mutation.",
+        "Resolved findings remain auditable and are not silently removed.",
+        "Tests cover preserved IDs, superseded IDs, dropped IDs rejected/reported, and same-ID mutation rejected/reported."
+      ],
+      "constraints": [
+        "Do not rely on stateless one-shot Semantix calls for production Spec Studio sessions.",
+        "Decision IDs remain Phalanx-owned; Semantix may preserve or reference them but must not mint canonical audit decision IDs."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "LLM follow-up hardening now repairs omitted IDs, invalid supersession, and same-ID requirement mutations. Mutated REQ-* output becomes a valid supersession pair with a new REQ id; mutated findings preserve the old F-* and mint a new F id. Choice turns record decisions and can resolve linked findings. nextTurn.target is normalized; duplicates still fail.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-readiness-and-update-safety",
+      "title": "Implement readiness classifier and update-safety rules",
+      "goal": "Teach Semantix to classify ready, needs_user, and blocked for greenfield, update, unknown, duplicate, replacement, and degraded cases using the Spec Studio contract rules.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p0"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-stable-id-continuity"
+      ],
+      "effort": "l",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:75",
+        "docs/phalanx-spec-studio-integration-contract.md:220",
+        "docs/phalanx-spec-studio-integration-contract.md:790",
+        "docs/phalanx-spec-studio-integration-contract.md:878",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:94"
+      ],
+      "definition_of_done": [
+        "Greenfield requests can be ready only when alignedRequirement, scope, must-level acceptance, and obvious exclusions are clear.",
+        "Update requests can be ready only with targetSurfaces plus doNotChange/reuse/compatibility boundaries.",
+        "Unknown new-vs-update classification returns needs_user with an open question and blocker finding.",
+        "Duplicate or replacement of an existing surface without explicit approval returns blocked or needs_user, never ready.",
+        "Negative requirements and do-not-change boundaries are first-class requirement facts."
+      ],
+      "constraints": [
+        "Missing update target surface means needs_user, not ready.",
+        "Do not treat update requests as greenfield when current-system context is missing.",
+        "Semantix readiness is advisory; Phalanx remains lock authority."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-readiness.js: classifyReadiness handles greenfield (alignedRequirement+scope+must-acceptance+exclusions), update (targetSurfaces + doNotChange/reuse/compatibility), unknown (needs_user + Q-MODE-001 + blocker), duplicate/replacement (blocked/needs_user/explicit). applyReadinessVerdict merges classifier output preserving user findings. promoteNegativeRequirements lifts negatives + doNotChange to first-class facts. docs/plans report added. 24 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-context-request-generator",
+      "title": "Generate Phalanx-brokered context requests",
+      "goal": "Emit focused SemantixContextRequest objects when existing-system facts materially affect readiness, instead of inventing facts or querying Hoplon directly.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface",
+        "stx-spec-readiness-and-update-safety"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:269",
+        "docs/phalanx-spec-studio-integration-contract.md:295",
+        "docs/phalanx-spec-studio-integration-contract.md:1100",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:132"
+      ],
+      "definition_of_done": [
+        "Semantix can emit context requests for identify_target_surface, summarize_current_behavior, find_existing_flow, find_reusable_component, find_constraints, collect_hoplon_evidence, and inspect_reference_artifact.",
+        "Requests include stable id, sessionId, iteration, purpose, query, requestedFrom, constraints, and reason.",
+        "Requests use requestedFrom/allowedSources to ask Phalanx to broker Hoplon/repo/upload/trace access.",
+        "Tests prove no direct Semantix-to-Hoplon call path exists in this slice."
+      ],
+      "constraints": [
+        "Semantix must not query Hoplon directly.",
+        "Do not make unavailable context a fabricated fact.",
+        "Only request context when it materially affects readiness or acceptance clarity."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-context-requests.js: createContextRequest factory + 7 per-purpose helpers (identify_target_surface, summarize_current_behavior, find_existing_flow, find_reusable_component, find_constraints, collect_hoplon_evidence, inspect_reference_artifact). createContextRequestSequencer mints stable ids. planContextRequests gap-driven planner. Structural tests assert no Hoplon import in stx source or package manifest. 26 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-grounded-context-ingestion",
+      "title": "Ingest Phalanx context responses without mixing interpretation into facts",
+      "goal": "Consume SemantixContextResponse facts/artifacts from Phalanx and update packets while preserving evidence refs and separating grounded facts from Semantix interpretation.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-context-request-generator"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:230",
+        "docs/phalanx-spec-studio-integration-contract.md:315",
+        "docs/phalanx-spec-studio-integration-contract.md:1017",
+        "docs/phalanx-spec-studio-integration-contract.md:1102"
+      ],
+      "definition_of_done": [
+        "Context response facts with evidence refs become groundedFacts with stable FACT IDs, source, text, confidence, and evidenceRef.",
+        "Unavailable/empty/error context responses become contextSources with status unavailable or skipped and do not fabricate groundedFacts.",
+        "Semantix interpretations from grounded facts go into assumptions, risks, findings, recommendations, or requirement facts, not groundedFacts.",
+        "Tests cover successful Hoplon-grounded fact, unavailable context, skipped context, and fact/interpretation separation."
+      ],
+      "constraints": [
+        "Grounded facts require evidence refs.",
+        "Hoplon is context acquisition only, not spec authority.",
+        "User approval and locked artifact remain the desired-behavior authority."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-context-ingestion.js: ingestContextResponses maps response status (ok/empty -> used, error -> unavailable, skipped -> skipped), promotes only facts with evidenceRef into groundedFacts, never fabricates facts. recordInterpretationsFromFacts records assumptions/risks/findings/recommendations/requirements with required sourceFactRef and refuses to touch groundedFacts. 17 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-user-turn-loop",
+      "title": "Implement user-turn, reconsider, skip, and decide-all semantics",
+      "goal": "Support the interactive Spec Studio loop where user answers, free text, reconsiderations, skipped gaps, and delegated Semantix decisions trigger packet re-evaluation.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "evaluator",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-stable-id-continuity",
+        "stx-spec-readiness-and-update-safety"
+      ],
+      "effort": "l",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:56",
+        "docs/phalanx-spec-studio-integration-contract.md:372",
+        "docs/phalanx-spec-studio-integration-contract.md:418",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:129"
+      ],
+      "definition_of_done": [
+        "Choice and free-text user turns update requirements, findings, decisions, openQuestions, coverage hints, and nextTurn deterministically enough for tests.",
+        "Reconsider supersedes prior decisions or requirements instead of rewriting history.",
+        "Skip or flag-as-gap preserves an auditable finding or concern.",
+        "decided-by-semantix decisions are flagged for human visibility and never treated as canonical Phalanx audit IDs."
+      ],
+      "constraints": [
+        "Semantix may propose decision semantics, but Phalanx mints canonical decision IDs.",
+        "Findings cannot be silently dismissed.",
+        "Do not implement Phalanx persistence in Semantix."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-user-turn-loop.js: applyUserChoiceTurn / applyUserFreeTurn / applyReconsiderTurn / applySkipTurn / applyDecideAllTurn. Choice/free/decide-all resolve linked findings + open questions, reconsider supersedes prior decision and reopens findings with reopenReason, skip raises concern (never dismisses blockers), decided-by-semantix entries flagged for human review. sem_dec_ ids stay provisional. Continuity guard now allows reopen with audit reason. 21 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-degraded-behavior",
+      "title": "Produce honest degraded/unavailable Semantix packet behavior",
+      "goal": "Ensure Semantix partial failure returns needs_user with blocker findings and never silently passes a degraded state into lock or Staff planning.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "s",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:630",
+        "docs/phalanx-spec-studio-integration-contract.md:648",
+        "docs/phalanx-spec-studio-integration-contract.md:1105",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:158"
+      ],
+      "definition_of_done": [
+        "Partial Semantix degraded packet uses source semantix, readiness needs_user, a blocker finding, alignmentPct 0 unless prior packet is explicitly stale-safe, and no new ungrounded requirement facts.",
+        "Malformed or unavailable model/evaluator output degrades honestly in the Semantix adapter surface.",
+        "Tests prove degraded packets validate but are not lockable by downstream contract expectations.",
+        "Docs/report state that fully unreachable Semantix fallback envelopes remain Phalanx-owned."
+      ],
+      "constraints": [
+        "Do not mark degraded packets ready.",
+        "Do not start or modify Phalanx run behavior.",
+        "Do not invent facts during degradation."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-degraded.js: createDegradedPacket (source=semantix, readiness=needs_user, blocker, alignmentPct=0 unless staleSafe carries prior coverage, no invented facts), isPacketLockable / isDegradedPacket predicates, withDegradationFallback wrapper that catches throws and malformed responses + demotes dishonest ready packets. docs/plans degraded-behavior boundary report added. 20 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-no-staff-authority-guard",
+      "title": "Guard against Semantix emitting Staff-owned planning content",
+      "goal": "Prevent Semantix output from carrying Staff design docs, feature puzzles, verify commands, implementation plans, or file-change authority inside packets or next-turn bodies.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "contract",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-packet-contract-module",
+        "stx-spec-evaluator-interface"
+      ],
+      "effort": "s",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:9",
+        "docs/phalanx-spec-studio-integration-contract.md:480",
+        "docs/phalanx-spec-studio-integration-contract.md:1107",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:178"
+      ],
+      "definition_of_done": [
+        "Validator/evaluator rejects or reports Staff-owned fields at any packet depth, including nextTurn bodies and requirement extras.",
+        "Semantix can recommend clarification, assumptions, risks, findings, and acceptance criteria but not Staff implementation plans.",
+        "Tests cover top-level and nested Staff-owned output bleed.",
+        "Execution report documents the authority boundary."
+      ],
+      "constraints": [
+        "Staff plans only after lock from the locked artifact.",
+        "Semantix aligns user intent; it does not execute code or choose verify commands.",
+        "Do not weaken packet passthrough so much that Staff-owned fields can hide in nested payloads."
+      ],
+      "expected_changes": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-no-staff-authority.js: deep-walking guard catches Staff-owned keys at any depth (requirements, findings, contextSources, groundedFacts, nextTurn.body, options). Case-insensitive fragment match handles mixed_case / snake_case. Free-text fields still allowed. STAFF_OWNED_FIELDS centralized; validateSemantixAlignmentPacket delegates. docs/plans authority-boundary report added. 23 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-sample-fixture-matrix",
+      "title": "Build upstream sample fixture and regression matrix",
+      "goal": "Create compact Semantix-side fixtures and targeted tests for all sample packet flows and evaluator transitions required by the contract.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "proof",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-readiness-and-update-safety",
+        "stx-spec-grounded-context-ingestion",
+        "stx-spec-degraded-behavior",
+        "stx-spec-no-staff-authority-guard"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:708",
+        "docs/phalanx-spec-studio-integration-contract.md:790",
+        "docs/phalanx-spec-studio-integration-contract.md:878",
+        "docs/phalanx-spec-studio-integration-contract.md:959",
+        "docs/phalanx-spec-studio-integration-contract.md:1017"
+      ],
+      "definition_of_done": [
+        "Fixtures cover greenfield ready, update ready, ambiguous needs_user, replacement blocked, Hoplon-grounded update, degraded/unavailable, malformed context, and nested Staff-owned field bleed.",
+        "Targeted tests run without a live Phalanx or Hoplon service.",
+        "Fixtures stay compact and do not copy unrelated prose from the contract docs.",
+        "A report lists what samples were used and what remains out of scope."
+      ],
+      "constraints": [
+        "Do not depend on a live Semantix service process in fixture tests.",
+        "Do not copy large doc sections into fixtures.",
+        "Do not use fixture success as proof of Phalanx lock authority."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/",
+        "packages/core/src/",
+        "packages/stx/src/",
+        "shared/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Extended packages/stx/tests/fixtures/spec-studio-samples.js with malformedContextResponseSample, factWithoutEvidenceContextResponseSample, staffOwnedBleedPacket, and 3 evaluateResponseFixtures. Added spec-studio-fixture-matrix.test.js: 38 tests cross-checking validator + classifier + lockability + degraded + staff-guard verdicts per fixture. docs/plans report enumerates in-scope fixtures and out-of-scope concerns. No live services.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-phalanx-capability-handshake",
+      "title": "Expose a Phalanx capability-handshake adapter",
+      "goal": "Provide a small callable Semantix adapter that Phalanx can use to verify Semantix packet generation, malformed-output handling, unavailable behavior, and prior-state preservation.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "integration",
+        "priorityId": "p1"
+      },
+      "dependencies": [
+        "stx-spec-evaluator-interface",
+        "stx-spec-sample-fixture-matrix"
+      ],
+      "effort": "m",
+      "references": [
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:90",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_PACKET_CONTRACT_CLAUDE_PROMPT.md:46",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:48",
+        "docs/phalanx-spec-studio-integration-contract.md:36"
+      ],
+      "definition_of_done": [
+        "Adapter can run in fixture/simulated mode from Phalanx tests without a long-running Semantix service.",
+        "Adapter returns packets that pass the Semantix-side and Phalanx-side contract validators.",
+        "Unavailable adapter behavior is explicit and degraded, not a thrown opaque failure.",
+        "Tests cover successful packet validation, malformed response, unavailable Semantix, and prior-state ID preservation."
+      ],
+      "constraints": [
+        "Do not require editing Project-Phalanx from this task.",
+        "Do not make Semantix unavailable a terminal Phalanx pipeline failure.",
+        "Do not hardcode one machine-specific repo path as the only integration mode."
+      ],
+      "expected_changes": [
+        "packages/stx/src/",
+        "packages/core/src/",
+        "packages/stx/tests/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/src/spec-studio-handshake.js: describeSemantixCapabilities() returns the static handshake summary (contract version, supported triggers/purposes/sources, authority boundaries). createSemantixHandshakeAdapter(options) wraps the evaluator seam with degradation fallback + continuity guard, supports fixture object/function modes, evaluator mode, and unavailable mode (no opaque throws). isHandshakePacketLockable mirrors Phalanx lock criteria. 14 tests.",
+      "assignee": "claude-opus"
+    },
+    {
+      "id": "stx-spec-end-to-end-flow-proof",
+      "title": "Prove Semantix-side Spec Studio evaluator flows end to end",
+      "goal": "Run a focused Semantix-side proof for new, update, ambiguous, blocked replacement, degraded, Hoplon-grounded context-response, and multi-turn reconsider flows.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "proof",
+        "priorityId": "p2"
+      },
+      "dependencies": [
+        "stx-spec-phalanx-capability-handshake",
+        "stx-spec-user-turn-loop"
+      ],
+      "effort": "m",
+      "references": [
+        "docs/phalanx-spec-studio-integration-contract.md:1138",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_INTEGRATION_SPEC.md:222",
+        "../Project-Phalanx/docs/references/SEMANTIX_SPEC_STUDIO_CLAUDE_EXECUTION_PROMPT.md:212"
+      ],
+      "definition_of_done": [
+        "A focused proof suite exercises the evaluator through greenfield ready, update ready, ambiguous needs_user, blocked replacement, degraded, Hoplon-grounded update, reconsider/supersede, and skipped-gap cases.",
+        "The proof asserts packet validity, stable IDs, fact/interpretation separation, no Staff-owned output, and correct readiness behavior.",
+        "The execution report states exactly which flows are Semantix-side only and which require Phalanx lock/session/handoff work.",
+        "Tracker task context records test commands and results for Codex review."
+      ],
+      "constraints": [
+        "Do not claim Phalanx UI/session/lock/Staff integration is complete from Semantix-only proof.",
+        "Do not start pipeline runs automatically.",
+        "Use targeted tests and a concise execution report."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/",
+        "packages/core/src/",
+        "packages/stx/src/",
+        "docs/plans/"
+      ],
+      "allowed_paths": [
+        "packages/core/src/",
+        "packages/stx/src/",
+        "packages/stx/tests/",
+        "shared/",
+        "docs/plans/",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "comment": "Landed packages/stx/tests/spec-studio-end-to-end-proof.test.js: 10 tests across 8 flows (greenfield, update, ambiguous, replacement-blocked, degraded, hoplon-grounded ingestion+interpretation, reconsider/supersede, skipped-gap) plus cross-flow regression + authority-boundary assertion. Each packet checked by validator + Staff guard. Commands: node --test packages/stx/tests/... OR npm test. Repo: 333 stx + 27 control-plane green. Phalanx lock/session/Staff out of scope.",
+      "assignee": "claude-opus"
+    },
+    {
+      "dependencies": [],
+      "id": "ss-json-001",
+      "title": "Add Spec Studio JSON evaluate endpoint",
+      "goal": "Expose a Semantix HTTP endpoint that accepts SemantixEvaluateRequest JSON and returns SemantixEvaluateResponse JSON without requiring Phalanx to run.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:25",
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:30"
+      ],
+      "definition_of_done": [
+        "POST /spec-studio/evaluate exists in the Semantix server.",
+        "The route uses createSemantixHandshakeAdapter.",
+        "Valid initial JSON returns HTTP 200 with a valid SemantixEvaluateResponse.",
+        "Invalid request shape returns HTTP 400 with validation details."
+      ],
+      "expected_changes": [
+        "packages/stx/src/http/server.js",
+        "packages/stx/src/application.js",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "manual-json",
+          "http",
+          "preintegration"
+        ],
+        "notes": "First gate for JSON-only testing before Phalanx live transport."
+      },
+      "assignee": "claude",
+      "blocker_reason": null,
+      "comment": "Starting implementation of POST /spec-studio/evaluate endpoint."
+    },
+    {
+      "dependencies": [
+        "ss-json-001"
+      ],
+      "id": "ss-json-002",
+      "title": "Add deterministic Spec Studio discussion evaluator mode",
+      "goal": "Provide a deterministic evaluator behind the JSON endpoint so initial -> question -> user answer -> ready can be proven without an LLM or Phalanx.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:61",
+        "packages/stx/tests/spec-studio-phalanx-request-probe.test.js:37"
+      ],
+      "definition_of_done": [
+        "Initial trigger returns an ambiguous needs_user packet with nextTurn.",
+        "Choice user_turn can return a ready packet.",
+        "context_response accepts nested Phalanx context episode shape.",
+        "skip, delegate, and reconsider bodies do not crash the endpoint.",
+        "Throwing or malformed evaluator behavior degrades honestly to a non-lockable Semantix packet."
+      ],
+      "expected_changes": [
+        "packages/stx/src/spec-studio-*.js",
+        "packages/stx/tests/spec-studio-*.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "deterministic-evaluator",
+          "degraded-path"
+        ],
+        "notes": "This is a transport/protocol evaluator, not production semantic reasoning."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002"
+      ],
+      "id": "ss-json-003",
+      "title": "Add copy-pasteable manual JSON fixtures",
+      "goal": "Create fixture request bodies that can be posted manually to Semantix for every supported discussion turn shape.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:86"
+      ],
+      "definition_of_done": [
+        "Fixture folder exists under packages/stx/tests/fixtures/spec-studio-manual-json/.",
+        "Fixtures include initial, choice-turn, free-turn, skip-turn, delegate-turn, reconsider-turn, context-response-nested, and malformed-request JSON.",
+        "Valid fixtures are accepted by automated tests.",
+        "Malformed fixture is rejected with HTTP 400."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/fixtures/spec-studio-manual-json/**",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/tests/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "fixtures",
+          "manual-json",
+          "curl-ready"
+        ],
+        "notes": "Fixtures should be useful both in tests and by copy-pasting into curl/Postman."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002",
+        "ss-json-003"
+      ],
+      "id": "ss-json-004",
+      "title": "Add Spec Studio manual JSON HTTP regression tests",
+      "goal": "Start the Semantix HTTP server in-process and prove the manual JSON fixtures work over HTTP before Phalanx is wired.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:138"
+      ],
+      "definition_of_done": [
+        "Tests cover initial request without optional arrays.",
+        "Tests cover user choice with currentPacket.",
+        "Tests cover nested context-response episode.",
+        "Tests cover skip, delegate, and reconsider bodies.",
+        "Tests cover malformed request returning HTTP 400.",
+        "Tests cover evaluator failure returning non-lockable Semantix degraded response."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/src/http/server.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/**",
+        "packages/stx/tests/**"
+      ],
+      "context": {
+        "tags": [
+          "http-test",
+          "regression",
+          "preintegration"
+        ],
+        "notes": "This is the automated proof that manual JSON works before live Phalanx transport."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-002",
+        "ss-json-003"
+      ],
+      "id": "ss-json-005",
+      "title": "Add manual JSON probe script",
+      "goal": "Provide a command that posts the fixture sequence to a running Semantix server and prints compact readiness/source/iteration output.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:114"
+      ],
+      "definition_of_done": [
+        "npm script exists for probe:spec-studio-json in @semantix/stx.",
+        "Script POSTs initial.json, captures packet, injects it into choice-turn.json, and POSTs the follow-up.",
+        "Script exits 0 on valid response sequence.",
+        "Script exits nonzero and prints response body on validation failure."
+      ],
+      "expected_changes": [
+        "packages/stx/package.json",
+        "packages/stx/scripts/**",
+        "packages/stx/tests/fixtures/spec-studio-manual-json/**"
+      ],
+      "allowed_paths": [
+        "packages/stx/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "probe-script",
+          "manual-json",
+          "operator-tool"
+        ],
+        "notes": "This gives the operator a direct Semantix-only smoke command."
+      }
+    },
+    {
+      "dependencies": [
+        "ss-json-001",
+        "ss-json-003",
+        "ss-json-005"
+      ],
+      "id": "ss-json-006",
+      "title": "Write manual JSON probe operator guide",
+      "goal": "Document exactly how to start Semantix, POST the fixtures, and identify a successful JSON-only discussion loop.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p2"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:159"
+      ],
+      "definition_of_done": [
+        "docs/spec-studio-manual-json-probe.md exists.",
+        "Guide includes start command, endpoint URL, initial curl, follow-up curl, and success criteria.",
+        "Guide explains that Phalanx is not required for this probe.",
+        "Guide names the handoff condition for later PHALANX_SEMANTIX_HTTP_URL wiring."
+      ],
+      "expected_changes": [
+        "docs/spec-studio-manual-json-probe.md"
+      ],
+      "allowed_paths": [
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "docs",
+          "operator-guide",
+          "manual-json"
+        ],
+        "notes": "This should be short and procedural, not architecture prose."
+      },
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "ss-json-004",
+        "ss-json-005",
+        "ss-json-006"
+      ],
+      "id": "ss-json-007",
+      "title": "Run final Semantix-only JSON discussion proof",
+      "goal": "Execute the automated and manual JSON probes and record the evidence needed before starting live Phalanx integration.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-json-probe",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:180",
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:106"
+      ],
+      "definition_of_done": [
+        "node --test packages/stx/tests/spec-studio-manual-json-http.test.js passes.",
+        "npm test passes.",
+        "Manual probe script reaches a valid response sequence against a running Semantix server.",
+        "Tracker context records the exact commands and results."
+      ],
+      "expected_changes": [
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        ".llm-tracker/trackers/semantix.json",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "verification",
+          "manual-proof",
+          "handoff"
+        ],
+        "notes": "This is the explicit gate before setting PHALANX_SEMANTIX_HTTP_URL in Phalanx.",
+        "proof_commands": "node --test packages/stx/tests/spec-studio-manual-json-http.test.js → 10/10 pass\nnpm test --workspace packages/stx → 366/366 pass\nnode packages/stx/scripts/probe-spec-studio-json.js --url http://127.0.0.1:4402/spec-studio/evaluate → PROBE PASSED (initial→needs_user@iter0, choice→ready@iter1 alignmentPct=100)"
+      },
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-001",
+      "title": "Make Spec Studio evaluator backing explicit and fail closed",
+      "goal": "Remove ambiguity around /spec-studio/evaluate by making the active evaluator mode visible and preventing the deterministic probe evaluator from being mistaken for production readiness.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "packages/stx/src/http/server.js:368",
+        "packages/stx/src/spec-studio-json-probe-evaluator.js:1",
+        "docs/spec-studio-manual-json-probe.md:1"
+      ],
+      "definition_of_done": [
+        "The HTTP route exposes or logs the active evaluator backing as one of probe, llm, or unavailable.",
+        "Default behavior is documented and cannot be described as production-ready when backed by the probe evaluator.",
+        "Tests assert that probe mode is explicitly labeled in responses, health, docs, or an equivalent observable surface.",
+        "Manual JSON docs clearly distinguish transport/probe readiness from LLM-backed readiness."
+      ],
+      "constraints": [
+        "Do not remove the probe evaluator; keep it for regression and transport tests.",
+        "Do not claim Phalanx integration readiness from probe-mode evidence."
+      ],
+      "context": {
+        "reason": "Prevents repeating the readiness ambiguity that made a mock transport look like a real evaluator."
+      },
+      "tags": [
+        "readiness",
+        "safety",
+        "probe-mode"
+      ],
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-002",
+      "title": "Design the LLM-backed Spec Studio evaluator contract",
+      "goal": "Define the concrete prompt, input synthesis, output schema, and degradation expectations for a real Semantix evaluator that consumes SemantixEvaluateRequest and emits SemantixEvaluateResponse.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-evaluator.js:1",
+        "packages/stx/src/spec-studio-contracts.js:1",
+        "docs/plans/spec-studio-manual-json-preintegration-tasks.md:1"
+      ],
+      "definition_of_done": [
+        "A repo-local design/spec document names the real evaluator module, injected dependencies, model connector boundary, prompt inputs, and output schema.",
+        "The spec covers initial, user_turn, reconsider, skip, decide_all, and context_response triggers.",
+        "The spec states how decisions, findings, currentPacket, and contextResponses are summarized into the LLM request.",
+        "The spec defines failure behavior: malformed model output degrades honestly and never returns ready."
+      ],
+      "constraints": [
+        "No Phalanx runtime dependency in the Semantix evaluator.",
+        "No Staff-owned fields may be produced by the evaluator."
+      ],
+      "context": {
+        "reason": "Locks down what real evaluator means before writing adapter code."
+      },
+      "tags": [
+        "design",
+        "llm",
+        "contract"
+      ],
+      "assignee": "claude",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "ss-llm-001",
+        "ss-llm-002"
+      ],
+      "id": "ss-llm-003",
+      "title": "Implement the real LLM-backed Spec Studio evaluator adapter",
+      "goal": "Add an evaluator implementation that calls the configured LLM/model connector and returns contract-valid SemantixEvaluateResponse packets instead of canned probe output.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "packages/stx/src/spec-studio-evaluator.js:1",
+        "packages/stx/src/http/server.js:368",
+        "packages/stx/src/application.js:268"
+      ],
+      "definition_of_done": [
+        "A new real evaluator module exists and is separate from spec-studio-json-probe-evaluator.js.",
+        "The evaluator uses a configured LLM/model connector rather than deterministic canned responses.",
+        "The evaluator handles at least initial and user_turn triggers with non-canned packet generation.",
+        "The route can be configured to use the LLM evaluator, while probe mode remains explicitly opt-in or explicitly labeled.",
+        "All evaluator outputs are validated by the existing Semantix response validator."
+      ],
+      "constraints": [
+        "Do not wire Phalanx as part of this task.",
+        "Do not silently fall back from LLM mode to probe mode."
+      ],
+      "context": {
+        "reason": "This is the missing production behavior behind the HTTP transport."
+      },
+      "tags": [
+        "implementation",
+        "llm",
+        "evaluator"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003"
+      ],
+      "id": "ss-llm-004",
+      "title": "Add robust LLM output repair and degraded handling",
+      "goal": "Ensure malformed, partial, or failed LLM evaluator output becomes an honest non-lockable degraded packet instead of a fake ready packet or a hard-to-debug transport failure.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-degraded.js:1",
+        "packages/stx/src/spec-studio-handshake.js:1",
+        "packages/stx/src/spec-studio-contracts.js:1"
+      ],
+      "definition_of_done": [
+        "Malformed model JSON is caught and converted to a needs_user degraded packet with blocker finding.",
+        "Ready packets with coverage/findings contradictions are demoted or rejected by tests.",
+        "LLM timeout/provider failure never emits readiness ready.",
+        "Errors preserve enough diagnostic detail for manual JSON debugging without leaking unrelated runtime noise."
+      ],
+      "constraints": [
+        "Never mark degraded output lockable.",
+        "Keep Phalanx lock authority semantics unchanged."
+      ],
+      "context": {
+        "reason": "A real LLM path needs failure semantics before live integration."
+      },
+      "tags": [
+        "degraded",
+        "validation",
+        "llm"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003",
+        "ss-llm-004"
+      ],
+      "id": "ss-llm-005",
+      "title": "Add mocked-LLM regression tests for real iterative discussion",
+      "goal": "Prove the real evaluator path performs an iterative discussion loop using mocked LLM responses, not the deterministic probe evaluator.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js:1",
+        "packages/stx/tests/spec-studio-evaluator.test.js:1"
+      ],
+      "definition_of_done": [
+        "Tests run the route in LLM evaluator mode with mocked model responses.",
+        "Initial request can produce a non-canned Semantix nextTurn derived from the request.",
+        "A follow-up user_turn updates the packet based on prior currentPacket and answer.",
+        "Tests fail if the probe evaluator is used accidentally in LLM-mode scenarios.",
+        "All new tests pass with the existing workspace test suite."
+      ],
+      "constraints": [
+        "Mock the LLM deterministically in tests; do not require network/model access in CI.",
+        "Keep probe-mode tests separate and clearly named."
+      ],
+      "context": {
+        "reason": "This is the first proof that discussion behavior is real rather than canned."
+      },
+      "tags": [
+        "tests",
+        "discussion-loop",
+        "llm"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-003",
+        "ss-llm-004",
+        "ss-llm-005"
+      ],
+      "id": "ss-llm-006",
+      "title": "Add manual JSON proof for LLM-backed evaluator mode",
+      "goal": "Extend the manual JSON probe so an operator can run the same initial -> follow-up flow against the real LLM evaluator and see evidence that the output is not the canned probe path.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/scripts/probe-spec-studio-json.js:1",
+        "docs/spec-studio-manual-json-probe.md:1",
+        "packages/stx/tests/fixtures/spec-studio-manual-json/initial.json:1"
+      ],
+      "definition_of_done": [
+        "Manual instructions include how to start Semantix in LLM evaluator mode.",
+        "Probe output identifies evaluator backing as llm.",
+        "Manual proof requires at least initial -> needs_user and one follow-up turn that changes the packet based on the answer.",
+        "Docs state that probe-mode success is insufficient for Phalanx readiness.",
+        "A captured proof command/result is recorded in the tracker task context or docs."
+      ],
+      "constraints": [
+        "Do not require Phalanx for this proof.",
+        "Do not count deterministic probe output as satisfying this task."
+      ],
+      "context": {
+        "reason": "This is the missing pre-Phalanx proof the user originally needed.",
+        "verification_status": "Complete: live LLM-backed manual proof is recorded in docs/spec-studio-llm-proof.md and the STX suite passes 399/399.",
+        "completionEvidence": "docs/spec-studio-llm-proof.md records LLM-mode proof and 399/399 STX tests passing.",
+        "verification": "npm run test --workspace @semantix/stx -- --test-reporter=tap => 399 pass, 0 fail",
+        "contractCorrection": "Discrete answer suggestions use nextTurn.body.kind=\"question\" with body.options; outgoing nextTurn.body.kind=\"choice\" is rejected."
+      },
+      "tags": [
+        "manual-proof",
+        "json",
+        "llm"
+      ],
+      "comment": "Completed: manual LLM evaluator proof is recorded in docs/spec-studio-llm-proof.md, mode instructions identify evaluatorMode=llm, and proof evidence distinguishes LLM-backed flow from probe mode. Corrected multi-choice prompt shape to Phalanx-compatible question+options."
+    },
+    {
+      "dependencies": [
+        "ss-llm-006"
+      ],
+      "id": "ss-llm-007",
+      "title": "Gate Phalanx integration on real evaluator proof",
+      "goal": "Update docs/tracker handoff so PHALANX_SEMANTIX_HTTP_URL is not treated as ready until the LLM-backed manual JSON proof is complete.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/spec-studio-live-phalanx-discussion-loop.md:1",
+        "docs/spec-studio-manual-json-probe.md:1",
+        ".llm-tracker/trackers/semantix.json:1"
+      ],
+      "definition_of_done": [
+        "Phalanx integration docs distinguish transport-ready, probe-ready, LLM-backed ready, and production-ready states.",
+        "The next Phalanx task references the LLM-backed manual JSON proof as a prerequisite.",
+        "No doc says no Semantix code changes are required unless the route is actually backed by the real evaluator.",
+        "Tracker scratchpad records the current readiness state accurately."
+      ],
+      "constraints": [
+        "Do not mark live Phalanx integration unblocked from probe-only evidence."
+      ],
+      "context": {
+        "reason": "Prevents repeating the false readiness handoff."
+      },
+      "tags": [
+        "handoff",
+        "docs",
+        "readiness"
+      ]
+    },
+    {
+      "dependencies": [
+        "ss-llm-006",
+        "ss-llm-007"
+      ],
+      "id": "ss-llm-008",
+      "title": "Run final LLM-backed readiness proof before Phalanx wiring",
+      "goal": "Execute and record the final evidence that Semantix can run a real LLM-backed iterative Spec Studio discussion through manual JSON before connecting Phalanx.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/spec-studio-manual-json-probe.md:1",
+        "packages/stx/scripts/probe-spec-studio-json.js:1"
+      ],
+      "definition_of_done": [
+        "Full test suite passes.",
+        "Manual JSON proof passes in LLM evaluator mode.",
+        "Proof output shows evaluator backing llm, not probe.",
+        "The run reaches a meaningful needs_user/ready/blocked state based on real model output, not a canned packet.",
+        "Only after this task is complete may Phalanx live wiring be called ready to start."
+      ],
+      "constraints": [
+        "If model access is unavailable, this task remains incomplete.",
+        "Do not substitute mocked-LLM tests for this manual proof."
+      ],
+      "context": {
+        "reason": "This is the explicit go/no-go gate for live Phalanx integration.",
+        "verification_status": "Complete: final LLM-backed readiness proof is recorded and Phalanx-facing nextTurn options now align with the contract.",
+        "completionEvidence": "docs/spec-studio-llm-proof.md gate status and proof/test counts updated.",
+        "verification": "Focused Spec Studio contract/evaluator/Phalanx probe tests passed; full STX suite passed 399/399.",
+        "phalanxContractAlignment": "Semantix nextTurn choice prompts remain question turns with options; option items require id and label."
+      },
+      "tags": [
+        "proof",
+        "go-no-go",
+        "integration-gate"
+      ],
+      "comment": "Completed: final LLM-backed readiness proof is restored as Phalanx-unblocking evidence after contract review correction. The Phalanx-facing shape now aligns with docs/phalanx-spec-studio-integration-contract.md and tests cover rejecting unsupported outgoing choice turns."
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-001",
+      "title": "Revalidate Codex app-server protocol",
+      "goal": "Run a live smoke proof against the installed Codex CLI and record which app-server methods, settings, and version assumptions are currently valid.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:5-12",
+        "control-plane/KNOWN_GAPS.md:24-27",
+        "docs/plans/semantix-phase-2-plan.md:24-39"
+      ],
+      "definition_of_done": [
+        "Current `codex` and `codex exec` versions are recorded in closeout evidence.",
+        "Live app-server smoke proof covers initialize, thread/start, turn/start, turn/interrupt, thread/read, and thread/turns/list or records a precise unsupported-method result.",
+        "Control-plane README no longer cites stale local validation evidence.",
+        "A focused connector or smoke test documents the accepted request/response shape."
+      ],
+      "constraints": [
+        "Do not treat mocked connector tests as protocol proof.",
+        "Do not change runtime semantics until the live protocol evidence is known."
+      ],
+      "expected_changes": [
+        "control-plane/README.md",
+        "control-plane/KNOWN_GAPS.md",
+        "docs/plans/semantix-phase-1-readiness.md or equivalent closeout evidence",
+        "packages/runtime-codex/tests/* or control-plane/tests/* if adding protocol smoke coverage"
+      ],
+      "allowed_paths": [
+        "control-plane/**",
+        "packages/runtime-codex/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "codex",
+          "protocol-proof"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+          "control-plane/tests/codex-app-server-connector.test.js",
+          "control-plane/README.md",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "notes": "Live app-server probe recorded 0.130.0 support for initialize, thread/start, turn/start, thread/read metadata, turn/interrupt with turnId+expectedTurnId, and precise limitations for includeTurns/list before materialization.",
+        "verification": "TPF_LLM_TOOL=codex tpf npm test in control-plane passed 27 tests; focused connector test passed 2 tests.",
+        "execution_report_reference": "docs/plans/semantix-phase-1-readiness.md:1"
+      },
+      "comment": "Completed Codex app-server protocol revalidation against codex-cli 0.130.0; connector and docs now record current initialize/thread/turn behavior and limitations.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "stx-p1-001"
+      ],
+      "id": "stx-p1-002",
+      "title": "Settle resume and steering semantics",
+      "goal": "Resolve whether the current Codex app-server supports true resume/steer. Implement it if available, or reclassify the gap honestly as an upstream limitation.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:5-12",
+        "docs/plans/semantix-phase-2-plan.md:28-30"
+      ],
+      "definition_of_done": [
+        "The connector exposes supported resume/steer methods if the live protocol supports them.",
+        "The control-plane service uses the new methods only through freshness-checked Semantix session state.",
+        "If unsupported, `KNOWN_GAPS.md` and runtime capabilities explicitly state the limitation without implying true resume/steer.",
+        "Tests cover either supported implementation behavior or unsupported/deferred behavior."
+      ],
+      "constraints": [
+        "Codex transcript history must not become authoritative state.",
+        "Freshness checks must remain server-side for resumed or steered turns."
+      ],
+      "expected_changes": [
+        "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+        "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+        "packages/core/src/control-plane-service.js",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/tests/*.test.js"
+      ],
+      "allowed_paths": [
+        "packages/runtime-codex/**",
+        "packages/core/**",
+        "control-plane/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": [
+        "Changing public session route contracts",
+        "Changing the authoritative source of runtime session state"
+      ],
+      "context": {
+        "tags": [
+          "phase-1",
+          "multi-turn",
+          "freshness"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/runtime-codex/src/connectors/codex-app-server-connector.js",
+          "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "packages/core/src/control-plane-service.js",
+          "packages/stx/src/http/server.js",
+          "control-plane/tests/codex-app-server-connector.test.js",
+          "control-plane/tests/server.test.js",
+          "control-plane/KNOWN_GAPS.md",
+          "control-plane/README.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "verification": [
+          "node --test control-plane/tests/codex-app-server-connector.test.js",
+          "node --test control-plane/tests/control-plane.test.js",
+          "node --test --test-force-exit control-plane/tests/server.test.js",
+          "node --test packages/runtime-codex/tests/strict-compiler.test.js packages/runtime-codex/tests/admitted-code-change-host.test.js",
+          "npm test --workspace @semantix/control-plane",
+          "npm test"
+        ]
+      },
+      "comment": "Implemented Semantix-first Codex thread resume and turn steering: connector exposes thread/resume and turn/steer, runtime adapter advertises and calls them, control-plane service gates both through artifact/node freshness and active/paused Semantix session state, and HTTP routes/tests/docs cover the behavior.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "traceability": {
+        "execution_report": {
+          "reference": "docs/plans/semantix-phase-1-readiness.md:109"
+        }
+      }
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-003",
+      "title": "Close preview fidelity gap",
+      "goal": "Make preview fidelity explicit so real runtime diff content and synthesized metadata previews cannot be confused by the UI, CLI, or audit trail.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:14-22",
+        "docs/semantix-control-plane-spec.md:650-671",
+        "docs/plans/semantix-phase-2-plan.md:31-35"
+      ],
+      "definition_of_done": [
+        "Preview records expose whether content came from runtime diff/preview text or synthesized StateEffect metadata.",
+        "UI and CLI labels make metadata-only previews visibly distinct from real unified diffs.",
+        "Tests prove previewRef resolution preserves source fidelity and does not imply file-hunk output when none exists.",
+        "`KNOWN_GAPS.md` is updated to reflect the final behavior."
+      ],
+      "constraints": [
+        "Do not fabricate unified diff bodies.",
+        "StateEffect metadata remains useful, but must be labeled as metadata when no explicit diff exists."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "packages/stx/ui/control-surface/*.jsx",
+        "packages/stx/src/cli.js",
+        "control-plane/tests/*.test.js",
+        "packages/stx/tests/*.test.js",
+        "control-plane/KNOWN_GAPS.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/stx/**",
+        "control-plane/**",
+        "docs/plans/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "preview",
+          "audit"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "packages/stx/src/http/server.js",
+          "packages/stx/src/cli.js",
+          "packages/stx/ui/control-surface/ui.jsx",
+          "packages/stx/ui/control-surface/diff.jsx",
+          "packages/stx/ui/control-surface/phases.jsx",
+          "control-plane/tests/server.test.js",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "notes": "Preview records expose source/sourceLabel/fidelity/contentIsSynthetic. Metadata-only previews are labeled in browser UI and stx diff, and runtime diff previews are tagged runtime_diff.",
+        "verification": "control-plane npm test passed 27 tests; npm run test --workspace @semantix/stx passed; npm run build:ui --workspace @semantix/stx passed.",
+        "execution_report_reference": "docs/plans/semantix-phase-1-readiness.md:35"
+      },
+      "comment": "Completed preview fidelity closeout: preview records, UI, CLI, docs, and tests now distinguish runtime diff bodies from synthesized StateEffect metadata.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [],
+      "id": "stx-p1-004",
+      "title": "Rerun browser-host verification",
+      "goal": "Verify the bundled browser host path outside the socket-restricted sandbox and record whether `stx serve` works end to end.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p1"
+      },
+      "effort": "s",
+      "references": [
+        "control-plane/KNOWN_GAPS.md:14-22",
+        "control-plane/README.md:132-154",
+        "docs/plans/semantix-phase-2-plan.md:31-39"
+      ],
+      "definition_of_done": [
+        "`npm run build:ui --workspace @semantix/stx` or equivalent build command succeeds.",
+        "Live `stx serve` or preview server serves `/`, legacy UI redirects, `/health`, one previewRef lookup, and one SSE/event route.",
+        "If local environment still blocks sockets, the exact environment and error are recorded without claiming success.",
+        "Browser-host evidence is linked from the Phase 1 readiness record."
+      ],
+      "constraints": [
+        "Do not mask socket binding failures as successful browser verification.",
+        "Do not require Phalanx for this proof."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-1-readiness.md or equivalent closeout evidence",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/README.md"
+      ],
+      "allowed_paths": [
+        "docs/plans/**",
+        "control-plane/**",
+        "packages/stx/**"
+      ],
+      "approval_required_for": null,
+      "context": {
+        "tags": [
+          "phase-1",
+          "browser-host",
+          "verification"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "notes": "Sandboxed socket bind still fails with EPERM, so the live browser-host proof was run with approved escalation. Evidence file: /private/tmp/semantix-browser-host-proof.json. The server was stopped after verification and no listener remained on 127.0.0.1:4555.",
+        "files_touched": [
+          "control-plane/README.md",
+          "control-plane/KNOWN_GAPS.md",
+          "docs/plans/semantix-phase-1-readiness.md"
+        ],
+        "verification": "`npm run build:ui --workspace @semantix/stx` passed; control-plane `npm test` passed 27 tests; `npm run test --workspace @semantix/stx` passed; live HTTP proof covered /health, /, /chat redirect, previewRef, and SSE."
+      },
+      "comment": "Completed browser-host closeout: STX UI build passed and live `stx serve --host 127.0.0.1 --port 4555` succeeded outside the socket-restricted sandbox, with `/health`, `/`, `/chat` redirect, previewRef lookup, and SSE route verified.",
+      "assignee": "codex",
+      "blocker_reason": null
+    },
+    {
+      "dependencies": [
+        "stx-p1-001",
+        "stx-p1-002",
+        "stx-p1-003",
+        "stx-p1-004"
+      ],
+      "id": "stx-p1-005",
+      "title": "Publish Phase 1 readiness record",
+      "goal": "Produce the final Phase 1 closeout record after protocol, preview, browser-host, documentation, and test evidence agree.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-1-closeout",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:24-39",
+        "docs/semantix-control-plane-spec.md:682-690"
+      ],
+      "definition_of_done": [
+        "A Phase 1 readiness doc records current test results, Codex version/protocol evidence, preview fidelity decision, and browser-host proof.",
+        "`KNOWN_GAPS.md` contains only true deferred limitations, not stale validation notes.",
+        "Tracker scratchpad summarizes whether Phase 1 is closed and what remains deferred.",
+        "Full `npm test` passes after closeout changes."
+      ],
+      "constraints": [
+        "Do not mark Phase 1 closed while any Phase 1 closeout dependency is incomplete.",
+        "Deferred items must be explicit and non-blocking for Phase 2."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-1-readiness.md",
+        "control-plane/KNOWN_GAPS.md",
+        "control-plane/README.md",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        "docs/plans/**",
+        "control-plane/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Declaring Phase 1 closed with known deferred runtime limitations"
+      ],
+      "context": {
+        "tags": [
+          "phase-1",
+          "closeout",
+          "readiness"
+        ],
+        "roadmap_section": "Phase 1 Closeout Gate",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:24-39",
+        "files_touched": [
+          "docs/plans/semantix-phase-1-readiness.md",
+          "control-plane/KNOWN_GAPS.md",
+          "control-plane/README.md",
+          ".llm-tracker/trackers/semantix.json"
+        ],
+        "verification": [
+          "npm test"
+        ]
+      },
+      "comment": "Published the Phase 1 readiness record with current Codex protocol proof, resume/steer semantics, preview and browser-host evidence, final test results, and explicit remaining deferred limitations. Full workspace npm test passed on 2026-05-15.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "traceability": {
+        "execution_report": {
+          "reference": "docs/plans/semantix-phase-1-readiness.md:1"
+        }
+      }
+    },
+    {
+      "dependencies": [
+        "stx-p1-005"
+      ],
+      "id": "stx-p2-000",
+      "title": "Phase 2 Constraint Engine epic",
+      "kind": "group",
+      "goal": "Track Phase 2 work that turns Semantix constraints into executable admission, audit, provenance, and replay machinery.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "xl",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:41-64",
+        "docs/compiler-pipeline-and-neural-bytecode.md:102-151"
+      ],
+      "definition_of_done": [
+        "All child Phase 2 tasks are either complete or explicitly split/deferred with rationale.",
+        "Phase 2 exit criteria in the plan doc are reviewed against implementation evidence."
+      ],
+      "constraints": [
+        "This is a grouping task; child tasks carry execution-specific acceptance criteria."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-plan.md",
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "packages/stx/**"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        "packages/**",
+        "control-plane/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "epic",
+          "constraint-engine"
+        ],
+        "roadmap_section": "Phase 2 Scope",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:41-64"
+      }
+    },
+    {
+      "dependencies": [
+        "stx-p1-005"
+      ],
+      "id": "stx-p2-001",
+      "title": "Formalize Constraint IR",
+      "parent_id": "stx-p2-000",
+      "goal": "Define the durable intermediate representation for compiled Semantix constraints and document how `context`, `constraint`, and `~>` lower into it.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:68-86",
+        "docs/compiler-pipeline-and-neural-bytecode.md:102-138",
+        "docs/language-fundamentals.md:216-226"
+      ],
+      "definition_of_done": [
+        "`ConstraintIR` fields are specified for schemas, path policies, capabilities, approvals, retry policy, verifier policy, provenance, and failure classification.",
+        "At least three syntax examples are lowered into IR examples.",
+        "Compatibility notes explain how IR attaches to IntentContract, ExecutionPlan, StateEffect, and strict compiler envelopes.",
+        "Open questions are captured as follow-up tasks rather than implicit implementation guesses."
+      ],
+      "constraints": [
+        "Do not implement broad syntax before the IR is reviewed.",
+        "Keep the first IR minimal enough to compile and test."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-plan.md",
+        "docs/language-fundamentals.md",
+        "docs/compiler-pipeline-and-neural-bytecode.md",
+        "packages/core/src/contracts.js"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        "packages/core/**"
+      ],
+      "approval_required_for": [
+        "Changing public Semantix language syntax"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "ir",
+          "constraints"
+        ],
+        "roadmap_section": "Milestone 1: Constraint IR",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:68-86",
+        "files_touched": [
+          "docs/plans/semantix-phase-2-plan.md",
+          "docs/language-fundamentals.md",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          "packages/core/src/contracts.js"
+        ],
+        "verification": [
+          "node --input-type=module -e import/createConstraintIR smoke",
+          "node --test packages/stx/tests/spec-studio-json-probe-evaluator.test.js packages/stx/tests/spec-studio-llm-evaluator.test.js",
+          "git diff --check"
+        ]
+      },
+      "comment": "Completed Phase 2 Constraint IR draft after explicit user approval for the public syntax gate. Added ConstraintIR v1 contract/factory/identity helpers, three syntax-to-IR lowering examples, and compatibility notes for IntentContract, ExecutionPlan, StateEffect, and strict compiler envelopes. Verification: ConstraintIR import/factory smoke passed, Spec Studio Semantix tests passed, git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex"
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-002",
+      "title": "Implement deterministic constraint compiler slice",
+      "parent_id": "stx-p2-000",
+      "goal": "Build the first compiler path that lowers constraint declarations into deterministic validation artifacts without requiring live model calls.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:88-100",
+        "docs/compiler-pipeline-and-neural-bytecode.md:116-138"
+      ],
+      "definition_of_done": [
+        "Compiler emits structural validators, file path policy, required/forbidden field validators, approval markers, and retry/fail policy for the first supported constraint subset.",
+        "Compiler rejects illegal or unsatisfiable hard constraints with deterministic errors.",
+        "Unit tests cover positive lowering and negative invalid-constraint cases.",
+        "No live model or provider dependency is needed for compiler tests."
+      ],
+      "constraints": [
+        "Prefer local package patterns over a new compiler framework.",
+        "No broad parser rewrite unless required by the chosen IR."
+      ],
+      "expected_changes": [
+        "packages/core/src/**",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/runtime-codex/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Changing existing strict compiler envelope shape"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "compiler",
+          "constraints"
+        ],
+        "roadmap_section": "Milestone 2: Deterministic Constraint Compiler",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:88-100",
+        "notes": "ConstraintIR compiler slice complete. PMO refs: artifact://semantix/stx-p2-002/constraint-bundle-contract-2026-05-16 and evidence://semantix/stx-p2-002/runtime-codex-tests-2026-05-16. Service was not restarted and remains reachable.",
+        "files_touched": [
+          "packages/runtime-codex/src/strict-compiler.js",
+          "packages/runtime-codex/tests/strict-compiler.test.js",
+          "packages/core/src/contracts.js",
+          "docs/plans/semantix-phase-2-plan.md",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          ".llm-tracker/trackers/semantix.json"
+        ],
+        "verification": "node --test packages/runtime-codex/tests/strict-compiler.test.js; node --test packages/runtime-codex/tests/*.test.js; npm test; git diff --check; curl -i -s http://127.0.0.1:4401/spec-studio/mode",
+        "pmo_artifact_ref": "artifact://semantix/stx-p2-002/constraint-bundle-contract-2026-05-16",
+        "pmo_evidence_ref": "evidence://semantix/stx-p2-002/runtime-codex-tests-2026-05-16"
+      },
+      "comment": "Completed ConstraintIR compiler slice after approval for strict compiler envelope changes. Added constraintBundle emission, deterministic artifact refs, fallback hard_validation_schema bundles, and negative validation for unsatisfiable constraints. Verification passed: runtime-codex tests, full npm test, diff check, service probe. PMO shared-flow pointers updated.",
+      "blocker_reason": null,
+      "assignee": "codex",
+      "outcome": "partial_slice_landed"
+    },
+    {
+      "dependencies": [
+        "stx-p2-002"
+      ],
+      "id": "stx-p2-003",
+      "title": "Implement runtime admission loop",
+      "parent_id": "stx-p2-000",
+      "goal": "Route semantic output candidates through compiled constraints before admission into trusted state, including bounded retry and fail-closed behavior.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:102-113",
+        "docs/compiler-pipeline-and-neural-bytecode.md:140-151"
+      ],
+      "definition_of_done": [
+        "Semantic candidates are parsed, validated, classified, retried within policy, and either admitted or rejected with deterministic reason codes.",
+        "Hard constraint violations fail closed and cannot become trusted state.",
+        "Retryable failures have fixed attempt budgets and persisted attempt evidence.",
+        "Tests cover admitted, retried-then-admitted, retry-exhausted, and hard-failed candidates."
+      ],
+      "constraints": [
+        "Do not expose constraint failures only as conversational text.",
+        "Do not allow side effects before admission succeeds."
+      ],
+      "expected_changes": [
+        "packages/core/src/v0-artifact.js",
+        "packages/core/src/control-plane-service.js",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/runtime-codex/tests/**",
+        "control-plane/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "packages/runtime-codex/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Changing semantic admission status vocabulary",
+        "Changing retry defaults"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "runtime-admission",
+          "constraint-engine"
+        ],
+        "roadmap_section": "Milestone 3: Runtime Admission Loop",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:102-113",
+        "files_touched": [
+          "control-plane/tests/control-plane.test.js",
+          "docs/compiler-pipeline-and-neural-bytecode.md",
+          "docs/phalanx-spec-studio-integration-contract.md",
+          "docs/plans/semantix-phase-2-plan.md",
+          "packages/core/src/control-plane-service.js",
+          "packages/core/src/v0-artifact.js",
+          "packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "packages/runtime-codex/src/strict-compiler.js",
+          "packages/runtime-codex/tests/strict-compiler.test.js"
+        ],
+        "notes": "Implemented compiled-constraint runtime admission with bounded retry, fail-closed hard violations, persisted attempt evidence, and PMO shared-flow artifact pointer.",
+        "pmo_artifact_ref": "artifact://semantix/stx-p2-003/runtime-admission-loop-2026-05-16",
+        "pmo_evidence_refs": [
+          "evidence://semantix/stx-p2-003/control-plane-tests-2026-05-16",
+          "evidence://semantix/stx-p2-003/npm-test-2026-05-16",
+          "evidence://semantix/stx-p2-003/runtime-codex-tests-2026-05-16"
+        ],
+        "verification": [
+          "node --check packages/runtime-codex/src/strict-compiler.js",
+          "node --check packages/runtime-codex/src/codex-cli-runtime-adapter.js",
+          "node --check packages/core/src/control-plane-service.js",
+          "node --check packages/core/src/v0-artifact.js",
+          "node --test packages/runtime-codex/tests/strict-compiler.test.js",
+          "node --test control-plane/tests/control-plane.test.js",
+          "node --test --test-force-exit control-plane/tests/server.test.js",
+          "npm test"
+        ]
+      },
+      "comment": "Completed runtime admission loop after approved status/retry changes; verified with focused suites and full npm test; Phalanx code untouched.",
+      "blocker_reason": null,
+      "assignee": "codex"
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-004",
+      "title": "Add verifier provider hook contract",
+      "parent_id": "stx-p2-000",
+      "goal": "Define and implement a narrow verifier/provider hook for advisory semantic checks while preserving Semantix as the decision authority.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:115-126",
+        "docs/semantix-control-plane-spec.md:673-680"
+      ],
+      "definition_of_done": [
+        "Verifier hook contract supports contradiction, entailment, groundedness, and similarity-style checks as advisory evidence.",
+        "Control-plane/runtime code treats verifier output as policy-bound evidence, not direct authority.",
+        "Tests cover verifier unavailable, verifier concern, and verifier block/downgrade behavior according to policy.",
+        "Provider adapter docs explain why provider-only execution remains outside this slice."
+      ],
+      "constraints": [
+        "Providers may advise; Semantix decides.",
+        "No provider-only execution path in this task."
+      ],
+      "expected_changes": [
+        "packages/core/src/runtime-registry.js",
+        "packages/core/src/contracts.js",
+        "docs/semantix-control-plane-spec.md",
+        "packages/core/tests/** or control-plane/tests/**"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Adding a new provider family or external network-backed default"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "verifier",
+          "provider-contract"
+        ],
+        "roadmap_section": "Milestone 4: Verifier And Provider Hooks",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:115-126",
+        "files_touched": [
+          "packages/core/src/contracts.js",
+          "packages/core/src/runtime-registry.js",
+          "packages/core/tests/verifier-policy.test.js",
+          "docs/semantix-control-plane-spec.md"
+        ],
+        "notes": "Provider output is advisory evidence only; Semantix policy selects pass/review_required/block.",
+        "verification": "TPF_LLM_TOOL=codex tpf node --test --test-force-exit control-plane/tests/audit-bundle.test.js control-plane/tests/control-plane.test.js packages/core/tests/verifier-policy.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane; TPF_LLM_TOOL=codex tpf git diff --check"
+      },
+      "comment": "Completed approved verifier provider hook slice on 2026-05-16. Added createVerifierInput/applyVerifierPolicy, verifier provider adapter validation, policy-owned verifier evidence tests, and docs that provider-only execution remains out of scope. Verification: node --test packages/core/tests/verifier-policy.test.js passed; combined control-plane/verifier set passed 24/24; control-plane workspace suite passed 32/32 with localhost approval; git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex-worker"
+    },
+    {
+      "dependencies": [
+        "stx-p2-003",
+        "stx-p2-004"
+      ],
+      "id": "stx-p2-005",
+      "title": "Build Constraint Engine proof matrix",
+      "parent_id": "stx-p2-000",
+      "goal": "Create deterministic fixtures that prove the Constraint Engine handles representative Semantix programs and failure modes.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:128-141",
+        "docs/plans/semantix-phase-2-plan.md:207-219"
+      ],
+      "definition_of_done": [
+        "Fixture matrix covers extraction, constrained summarization, semantic routing, safe file-change proposal, blocked path mutation, retryable schema failure, and non-retryable policy failure.",
+        "Concrete proof fixture covers a proposed file/API/shell effect rendered structurally, approved, invalidated by an artifact change, rejected as stale, re-approved from the fresh artifact, resumed, and executed.",
+        "The same stale-approval proof runs through the active Codex path and a mock or second runtime adapter path without requiring live external services.",
+        "Each fixture asserts contract shape, admission outcome, policy classification, freshness state, and audit evidence.",
+        "Core matrix passes without live services; any live smoke proof is additive and explicitly labeled."
+      ],
+      "constraints": [
+        "Do not require Phalanx or external services for deterministic proof coverage.",
+        "Negative tests must fail closed."
+      ],
+      "expected_changes": [
+        "packages/core/tests/**",
+        "packages/runtime-codex/tests/**",
+        "packages/stx/tests/**",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Adding live-service tests to the default test suite"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "proof",
+          "fixtures"
+        ],
+        "roadmap_section": "Milestone 5: Proof Matrix",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:128-141"
+      },
+      "comment": "Proof matrix now includes the required concrete stale-approval side-effect proof and second-adapter replay scenario.",
+      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-004.",
+      "related": [
+        "stx-p2-009"
+      ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-001"
+      ],
+      "id": "stx-p2-006",
+      "title": "Define audit bundle and signed artifact path",
+      "parent_id": "stx-p2-000",
+      "goal": "Specify the exportable evidence bundle for constraint admission and the path toward signed review artifacts.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:143-159",
+        "docs/Semantix Control Plane UI.md:676-697"
+      ],
+      "definition_of_done": [
+        "Audit bundle schema includes reviewed artifact identity, compiled constraint identity, candidate metadata, validation results, verifier results, retries, final outcome, and shown state effects.",
+        "Audit replay can enumerate the concrete proof sequence: proposed effect, structural render, first approval, artifact mutation, stale rejection, fresh re-approval, resume, and execution.",
+        "Replay evidence preserves reviewer-visible state-effect previews for file, API, and shell-style effects without relying on conversational transcript memory.",
+        "Signed review artifact path is documented with explicit out-of-scope cryptographic production hardening if needed.",
+        "Existing audit record flow remains compatible with v1 approval/freshness rules.",
+        "Tests or fixtures prove a sample bundle can be generated from deterministic admission evidence."
+      ],
+      "constraints": [
+        "Audit export can be a first schema and fixture; full export UI is not required.",
+        "Do not weaken existing durable review recording."
+      ],
+      "expected_changes": [
+        "packages/core/src/contracts.js",
+        "packages/core/src/control-plane-service.js",
+        "docs/Semantix Control Plane UI.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "docs/**",
+        "control-plane/**"
+      ],
+      "approval_required_for": [
+        "Introducing signing dependencies or external key management"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "audit",
+          "signed-artifacts"
+        ],
+        "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-159",
+        "phase2_proof_contract": "Audit replay must show exactly what was seen, approved, changed, rejected as stale, re-approved, resumed, and executed.",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "control-plane/tests/audit-bundle.test.js",
+          "docs/Semantix Control Plane UI.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "notes": "Signing remains an unsigned deterministic envelope with production key provisioning, rotation, KMS/HSM, timestamp authority, and certificate transparency explicitly out of scope.",
+        "verification": "TPF_LLM_TOOL=codex tpf node --test --test-force-exit control-plane/tests/audit-bundle.test.js control-plane/tests/control-plane.test.js packages/core/tests/verifier-policy.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane; TPF_LLM_TOOL=codex tpf git diff --check"
+      },
+      "comment": "Completed approved audit bundle/signing-path slice on 2026-05-16. Added getAuditBundle with reviewed artifact identity, compiled constraint identities, candidate metadata, admission/verifier/retry/final outcome evidence, shown previews, replay timeline, and unsigned detached-signature path. Verification: audit-bundle test passed; combined control-plane/verifier set passed 24/24; control-plane workspace suite passed 32/32 with localhost approval; git diff --check passed.",
+      "blocker_reason": null,
+      "assignee": "codex"
+    },
+    {
+      "dependencies": [
+        "stx-p2-011"
+      ],
+      "id": "stx-p2-007",
+      "title": "Implement provenance and replay foundation",
+      "parent_id": "stx-p2-000",
+      "goal": "Connect admitted semantic values to context, constraints, verifier evidence, artifact versions, and deterministic replay of admission decisions.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "l",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:143-170",
+        "docs/plans/semantix-phase-2-plan.md:196-205"
+      ],
+      "definition_of_done": [
+        "Admitted semantic values carry provenance links to context, constraints, verifier evidence, artifact identity, and admission attempt metadata.",
+        "Replay can reproduce deterministic admission or rejection from recorded candidate plus compiled constraints.",
+        "Replay shows the approval freshness chain for the concrete proof: artifact seen by reviewer, artifact that changed, rejected stale approval envelope, fresh approval envelope, and executed artifact.",
+        "Replay docs explicitly avoid promising token-level model reproduction.",
+        "Tests cover deterministic replay of at least one admitted candidate, one rejected candidate, and one stale approval rejection."
+      ],
+      "constraints": [
+        "Replay target is admission decision replay, not model token replay.",
+        "Do not store secrets or raw unbounded transcripts in provenance records."
+      ],
+      "expected_changes": [
+        "packages/core/src/contracts.js",
+        "packages/core/src/control-plane-service.js",
+        "packages/runtime-codex/src/strict-compiler.js",
+        "packages/**/tests/**",
+        "docs/**"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "approval_required_for": [
+        "Persisting new classes of raw model output or context payloads"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "provenance",
+          "replay"
+        ],
+        "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-170",
+        "phase2_proof_replay": "Replay must expose exactly what was seen, approved, changed, and executed for the stale-approval proof."
+      },
+      "comment": "Replay/provenance now explicitly owns deterministic replay of stale approval rejection and fresh re-approval evidence.",
+      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-006.",
+      "related": [
+        "stx-p2-009"
+      ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-005",
+        "stx-p2-007",
+        "stx-p2-009",
+        "stx-p2-010",
+        "stx-p2-011",
+        "stx-p2-012"
+      ],
+      "id": "stx-p2-008",
+      "title": "Run Phase 2 readiness review",
+      "parent_id": "stx-p2-000",
+      "goal": "Review Phase 2 exit criteria against implementation evidence and decide whether runtime/provider expansion belongs in the next phase.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "s",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:207-219",
+        "docs/semantix-control-plane-spec.md:673-680"
+      ],
+      "definition_of_done": [
+        "Every Phase 2 exit criterion is mapped to tests, docs, or explicit deferred work.",
+        "Concrete stale-approval side-effect proof passes through Codex and a mock or second runtime adapter, with audit replay evidence attached.",
+        "Full repo tests pass or any skipped live-service checks are explicitly classified as additive smoke coverage.",
+        "Tracker status explains whether Phase 2 is closed, split, or still blocked.",
+        "A next-phase recommendation is recorded for runtime/provider expansion."
+      ],
+      "constraints": [
+        "Do not expand into multi-runtime execution until Constraint Engine evidence is complete.",
+        "Deferred work must be explicit and non-blocking."
+      ],
+      "expected_changes": [
+        "docs/plans/semantix-phase-2-readiness.md",
+        "docs/plans/semantix-phase-2-plan.md",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "allowed_paths": [
+        "docs/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Declaring Phase 2 closed",
+        "Opening provider-only or multi-runtime execution as the next phase"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "readiness",
+          "next-phase"
+        ],
+        "roadmap_section": "Exit Criteria",
+        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:207-219"
+      },
+      "comment": "Final Phase 2 review waits for the concrete stale-approval/second-adapter proof evidence in addition to proof matrix and replay/provenance evidence.",
+      "blocker_reason": "Waiting for stx-p2-005 and stx-p2-007."
+    },
+    {
+      "dependencies": [
+        "stx-p2-007",
+        "stx-p2-010"
+      ],
+      "id": "stx-p2-009",
+      "title": "Prove stale side-effect approval across adapters",
+      "goal": "Build the concrete Phase 2 proof: a proposed side effect is rendered structurally, approved, invalidated by artifact drift, rejected as stale, re-approved from fresh state, executed, and replayed through Codex and a mock or second runtime adapter.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "parent_id": "stx-p2-000",
+      "effort": "m",
+      "related": [
+        "stx-p2-005",
+        "stx-p2-006",
+        "stx-p2-007"
+      ],
+      "comment": "This is the concrete proof requested for Phase 2; it should remain deterministic first, with live runtime coverage treated as additive.",
+      "references": [
+        "semantix-codex-poc-v2.md:301-335",
+        "docs/plans/semantix-phase-2-plan.md:143-170",
+        "docs/plans/semantix-phase-2-plan.md:207-219"
+      ],
+      "definition_of_done": [
+        "Codex/runtime candidate proposes at least one file, API, or shell-style side effect as structured data, not prose-only text.",
+        "Semantix renders the proposed effect structurally with artifact identity, graph version, node revision, state-effect preview, policy state, reversibility, and approval gate identity.",
+        "Reviewer approval binds to the rendered artifact identity and is accepted only while fresh.",
+        "The underlying artifact changes before execution and the old approval envelope is rejected as stale server-side.",
+        "Reviewer re-approves the fresh artifact and execution resumes from the approved checkpoint.",
+        "Audit replay shows exactly what was seen, approved, changed, rejected as stale, freshly approved, resumed, and executed.",
+        "The same flow passes through the active Codex adapter path and through a mock or second runtime adapter path.",
+        "Tests prove no side effect executes before fresh approval."
+      ],
+      "constraints": [
+        "No side effects before fresh approval.",
+        "Do not use a conversational approval gesture as authority; bind approval to artifactHash, planVersion, graphVersion, and node revision.",
+        "The mock or second adapter path must exercise the runtime adapter boundary, not bypass it through test-only direct mutation.",
+        "Live-service proof is optional and must be explicitly separated from deterministic CI coverage."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "packages/core/src/contracts.js",
+        "packages/core/src/runtime-registry.js",
+        "packages/runtime-codex/src/**",
+        "control-plane/tests/**",
+        "packages/**/tests/**",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/**",
+        "control-plane/**",
+        "docs/**",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [
+        "Changing public approval or freshness semantics",
+        "Adding live-service tests to the default test suite",
+        "Introducing a non-mock second runtime adapter as a default dependency"
+      ]
+    },
+    {
+      "dependencies": [
+        "stx-p2-007"
+      ],
+      "id": "stx-p2-010",
+      "title": "Add audit replay drift sentinels",
+      "goal": "Build deterministic fixtures that tell us when replay no longer reproduces the same admission, freshness, approval, and state-effect decisions from the same recorded audit bundle.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:272-289",
+        "docs/Semantix Control Plane UI.md:676-716"
+      ],
+      "definition_of_done": [
+        "Golden audit bundles replay to the same final policy state, artifact identity, state-effect preview fidelity, and approval timeline on repeated runs.",
+        "A fixture intentionally mutating artifact hash, graph version, node revision, preview content, or constraint identity fails with a named drift reason.",
+        "The drift report distinguishes expected version migration from unexpected replay drift.",
+        "Tests run without live services and fail closed when replay evidence is missing or ambiguous."
+      ],
+      "constraints": [
+        "No live provider calls in the default drift sentinel suite.",
+        "Do not persist additional raw model output or context payloads for this task."
+      ],
+      "expected_changes": [
+        "control-plane/tests/**",
+        "packages/core/src/control-plane-service.js",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "control-plane/**",
+        "packages/core/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "drift",
+          "audit-replay"
+        ],
+        "notes": "Detects replay drift by comparing deterministic bundle-derived decisions against stable golden fixtures."
+      }
+    },
+    {
+      "dependencies": [
+        "stx-p2-006"
+      ],
+      "id": "stx-p2-011",
+      "title": "Define audit payload redaction and size guardrails",
+      "goal": "Set the retention, redaction, and size-budget policy for audit bundles before provenance/replay starts persisting broader model or context evidence.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "docs/plans/semantix-phase-2-plan.md:272-289",
+        "docs/Semantix Control Plane UI.md:676-716"
+      ],
+      "definition_of_done": [
+        "Audit bundle fields are classified as required, hash-only, redacted, optional, or disallowed for default persistence.",
+        "Bundle generation emits deterministic size metadata and redaction reasons for preview content, verifier evidence, context, and admitted output references.",
+        "Tests prove oversized or disallowed payloads fail closed or redact deterministically before export.",
+        "Docs explain what evidence can be replayed from hashes and what requires explicit operator-approved retention."
+      ],
+      "constraints": [
+        "Do not add new default persistence of raw model output or raw context payloads in this task.",
+        "Prefer hashes, references, and redacted fixture payloads over raw content when replay does not require content."
+      ],
+      "expected_changes": [
+        "packages/core/src/control-plane-service.js",
+        "control-plane/tests/**",
+        "docs/Semantix Control Plane UI.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "control-plane/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "redaction",
+          "audit-bundle"
+        ],
+        "notes": "Default audit export strips raw preview bodies, verifier/provider payloads, semantic context, admitted output, and model-derived summaries; replay binds through deterministic hashes and explicit retention policy metadata.",
+        "files_touched": [
+          "packages/core/src/control-plane-service.js",
+          "control-plane/tests/audit-bundle.test.js",
+          "docs/Semantix Control Plane UI.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "verification": "TPF_LLM_TOOL=codex tpf node --test control-plane/tests/audit-bundle.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane (rerun with localhost approval) passed 33/33; TPF_LLM_TOOL=codex tpf git diff --check passed."
+      },
+      "assignee": "codex",
+      "blocker_reason": null,
+      "comment": "Completed audit redaction/size guardrails. Added payload classifications, hash-only refs, redaction reasons, deterministic size metadata, disallowed raw-payload fail-closed scan, audit bundle tests, and docs. Verification: audit-bundle focused tests passed; control-plane workspace tests passed 33/33 with localhost approval; git diff --check passed.",
+      "outcome": "partial_slice_landed"
+    },
+    {
+      "dependencies": [
+        "stx-p2-004"
+      ],
+      "id": "stx-p2-012",
+      "title": "Calibrate verifier drift guardrails",
+      "goal": "Define how Semantix detects unexpected verifier behavior changes without letting provider scores become direct authority.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "docs/semantix-control-plane-spec.md:495-560",
+        "docs/plans/semantix-phase-2-plan.md:272-289"
+      ],
+      "definition_of_done": [
+        "A deterministic verifier fixture corpus records check kind, threshold, comparator, provider result, Semantix policy decision, and expected risk flags.",
+        "Tests fail when the same verifier evidence produces a different Semantix policy decision without an explicit fixture migration.",
+        "Docs define drift classes for provider-output drift, policy-threshold drift, missing-evidence drift, and expected migration drift.",
+        "Live verifier/provider sampling remains opt-in and cannot run in the default test suite."
+      ],
+      "constraints": [
+        "Provider output remains advisory evidence only.",
+        "No live provider calls in default tests.",
+        "Do not change runtime/provider defaults while calibrating drift guardrails."
+      ],
+      "expected_changes": [
+        "packages/core/tests/**",
+        "packages/core/src/contracts.js",
+        "docs/semantix-control-plane-spec.md",
+        "docs/plans/semantix-phase-2-plan.md"
+      ],
+      "allowed_paths": [
+        "packages/core/**",
+        "docs/**"
+      ],
+      "context": {
+        "tags": [
+          "phase-2",
+          "drift",
+          "verifier"
+        ],
+        "notes": "Fixture corpus records check kind, threshold, comparator, provider result, Semantix policy decision, expected risk flags, and migration metadata. Provider output remains advisory; live provider sampling is not in default tests.",
+        "files_touched": [
+          "packages/core/tests/verifier-policy.test.js",
+          "packages/core/tests/fixtures/verifier-drift-corpus.json",
+          "docs/semantix-control-plane-spec.md",
+          "docs/plans/semantix-phase-2-plan.md"
+        ],
+        "verification": "TPF_LLM_TOOL=codex tpf node --test packages/core/tests/verifier-policy.test.js passed 11/11; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/control-plane (rerun with localhost approval) passed 33/33; TPF_LLM_TOOL=codex tpf git diff --check passed."
+      },
+      "assignee": "codex",
+      "blocker_reason": null,
+      "comment": "Completed verifier drift calibration. Added deterministic verifier drift corpus, snapshot tests for Semantix policy decisions, and docs defining drift classes and opt-in live sampling boundary. Verification: verifier-policy tests passed 11/11; control-plane workspace tests passed 33/33; git diff --check passed.",
+      "outcome": "partial_slice_landed"
+    }
+  ]
+}

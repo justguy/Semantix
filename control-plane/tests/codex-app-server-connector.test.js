@@ -82,6 +82,87 @@ function createFakeSpawnHarness() {
         );
       }
 
+      if (message.method === "turn/interrupt") {
+        child.stdout.write(
+          `${JSON.stringify({
+            id: message.id,
+            result: {
+              turn: {
+                id: message.params.turnId,
+                status: "interrupted",
+              },
+            },
+          })}\n`,
+        );
+      }
+
+      if (message.method === "thread/resume") {
+        child.stdout.write(
+          `${JSON.stringify({
+            id: message.id,
+            result: {
+              thread: {
+                id: message.params.threadId,
+                preview: "resumed",
+                status: { type: "idle" },
+                turns: [],
+              },
+            },
+          })}\n`,
+        );
+      }
+
+      if (message.method === "turn/steer") {
+        child.stdout.write(
+          `${JSON.stringify({
+            id: message.id,
+            result: {
+              turn: {
+                id: message.params.turnId,
+                status: "inProgress",
+              },
+            },
+          })}\n`,
+        );
+      }
+
+      if (message.method === "thread/read") {
+        child.stdout.write(
+          `${JSON.stringify({
+            id: message.id,
+            result: {
+              thread: {
+                id: message.params.threadId,
+                preview: "hello",
+                status: { type: "idle" },
+                turns: [
+                  {
+                    id: "runtime-turn-1",
+                    status: "interrupted",
+                  },
+                ],
+              },
+            },
+          })}\n`,
+        );
+      }
+
+      if (message.method === "thread/turns/list") {
+        child.stdout.write(
+          `${JSON.stringify({
+            id: message.id,
+            result: {
+              data: [
+                {
+                  id: "runtime-turn-1",
+                  status: "interrupted",
+                },
+              ],
+            },
+          })}\n`,
+        );
+      }
+
       callback?.();
     },
   };
@@ -113,6 +194,10 @@ test("starts the Codex app-server with config overrides and initializes JSON-RPC
   assert.ok(spawnCall.args.includes("app-server"));
   assert.ok(spawnCall.args.includes('approval_policy="never"'));
   assert.ok(spawnCall.args.includes('sandbox_mode="workspace-write"'));
+  const initializeCall = JSON.parse(harness.calls[1]);
+  assert.equal(initializeCall.method, "initialize");
+  assert.equal(initializeCall.params.capabilities.experimental, true);
+  assert.equal(initializeCall.params.capabilities.experimentalApi, true);
   assert.equal(health.healthy, true);
   assert.equal(health.transport, "app-server-jsonrpc");
 });
@@ -135,8 +220,69 @@ test("creates threads, submits turns, and emits app-server notifications", async
     threadId: session.runtimeSessionId,
     input: [{ type: "text", text: "hello", text_elements: [] }],
   });
+  const thread = await connector.readThread({
+    threadId: session.runtimeSessionId,
+  });
+  const turns = await connector.listTurns({
+    threadId: session.runtimeSessionId,
+  });
+  const resumed = await connector.resumeThread({
+    threadId: session.runtimeSessionId,
+  });
+  const steered = await connector.steerTurn({
+    threadId: session.runtimeSessionId,
+    turnId: turn.runtimeTurnId,
+    input: [{ type: "text", text: "steer", text_elements: [] }],
+  });
+  const interrupted = await connector.interruptTurn({
+    threadId: session.runtimeSessionId,
+    turnId: turn.runtimeTurnId,
+  });
 
   assert.equal(session.runtimeSessionId, "runtime-thread-1");
   assert.equal(turn.runtimeTurnId, "runtime-turn-1");
+  assert.equal(thread.id, "runtime-thread-1");
+  assert.equal(turns[0].id, "runtime-turn-1");
+  assert.equal(resumed.runtimeSessionId, "runtime-thread-1");
+  assert.equal(steered.runtimeTurnId, "runtime-turn-1");
+  assert.equal(interrupted.turn.status, "interrupted");
   assert.ok(notifications.includes("thread/started"));
+
+  const requests = harness.calls.slice(1).map((call) => JSON.parse(call));
+  assert.deepEqual(
+    requests.find((request) => request.method === "thread/read").params,
+    {
+      threadId: "runtime-thread-1",
+      includeTurns: true,
+    },
+  );
+  assert.deepEqual(
+    requests.find((request) => request.method === "thread/turns/list").params,
+    {
+      threadId: "runtime-thread-1",
+    },
+  );
+  assert.deepEqual(
+    requests.find((request) => request.method === "turn/interrupt").params,
+    {
+      threadId: "runtime-thread-1",
+      turnId: "runtime-turn-1",
+      expectedTurnId: "runtime-turn-1",
+    },
+  );
+  assert.deepEqual(
+    requests.find((request) => request.method === "thread/resume").params,
+    {
+      threadId: "runtime-thread-1",
+    },
+  );
+  assert.deepEqual(
+    requests.find((request) => request.method === "turn/steer").params,
+    {
+      threadId: "runtime-thread-1",
+      turnId: "runtime-turn-1",
+      expectedTurnId: "runtime-turn-1",
+      input: [{ type: "text", text: "steer", text_elements: [] }],
+    },
+  );
 });

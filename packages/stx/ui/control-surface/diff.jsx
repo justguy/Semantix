@@ -175,7 +175,7 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
         {sortedChanges.length === 0 ? (
           <div style={{ borderRadius: 12, border: `1px dashed ${t.borderStrong}`, background: t.panel, padding: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", color: t.textFaint, marginBottom: 8 }}>
-              Awaiting code changes
+              Awaiting admitted output
             </div>
             <div style={{ fontSize: 14, fontWeight: 700, color: t.text, marginBottom: 6 }}>{executionSummary.title}</div>
             <div style={{ fontSize: 12.5, color: t.textDim, lineHeight: 1.5, marginBottom: executionSummary.items.length > 0 ? 12 : 0 }}>
@@ -251,6 +251,11 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
                 {freshDecision && entry?.decision === "approve" && <Pill t={t} risk="green" strong>approved</Pill>}
                 {freshDecision && entry?.decision === "block" && <Pill t={t} risk="red" strong>blocked</Pill>}
                 {freshDecision && entry?.decision === "changes" && <Pill t={t} risk="orange" strong>changes requested</Pill>}
+                {change.previewFidelity === "metadata_only" ? (
+                  <Pill t={t} risk="orange">metadata-only preview</Pill>
+                ) : (
+                  <Pill t={t} risk="green">{change.previewSourceLabel || "runtime preview"}</Pill>
+                )}
                 {!isFreshView && <Pill t={t} risk="orange">stale view</Pill>}
               </div>
 
@@ -306,7 +311,7 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
                       )}
                       {affectedScope.length > 0 && (
                         <div style={{ marginBottom: primaryIssue?.evidence?.length ? 10 : 0 }}>
-                          <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Affected files / symbols</div>
+                          <div style={{ fontSize: 11.5, color: t.textDim, marginBottom: 6 }}>Affected scope</div>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                             {affectedScope.map((item) => (
                               <span key={item.key || item.label} style={{ fontSize: 11.5, padding: "4px 8px", borderRadius: 8, background: t.panelAlt, color: t.text, border: `1px solid ${t.border}` }}>
@@ -329,6 +334,11 @@ function DiffPanel({ t, artifact, selectedNode, focusId, onFocusDiff, approvals,
                     </div>
                   )}
 
+                  {change.previewFidelity === "metadata_only" && (
+                    <div style={{ borderTop: `1px solid ${t.border}`, background: t.orangeSoft, color: t.text, padding: "8px 14px", fontSize: 12 }}>
+                      Metadata-only preview: no runtime diff body was recorded for this change.
+                    </div>
+                  )}
                   <div style={{ background: t.panelAlt, borderTop: `1px solid ${t.border}`, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, padding: "10px 0", overflowX: "auto", lineHeight: 1.55 }}>
                     {lines.map((line, index) => renderDiffLine(line, t, index))}
                   </div>

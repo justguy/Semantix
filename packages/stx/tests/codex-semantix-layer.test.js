@@ -113,7 +113,7 @@ function createContradictoryCtReviewInput() {
   };
 }
 
-async function createHarness(t, runner) {
+async function createHarness(t, runner, { classificationProvider } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), "semantix-codex-layer-"));
   const dataDir = join(rootDir, "data");
   const workspaceRoot = join(rootDir, "workspace");
@@ -129,7 +129,7 @@ async function createHarness(t, runner) {
   const application = createStxApplication({
     dataDir,
     workspaceRoot,
-    classificationProvider: async (input) => classifyCodexRequest(input),
+    classificationProvider: classificationProvider ?? (async (input) => classifyCodexRequest(input)),
     connectorOptions: {
       runner,
       cwd: workspaceRoot,
@@ -195,10 +195,13 @@ test("Codex request classification varies with semantic risk and prompt constrai
 
   assert.equal(simple.effort, "low");
   assert.equal(simple.riskLevel, "low");
+  assert.equal(simple.outputKind, "semantic_response");
   assert.equal(conflicted.effort, "medium");
   assert.equal(conflicted.riskLevel, "low");
+  assert.equal(conflicted.outputKind, "semantic_response");
   assert.equal(conflicted.signals.semanticContradictionSignals, 0);
   assert.equal(destructive.riskLevel, "high");
+  assert.equal(destructive.outputKind, "code_change");
   assert.equal(conflicted.confidenceScore < simple.confidenceScore, true);
   assert.equal(destructive.confidenceScore < simple.confidenceScore, true);
 });
@@ -210,21 +213,34 @@ test("Codex request classification can use a mini model provider", async () => {
     connector: {
       async execute(input) {
         calls.push(input);
+        const classification = {
+          complexity: "high",
+          effort: "high",
+          riskLevel: "medium",
+          outputKind: "code_change",
+          confidenceScore: 0.67,
+          reasons: ["The prompt requests multi-agent project execution."],
+          suggestedSteps: ["Fast classification", "Constraint validation"],
+          signals: {
+            effortScore: 7,
+            riskScore: 2,
+            requiresExecution: true,
+            requiresFileChanges: true,
+          },
+        };
         return {
           exitCode: 0,
-          stdout: JSON.stringify({
-            complexity: "high",
-            effort: "high",
-            riskLevel: "medium",
-            confidenceScore: 0.67,
-            reasons: ["The prompt requests multi-agent project execution."],
-            suggestedSteps: ["Fast classification", "Constraint validation"],
-            signals: {
-              effortScore: 7,
-              riskScore: 2,
-            },
-          }),
+          stdout: JSON.stringify({ type: "message", content: [{ type: "output_text", text: JSON.stringify(classification) }] }),
           stderr: "",
+          finalJsonObject: {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify(classification),
+              },
+            ],
+          },
         };
       },
     },
@@ -241,6 +257,7 @@ test("Codex request classification can use a mini model provider", async () => {
   assert.match(calls[0].input, /Semantix fast classifier/);
   assert.equal(classification.effort, "high");
   assert.equal(classification.riskLevel, "medium");
+  assert.equal(classification.outputKind, "code_change");
   assert.equal(classification.confidenceScore, 0.67);
   assert.equal(classification.signals.classifier, "llm");
   assert.equal(classification.signals.classifierModel, "gpt-5.3-codex-spark");
@@ -270,6 +287,141 @@ test("Codex request classification falls back when the mini model fails", async 
   assert.equal(classification.signals.classifier, "heuristic_fallback");
   assert.equal(classification.signals.classifierModel, "gpt-5.3-codex-spark");
   assert.match(classification.reasons[0], /Mini-model classification failed/);
+});
+
+test("Codex Semantix layer persists mini-model classification across flow reads", async (t) => {
+  const { application } = await createHarness(
+    t,
+    async () => {
+      throw new Error("semantic admission should not run in this test");
+    },
+    {
+      classificationProvider: async (input) => ({
+        ...classifyCodexRequest(input),
+        complexity: "high",
+        effort: "high",
+        riskLevel: "medium",
+        outputKind: "code_change",
+        confidenceScore: 0.64,
+        confidenceBand: "medium",
+        signals: {
+          ...classifyCodexRequest(input).signals,
+          classifier: "llm",
+          classifierModel: "gpt-5.3-codex-spark",
+          requiresExecution: true,
+          requiresFileChanges: true,
+        },
+        reasons: ["The mini model classified this as project work."],
+      }),
+    },
+  );
+
+  await application.codexLayer.start({
+    runId: "run-layer-classification-persisted",
+    actor: "test",
+    ...createTaskInput(),
+    autoExecuteSemanticAdmission: false,
+  });
+  const flow = await application.codexLayer.getFlow({
+    runId: "run-layer-classification-persisted",
+  });
+
+  assert.equal(flow.classification.effort, "high");
+  assert.equal(flow.classification.riskLevel, "medium");
+  assert.equal(flow.classification.outputKind, "code_change");
+  assert.equal(flow.classification.signals.classifier, "llm");
+  assert.equal(flow.classification.signals.classifierModel, "gpt-5.3-codex-spark");
+});
+
+test("Codex Semantix layer routes creative prompts to semantic output without file execution", async (t) => {
+  const responseText = "I tried to write a sad, not-funny joke, but the punchline got emotional support and left.";
+  const { application } = await createHarness(
+    t,
+    async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        summary: "Draft a sad joke response while preserving the prompt tension.",
+        response: responseText,
+        response_kind: "creative_text",
+        supporting_context: [
+          {
+            kind: "prompt",
+            value: "The user asked for a sad and not funny joke that will make them laugh.",
+          },
+        ],
+        ct_review_input: {
+          ...createCtReviewInput("The response addresses the creative prompt without proposing repo work."),
+          plan_steps: [
+            {
+              id: "s1",
+              description: "Identify the creative-output request.",
+              dependencies: [],
+              resources: [],
+            },
+            {
+              id: "s2",
+              description: "Return a user-visible semantic response without file execution.",
+              dependencies: ["s1"],
+              resources: [],
+            },
+          ],
+          assumptions: [
+            {
+              description: "A sad non-obvious joke can still be amusing without requiring repo state.",
+              confidence: 0.74,
+              falsification_condition: "False if the user required a repository modification rather than a response.",
+            },
+          ],
+          has_destructive_side_effects: false,
+        },
+      }),
+      stderr: "",
+    }),
+    {
+      classificationProvider: async (input) => ({
+        ...classifyCodexRequest(input),
+        complexity: "low",
+        effort: "low",
+        riskLevel: "low",
+        outputKind: "semantic_response",
+        confidenceScore: 0.91,
+        confidenceBand: "high",
+        signals: {
+          ...classifyCodexRequest(input).signals,
+          classifier: "llm",
+          classifierModel: "gpt-5.3-codex-spark",
+          requiresExecution: false,
+          requiresFileChanges: false,
+        },
+        reasons: ["The prompt asks for creative text, not repository work."],
+      }),
+    },
+  );
+
+  const flow = await application.codexLayer.start({
+    runId: "run-layer-semantic-response",
+    actor: "test",
+    primaryDirective: "tell me a sad and not funny joke that will make me laugh",
+    strictBoundaries: [
+      "Keep the backend authoritative for artifact freshness.",
+      "Require fresh approval before any execution step becomes real.",
+      "Do not exceed the user-stated scope.",
+    ],
+    successState: "Compile a fresh review artifact and wait for explicit approval before execution.",
+  });
+
+  assert.equal(flow.phase, "completed");
+  assert.equal(flow.classification.outputKind, "semantic_response");
+  assert.equal(flow.approval.required, false);
+  assert.equal(flow.result.completed, true);
+  assert.equal(flow.result.filesUpdated.length, 0);
+  assert.equal(flow.result.stateEffects.length, 0);
+  assert.equal(flow.result.outputs[0].response, responseText);
+  assert.equal(flow.advanced.graph.nodes.some((node) => node.nodeType === "deterministic_execution"), false);
+  assert.equal(flow.steps.some((step) => step.id === 10), false);
+  assert.equal(flow.steps.some((step) => step.id === 11), false);
+  assert.equal(flow.issues.some((issue) => /workspace_path|semantix\.host|file/i.test(issue.summary)), false);
+  assert.match(flow.input.successState, /semantic response/i);
 });
 
 test("Codex Semantix layer projects a blocked proposal into the demo-flow issue state", async (t) => {
@@ -409,30 +561,18 @@ test("Codex Semantix layer approves and resumes a safe proposal with one call", 
 });
 
 test("Codex Semantix layer projects CT-MCP contradictions into blocking issues", async (t) => {
-  const { application, workspaceRoot } = await createHarness(
+  const { application } = await createHarness(
     t,
     async () => ({
       exitCode: 0,
       stdout: JSON.stringify({
-        workspace_path: join(workspaceRoot, "routes", "auth.ts"),
-        summary: "Add email verification route with verifyToken().",
-        diff_preview: "+ const claims = verifyToken(token);\n",
-        references: [
-          {
-            kind: "function",
-            name: "verifyToken",
-            required: true,
-          },
-        ],
-        parameters: [],
+        summary: "Draft a response while preserving the contradiction.",
+        response: "I cannot honestly guarantee a not-funny joke will make you laugh.",
+        response_kind: "creative_text",
         supporting_context: [
           {
-            kind: "file",
-            value: "routes/auth.ts",
-          },
-          {
-            kind: "symbol",
-            value: "verifyToken",
+            kind: "prompt",
+            value: "The prompt asks for a not-funny joke that makes the user laugh.",
           },
         ],
         ct_review_input: createContradictoryCtReviewInput(),
@@ -456,6 +596,8 @@ test("Codex Semantix layer projects CT-MCP contradictions into blocking issues",
   assert.equal(flow.approval.ready, false);
   assert.equal(flow.issues[0].code, "ct_reasoning_contradiction");
   assert.equal(flow.issues[0].blocking, true);
+  assert.equal(flow.result.completed, false);
+  assert.equal(flow.result.filesUpdated.length, 0);
   assert.match(flow.issues[0].summary, /contradictory semantic constraints/);
   assert.equal(flow.recommendations[0].action, "regenerate_with_ct_review");
 });

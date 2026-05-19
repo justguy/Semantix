@@ -289,7 +289,7 @@ function getScenarioRecordByKey(key) {
   return window.SEMANTIX_SCENARIOS?.[key] || null;
 }
 
-const DEFAULT_SUCCESS_SUMMARY = "Compile a fresh review artifact and wait for explicit approval before execution.";
+const DEFAULT_SUCCESS_SUMMARY = "Compile a Semantix-reviewed output and require explicit approval before any real execution.";
 const DEFAULT_BOUNDARIES = [
   "Keep the backend authoritative for artifact freshness.",
   "Require fresh approval before any execution step becomes real.",
@@ -562,6 +562,60 @@ function resolvePreviewBody(previewCache, change) {
   );
 }
 
+function resolvePreviewMetadata(previewCache, change) {
+  const cached = change.previewRef ? previewCache?.[change.previewRef] : null;
+  if (cached) {
+    const source = cached.previewSource || cached.source || "state_effect_metadata";
+    return {
+      previewSource: source,
+      previewSourceLabel: cached.previewSourceLabel || cached.sourceLabel || previewSourceLabel(source),
+      previewFidelity: cached.previewFidelity || cached.fidelity || (source === "state_effect_metadata" ? "metadata_only" : "runtime_preview"),
+      previewIsSynthetic: cached.previewIsSynthetic ?? cached.contentIsSynthetic ?? source === "state_effect_metadata",
+    };
+  }
+
+  if (change.previewSource || change.previewFidelity) {
+    const source = change.previewSource || (change.previewFidelity === "metadata_only" ? "state_effect_metadata" : "runtime_preview");
+    return {
+      previewSource: source,
+      previewSourceLabel: change.previewSourceLabel || previewSourceLabel(source),
+      previewFidelity: change.previewFidelity || (source === "state_effect_metadata" ? "metadata_only" : "runtime_preview"),
+      previewIsSynthetic: change.previewIsSynthetic ?? source === "state_effect_metadata",
+    };
+  }
+
+  if (change.diff || change.diffPreview) {
+    return {
+      previewSource: "runtime_diff",
+      previewSourceLabel: previewSourceLabel("runtime_diff"),
+      previewFidelity: "runtime_diff",
+      previewIsSynthetic: false,
+    };
+  }
+
+  if (change.preview || change.content || change.body) {
+    return {
+      previewSource: "runtime_preview",
+      previewSourceLabel: previewSourceLabel("runtime_preview"),
+      previewFidelity: "runtime_preview",
+      previewIsSynthetic: false,
+    };
+  }
+
+  return {
+    previewSource: "state_effect_metadata",
+    previewSourceLabel: previewSourceLabel("state_effect_metadata"),
+    previewFidelity: "metadata_only",
+    previewIsSynthetic: true,
+  };
+}
+
+function previewSourceLabel(source) {
+  if (source === "runtime_diff") return "Runtime diff";
+  if (source === "runtime_preview") return "Runtime preview";
+  return "Metadata-only preview";
+}
+
 function getChangeTargetLabel(change, { maxFiles = 3 } = {}) {
   const files = getChangeAffectedFiles(change);
   if (files.length === 1) return files[0];
@@ -763,6 +817,7 @@ function normalizeProposedChange(artifact, change, previewCache = {}) {
   const evidence = Array.isArray(enrichedChange.evidence)
     ? enrichedChange.evidence.map((entry) => normalizeIssueEvidence(entry)).filter(Boolean)
     : [];
+  const previewMetadata = resolvePreviewMetadata(previewCache, enrichedChange);
 
   return {
     ...enrichedChange,
@@ -770,6 +825,7 @@ function normalizeProposedChange(artifact, change, previewCache = {}) {
     node: enrichedChange.node || nodeId,
     originatingNodeId: enrichedChange.originatingNodeId || nodeId,
     preview: resolvePreviewBody(previewCache, enrichedChange),
+    ...previewMetadata,
     issues,
     issueSummary:
       enrichedChange.issueSummary
@@ -1231,6 +1287,7 @@ function summarizeExecutionState(source) {
   const pausedNodes = nodes.filter((node) => node.executionStatus === "paused");
   const failedNodes = nodes.filter((node) => node.executionStatus === "failed");
   const admittedNodes = nodes.filter((node) => node.admittedOutput != null);
+  const semanticResponseNodes = admittedNodes.filter((node) => typeof node.admittedOutput?.response === "string");
   const semanticAdmissionNode = runningNodes.find((node) => node.nodeType === "semantic_generation");
   const semanticAdmissionElapsedMs = semanticAdmissionNode && artifact?.generatedAt
     ? Date.now() - artifact.generatedAt
@@ -1262,10 +1319,10 @@ function summarizeExecutionState(source) {
   if (displayableChanges.length > 0) {
     const affectedFileCount = countAffectedFiles(displayableChanges);
     return {
-      title: "Admitted code changes ready",
+      title: "Admitted changes ready",
       body: affectedFileCount > 0
-        ? `${displayableChanges.length} admitted code change${displayableChanges.length === 1 ? "" : "s"} across ${affectedFileCount} file${affectedFileCount === 1 ? "" : "s"} are attached to this artifact.`
-        : `${displayableChanges.length} admitted code change${displayableChanges.length === 1 ? "" : "s"} are attached to this artifact.`,
+        ? `${displayableChanges.length} admitted change${displayableChanges.length === 1 ? "" : "s"} across ${affectedFileCount} file${affectedFileCount === 1 ? "" : "s"} are attached to this artifact.`
+        : `${displayableChanges.length} admitted change${displayableChanges.length === 1 ? "" : "s"} are attached to this artifact.`,
       items,
       latestCheckpoint,
       displayableCount: displayableChanges.length,
@@ -1273,10 +1330,21 @@ function summarizeExecutionState(source) {
     };
   }
 
+  if (semanticResponseNodes.length > 0) {
+    return {
+      title: "Semantic response admitted",
+      body: `${semanticResponseNodes.length} semantic response${semanticResponseNodes.length === 1 ? "" : "s"} are attached to this artifact.`,
+      items,
+      latestCheckpoint,
+      displayableCount: 0,
+      advisoryCount: advisoryChanges.length,
+    };
+  }
+
   if (failedNodes.length > 0 || artifact?.plan?.status === "failed") {
     return {
       title: "Semantic proposal failed",
-      body: failedNodes[0]?.outputSummary || "The runtime failed before Semantix could admit a strict code-change proposal.",
+      body: failedNodes[0]?.outputSummary || "The runtime failed before Semantix could admit strict semantic output.",
       items,
       latestCheckpoint,
       displayableCount: 0,
@@ -1291,7 +1359,7 @@ function summarizeExecutionState(source) {
       : "";
     return {
       title: "Compiling semantic proposal",
-      body: `Semantix is still waiting for semantic admission to produce a strict code-change proposal. Blocking issues cannot appear until that proposal is admitted and validated.${elapsedDetail}`,
+      body: `Semantix is still waiting for semantic admission to produce strict output. Blocking issues cannot appear until that output is admitted and validated.${elapsedDetail}`,
       items,
       latestCheckpoint,
       displayableCount: 0,
@@ -1302,7 +1370,7 @@ function summarizeExecutionState(source) {
   if (latestCheckpoint) {
     return {
       title: "Execution paused at checkpoint",
-      body: `No admitted code-change proposal is attached yet. Latest checkpoint: ${(latestCheckpoint.reason || "checkpoint_ready").replace(/_/g, " ")}.`,
+      body: `No admitted output is attached yet. Latest checkpoint: ${(latestCheckpoint.reason || "checkpoint_ready").replace(/_/g, " ")}.`,
       items,
       latestCheckpoint,
       displayableCount: 0,
@@ -1313,7 +1381,7 @@ function summarizeExecutionState(source) {
   if (admittedNodes.length > 0) {
     return {
       title: "Admitted output is ready",
-      body: `No rendered code-change diff is attached yet, but ${admittedNodes.length} node${admittedNodes.length === 1 ? "" : "s"} produced admitted output.`,
+      body: `${admittedNodes.length} node${admittedNodes.length === 1 ? "" : "s"} produced admitted output.`,
       items,
       latestCheckpoint,
       displayableCount: 0,
@@ -1324,7 +1392,7 @@ function summarizeExecutionState(source) {
   if (runningNodes.length > 0 || succeededNodes.length > 0 || pausedNodes.length > 0) {
     return {
       title: "Execution data available",
-      body: "This artifact has execution progress data but no admitted code-change proposal yet.",
+      body: "This artifact has execution progress data but no admitted output yet.",
       items,
       latestCheckpoint,
       displayableCount: 0,
@@ -1333,10 +1401,10 @@ function summarizeExecutionState(source) {
   }
 
   return {
-    title: "Awaiting admitted code changes",
+    title: "Awaiting admitted output",
     body: advisoryChanges.length > 0
-      ? "This artifact only carries advisory host previews right now. The review surface will expose code changes once the backend publishes admitted proposals."
-      : "No admitted code-change proposal is attached to this artifact yet.",
+      ? "This artifact only carries advisory host previews right now. The review surface will expose changes once the backend publishes admitted proposals."
+      : "No admitted semantic output is attached to this artifact yet.",
     items,
     latestCheckpoint,
     displayableCount: 0,
@@ -1386,7 +1454,7 @@ function formatFreshnessError(actionLabel, error) {
   const suffix = details.currentPlanVersion != null
     ? `Re-open v${details.currentPlanVersion} / g${details.currentGraphVersion ?? "?"}.`
     : "Re-open the latest artifact.";
-  return `${actionLabel} was rejected by the control plane because this review artifact is stale. ${suffix}`;
+  return `${actionLabel} was rejected by the control plane because this Semantix artifact is stale. ${suffix}`;
 }
 
 function getReviewArtifact(source) {

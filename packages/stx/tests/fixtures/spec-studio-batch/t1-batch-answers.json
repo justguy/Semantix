@@ -1,0 +1,18 @@
+{
+  "sessionId": "sess_batch_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_batch_001",
+    "body": {
+      "kind": "batch",
+      "answers": [
+        { "questionId": "Q-SYSTEM-TYPE", "kind": "choice", "picked": "OPT-NEW",      "label": "New system" },
+        { "questionId": "Q-USER-TYPE",   "kind": "choice", "picked": "OPT-END-USER", "label": "End user"   },
+        { "questionId": "Q-TIMELINE",    "kind": "choice", "picked": "OPT-Q2",       "label": "Q2 2026"    }
+      ]
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

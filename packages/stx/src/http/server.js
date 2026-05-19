@@ -4,6 +4,10 @@ import { extname, relative, resolve } from "node:path";
 import http from "node:http";
 import { URL } from "node:url";
 
+import { createSemantixHandshakeAdapter } from "../spec-studio-handshake.js";
+import { createSpecStudioJsonProbeEvaluator } from "../spec-studio-json-probe-evaluator.js";
+import { createLlmSpecStudioEvaluator } from "../spec-studio-llm-evaluator.js";
+
 const MAIN_UI_ROUTE = "/index.html";
 const LEGACY_UI_ROUTES = new Set([
   "/chat",
@@ -33,6 +37,63 @@ function json(response, statusCode, payload) {
     "content-type": "application/json; charset=utf-8",
   });
   response.end(`${JSON.stringify(payload)}\n`);
+}
+
+function compactRecord(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) =>
+      value !== undefined &&
+      value !== null &&
+      !(Array.isArray(value) && value.length === 0),
+    ),
+  );
+}
+
+function compactInspectorPayload(payload) {
+  if (!payload || typeof payload !== "object") return payload;
+  const {
+    hardValidationSchema,
+    pathPolicies,
+    admittedOutput,
+    ...node
+  } = payload.node ?? {};
+  const outputPreview = payload.outputPreview
+    ? compactRecord({
+        summary: payload.outputPreview.summary,
+        structuredData: payload.outputPreview.structuredData,
+        previewRef: payload.outputPreview.previewRef,
+        previewSource: payload.outputPreview.previewSource,
+        previewSourceLabel: payload.outputPreview.previewSourceLabel,
+        previewFidelity: payload.outputPreview.previewFidelity,
+        previewIsSynthetic: payload.outputPreview.previewIsSynthetic,
+        diffPreview: typeof payload.outputPreview.diffPreview === "string" ? payload.outputPreview.diffPreview : undefined,
+        stateEffects: payload.outputPreview.stateEffects,
+      })
+    : undefined;
+
+  return compactRecord({
+    ...payload,
+    node: compactRecord({
+      ...node,
+      admittedOutputSummary: admittedOutput
+        ? compactRecord({
+            summary: admittedOutput.summary,
+            responseKind: admittedOutput.response_kind,
+            hasResponse: typeof admittedOutput.response === "string" && admittedOutput.response.length > 0,
+            changeCount: Array.isArray(admittedOutput.changes) ? admittedOutput.changes.length : 0,
+            hasDiffPreview: typeof admittedOutput.diff_preview === "string" && admittedOutput.diff_preview.length > 0,
+          })
+        : undefined,
+    }),
+    outputPreview,
+    compiler: payload.compiler
+      ? compactRecord({
+          promptVersion: payload.compiler.promptVersion,
+          outputSchemaId: payload.compiler.outputSchemaId,
+        })
+      : undefined,
+  });
 }
 
 async function readJsonBody(request) {
@@ -79,6 +140,14 @@ function routeMatch(pathname, method) {
 
   if (method === "POST" && pathname === "/runs") {
     return { name: "runs.bootstrap" };
+  }
+
+  if (method === "POST" && pathname === "/spec-studio/evaluate") {
+    return { name: "spec-studio.evaluate" };
+  }
+
+  if (method === "GET" && pathname === "/spec-studio/mode") {
+    return { name: "spec-studio.mode" };
   }
 
   if (runs !== "runs" || !runId) {
@@ -135,6 +204,14 @@ function routeMatch(pathname, method) {
 
   if (method === "POST" && collection === "sessions" && item && child === "turns") {
     return { name: "session.turns.submit", runId, sessionId: item };
+  }
+
+  if (method === "POST" && collection === "sessions" && item && child === "steer") {
+    return { name: "session.turns.steer", runId, sessionId: item };
+  }
+
+  if (method === "POST" && collection === "sessions" && item && child === "resume") {
+    return { name: "session.resume", runId, sessionId: item };
   }
 
   if (method === "POST" && collection === "sessions" && item && child === "interrupt") {
@@ -305,9 +382,23 @@ function handleError(response, error) {
   });
 }
 
-export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd }) {
-  if (!service) {
-    throw new Error("createControlPlaneServer requires a ControlPlaneService instance.");
+export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd, specStudioAdapter, connector } = {}) {
+  let adapter = specStudioAdapter;
+  if (!adapter) {
+    const llmRequested = process.env.SPEC_STUDIO_EVALUATOR === "llm";
+    if (llmRequested && !connector) {
+      adapter = createSemantixHandshakeAdapter({
+        unavailable: true,
+        unavailableReason:
+          "SPEC_STUDIO_EVALUATOR=llm was requested, but no LLM connector is configured.",
+      });
+      adapter.evaluatorMode = "unavailable";
+    } else {
+      const evaluator = llmRequested
+        ? createLlmSpecStudioEvaluator({ connector })
+        : createSpecStudioJsonProbeEvaluator();
+      adapter = createSemantixHandshakeAdapter({ evaluator });
+    }
   }
 
   return http.createServer(async (request, response) => {
@@ -377,6 +468,29 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         });
 
         return undefined;
+      }
+
+      if (match.name === "spec-studio.mode") {
+        const evaluatorMode = adapter.evaluatorMode ?? adapter.evaluate?.evaluatorMode ?? "probe";
+        return json(response, 200, {
+          evaluatorMode,
+          ready: evaluatorMode === "llm",
+        });
+      }
+
+      if (match.name === "spec-studio.evaluate") {
+        let body;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          return json(response, 400, {
+            error: "VALIDATION_ERROR",
+            message: "Request body is not valid JSON.",
+            details: [],
+          });
+        }
+        const result = await adapter.evaluate(body);
+        return json(response, 200, result);
       }
 
       const body =
@@ -555,6 +669,30 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         );
       }
 
+      if (match.name === "session.turns.steer") {
+        return json(
+          response,
+          200,
+          await service.steerSessionTurn({
+            runId: match.runId,
+            sessionId: match.sessionId,
+            ...body,
+          }),
+        );
+      }
+
+      if (match.name === "session.resume") {
+        return json(
+          response,
+          200,
+          await service.resumeSession({
+            runId: match.runId,
+            sessionId: match.sessionId,
+            ...body,
+          }),
+        );
+      }
+
       if (match.name === "session.interrupt") {
         return json(
           response,
@@ -571,10 +709,12 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         return json(
           response,
           200,
-          await service.getNodeInspectorPayload({
-            runId: match.runId,
-            nodeId: match.nodeId,
-          }),
+          compactInspectorPayload(
+            await service.getNodeInspectorPayload({
+              runId: match.runId,
+              nodeId: match.nodeId,
+            }),
+          ),
         );
       }
 

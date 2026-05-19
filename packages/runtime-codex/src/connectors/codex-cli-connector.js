@@ -39,6 +39,7 @@ async function defaultRunner({
   cwd,
   env,
   signal,
+  abortGraceMs = Number(process.env.SEMANTIX_CODEX_ABORT_GRACE_MS ?? 5000),
   onStdoutLine,
   onStderrLine,
   onJsonMessage,
@@ -54,6 +55,8 @@ async function defaultRunner({
     let stderr = "";
     let stdoutBuffer = "";
     let stderrBuffer = "";
+    let abortKillTimer = null;
+    let closed = false;
 
     const flushLines = (buffer, emitter) => {
       const parts = buffer.split(/\r?\n/);
@@ -93,7 +96,15 @@ async function defaultRunner({
     });
 
     const abortHandler = () => {
+      if (closed) return;
       child.kill("SIGTERM");
+      const graceMs = Number.isFinite(abortGraceMs) && abortGraceMs >= 0 ? abortGraceMs : 5000;
+      abortKillTimer = setTimeout(() => {
+        if (!closed) {
+          child.kill("SIGKILL");
+        }
+      }, graceMs);
+      abortKillTimer.unref?.();
     };
 
     if (signal) {
@@ -106,8 +117,12 @@ async function defaultRunner({
 
     child.on("error", reject);
     child.on("close", (exitCode) => {
+      closed = true;
       if (signal) {
         signal.removeEventListener?.("abort", abortHandler);
+      }
+      if (abortKillTimer) {
+        clearTimeout(abortKillTimer);
       }
 
       if (stdoutBuffer) {
@@ -253,6 +268,7 @@ export class CodexCliConnector {
     approvalPolicy,
     sandboxMode,
     rawOverrides,
+    abortGraceMs,
     onStdoutLine,
     onStderrLine,
     onJsonMessage,
@@ -277,6 +293,7 @@ export class CodexCliConnector {
       }),
       ...(context ?? {}),
       signal,
+      abortGraceMs,
       onStdoutLine,
       onStderrLine,
       onJsonMessage: (message) => {

@@ -270,6 +270,7 @@ export function createStxApplication({
     codexLayer,
     uiDir,
     defaultRunCwd: effectiveWorkspaceRoot,
+    connector,
   });
 
   return {

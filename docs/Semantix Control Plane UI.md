@@ -694,6 +694,51 @@ For each review event, the backend should persist a durable record containing:
 
 The export interface can be deferred to v2. The recording cannot.
 
+The v1 audit bundle exported by the backend is a deterministic evidence envelope, not a UI-only
+transcript. It includes:
+
+- reviewed artifact identity and freshness metadata
+- compiled constraint identities and stable hashes
+- semantic candidate metadata and runtime binding
+- validation results, verifier evidence references, retry attempts, and final outcome references
+- state effects shown to the reviewer, including preview source, fidelity, synthetic-preview
+  markers, preview content hash, and preview content size
+- persisted review event identities and replay timeline entries for initial approval,
+  intervention, stale rejection, fresh re-approval, resume, and completion
+- payload policy metadata describing required, optional, hash-only, redacted, and disallowed
+  fields
+- deterministic size metadata for preview content, verifier evidence, semantic frame context,
+  admitted output, and redacted review-event details
+- unsigned signing metadata with a canonical payload hash and detached-signature path
+
+Default audit export does not persist raw model output, raw semantic frame context, raw verifier
+provider evidence, or raw preview content. Those payloads are represented by hashes, byte sizes,
+safe summaries where available, and explicit redaction reasons. Exact replay from the default
+bundle can prove that the same artifact, constraint identities, admitted output, preview content,
+context, verifier evidence, review events, and timeline were used by matching hashes. It cannot
+reconstruct the raw preview body, provider evidence, model output, or context text unless an
+operator has approved separate retention for those payloads.
+
+Default field classification:
+
+| Bundle field | Classification | Default export behavior |
+| --- | --- | --- |
+| `reviewedArtifact` | Required | Persist identity, versions, freshness, and artifact hash. |
+| `compiledConstraintIdentities` | Required | Persist compiled policy metadata and stable identity hashes. |
+| `candidateMetadata.runtimeBinding` | Optional | Persist runtime binding when present. |
+| `candidateMetadata.contextRef` | Hash-only | Persist semantic frame id, context hash, size, and redaction reason. |
+| `validationResults.attempts` | Required/redacted | Persist status, retry class, stdout hash, and hash-only evidence/message refs. |
+| `validationResults.admittedOutputRef` | Hash-only | Persist admitted output hash, size, and redaction reason. |
+| `verifierResults.configuredChecks` | Required | Persist configured verifier policy checks. |
+| `verifierResults.reportedResults` | Hash-only | Persist advisory status summary plus provider-result hash, size, and redaction reason. |
+| `shownStateEffects.preview` | Hash-only | Persist preview ref, media metadata, content hash, content size, and redaction reason. |
+| `reviewEvents.detailsRef` | Redacted | Persist event identity plus details hash and safe summary. |
+| Raw model output, raw context, raw verifier payload, raw preview body | Disallowed | Fail closed during default export if any raw payload field remains. |
+
+Signing is deliberately a path, not production key management. The first bundle records a stable
+hashable payload and signer identity reference. Key provisioning, rotation, KMS/HSM integration,
+timestamp authorities, and certificate transparency are later hardening work.
+
 ## 18. Technical Notes
 
 Suggested stack:

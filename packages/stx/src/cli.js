@@ -527,6 +527,11 @@ async function renderDiff(service, runId, artifact, requestedChangeId) {
         });
 
         lines.push(`  ${dim("mediaType")} ${preview.mediaType}`);
+        lines.push(`  ${dim("previewSource")} ${preview.sourceLabel ?? preview.source ?? "unknown"}`);
+        lines.push(`  ${dim("previewFidelity")} ${preview.fidelity ?? "unknown"}`);
+        if (preview.contentIsSynthetic) {
+          lines.push("  metadata-only preview; no runtime diff body was recorded");
+        }
         lines.push(
           indentBlock(preview.content || "Preview content is empty for this change.", 2),
         );

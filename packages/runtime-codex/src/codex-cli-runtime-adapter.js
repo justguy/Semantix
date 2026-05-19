@@ -214,6 +214,8 @@ export class CodexCliRuntimeAdapter {
       supportsStructuredOutput: true,
       supportsStreaming: true,
       supportsPauseResume: true,
+      supportsSessionResume: true,
+      supportsTurnSteering: true,
       supportsLocalExecution: true,
       supportsModelSelection: false,
       supportsEffectSimulation: false,
@@ -567,6 +569,65 @@ export class CodexCliRuntimeAdapter {
     return this.sessionConnector.listTurns({
       threadId: session.runtimeSessionId,
     });
+  }
+
+  async resumeSession({ runId, session, cwd, model, approvalPolicy, sandboxPolicy }) {
+    const trackedSession = this.resolveTrackedSession(session);
+    const result = await this.sessionConnector.resumeThread({
+      threadId: trackedSession.runtimeSessionId,
+      cwd,
+      model,
+      approvalPolicy,
+      sandboxPolicy,
+    });
+    const runtimeSessionId = result.runtimeSessionId ?? result.thread?.id ?? trackedSession.runtimeSessionId;
+
+    this.trackSession({
+      runId,
+      sessionId: session.sessionId,
+      runtimeSessionId,
+      nodeId: session.nodeId,
+    });
+
+    return {
+      runtimeSessionId,
+      thread: result.thread,
+    };
+  }
+
+  async steerSession({ runId, session, turn, input, cwd, model, approvalPolicy, sandboxPolicy }) {
+    const trackedSession = this.resolveTrackedSession(session);
+    const runtimeTurnId = turn?.runtimeTurnId ?? trackedSession.activeRuntimeTurnId;
+    if (!runtimeTurnId) {
+      throw new Error("Steering requires an active runtime turn.");
+    }
+
+    const normalizedInput = normalizeSessionInput(input ?? turn.input);
+    const result = await this.sessionConnector.steerTurn({
+      threadId: trackedSession.runtimeSessionId,
+      turnId: runtimeTurnId,
+      input: normalizedInput,
+      cwd,
+      model,
+      approvalPolicy,
+      sandboxPolicy,
+    });
+    const steeredRuntimeTurnId = result.runtimeTurnId ?? result.turn?.id ?? runtimeTurnId;
+
+    this.trackTurn({
+      runId,
+      sessionId: session.sessionId,
+      runtimeSessionId: trackedSession.runtimeSessionId,
+      turnId: turn.turnId,
+      runtimeTurnId: steeredRuntimeTurnId,
+      nodeId: session.nodeId,
+    });
+
+    return {
+      runtimeTurnId: steeredRuntimeTurnId,
+      turn: result.turn,
+      input: normalizedInput,
+    };
   }
 
   async interruptSession({ session, turn }) {

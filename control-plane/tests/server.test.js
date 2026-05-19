@@ -308,6 +308,48 @@ class FakeSessionConnector {
     this.completeTurn(threadId, turnId, "interrupted");
     return {};
   }
+
+  async resumeThread({ threadId }) {
+    const thread = this.threads.get(threadId);
+    thread.status = { type: "idle" };
+    queueMicrotask(() => {
+      this.emit("thread/status/changed", {
+        threadId,
+        status: thread.status,
+      });
+    });
+    return {
+      runtimeSessionId: threadId,
+      thread: {
+        ...thread,
+        turns: [...thread.turns],
+      },
+    };
+  }
+
+  async steerTurn({ threadId, turnId, input }) {
+    const thread = this.threads.get(threadId);
+    const turn = thread?.turns.find((candidate) => candidate.id === turnId);
+    turn.items = input.map((item, index) => ({
+      type: "userMessage",
+      id: `steered-${turnId}-${index + 1}`,
+      content:
+        item.type === "text"
+          ? [{ type: "text", text: item.text, text_elements: [] }]
+          : [],
+    }));
+    thread.preview = input.find((item) => item.type === "text")?.text ?? thread.preview;
+    queueMicrotask(() => {
+      this.emit("turn/started", {
+        threadId,
+        turn,
+      });
+    });
+    return {
+      runtimeTurnId: turnId,
+      turn,
+    };
+  }
 }
 
 async function createHarness(t, options = {}) {
@@ -683,7 +725,13 @@ test("resolves preview content JSON by previewRef over HTTP", async (t) => {
   assert.equal(preview.graphVersion, artifact.graphVersion);
   assert.equal(preview.artifactHash, artifact.artifactHash);
   assert.equal(preview.mediaType, "text/plain; charset=utf-8");
+  assert.equal(preview.source, "state_effect_metadata");
+  assert.equal(preview.sourceLabel, "Synthesized StateEffect metadata");
+  assert.equal(preview.fidelity, "metadata_only");
+  assert.equal(preview.contentIsSynthetic, true);
   assert.ok(preview.content.includes(`! previewRef ${effect.previewRef}`));
+  assert.ok(preview.content.includes("! previewSource state_effect_metadata"));
+  assert.ok(preview.content.includes("! previewFidelity metadata_only"));
   assert.ok(preview.content.includes(effect.summary));
 });
 
@@ -722,6 +770,17 @@ test("executes the Semantix v0.5 happy path over HTTP with stable proposed chang
   assert.ok(pausedEffect);
   assert.equal(pausedEffect.diffPreview, "@@ -1 +1 @@\n-old\n+new\n");
 
+  const previewResponse = await fetch(
+    `${baseUrl}/runs/run-http-v05-happy/previews?previewRef=${encodeURIComponent(pausedEffect.previewRef)}`,
+  );
+  assert.equal(previewResponse.status, 200);
+  const preview = await previewResponse.json();
+  assert.equal(preview.source, "runtime_diff");
+  assert.equal(preview.sourceLabel, "Runtime diff body");
+  assert.equal(preview.fidelity, "runtime_diff");
+  assert.equal(preview.contentIsSynthetic, false);
+  assert.equal(preview.mediaType, "text/x-diff; charset=utf-8");
+
   const inspectorResponse = await fetch(
     `${baseUrl}/runs/run-http-v05-happy/nodes/${encodeURIComponent(deterministicNode.id)}/inspector`,
   );
@@ -734,7 +793,13 @@ test("executes the Semantix v0.5 happy path over HTTP with stable proposed chang
   assert.equal(inspectorEffect.previewRef, "preview://host/1");
   assert.notEqual(inspectorEffect.target, DEFAULT_TARGET_SYMBOL);
   assert.equal(inspector.outputPreview.diffPreview, "@@ -1 +1 @@\n-old\n+new\n");
+  assert.equal(inspector.outputPreview.previewSource, "runtime_diff");
+  assert.equal(inspector.outputPreview.previewFidelity, "runtime_diff");
+  assert.equal(inspector.outputPreview.previewIsSynthetic, false);
   assert.equal(inspectorEffect.previewRef, "preview://host/1");
+  assert.equal(inspectorEffect.previewSource, "runtime_diff");
+  assert.equal(inspectorEffect.previewFidelity, "runtime_diff");
+  assert.equal(inspectorEffect.previewIsSynthetic, false);
 
   const approvalResponse = await postJson(`${baseUrl}/runs/run-http-v05-happy/approvals`, {
     actor: "reviewer",
@@ -994,6 +1059,121 @@ test("creates sessions, submits turns, and replays session-filtered events over 
 
   assert.equal(replayedSessionCreated.sessionId, session.sessionId);
   assert.equal(replayedTurnAccepted.sessionId, session.sessionId);
+});
+
+test("freshness-checks session steering and runtime thread resume over HTTP", async (t) => {
+  const { service } = await createHarness(t);
+  const server = createControlPlaneServer({
+    service,
+  });
+
+  t.after(async () => {
+    server.close();
+    await once(server, "close");
+  });
+
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  await service.createOrUpdateIntent({
+    runId: "run-session-steer-resume",
+    primaryDirective: "Support governed runtime session steering and resume.",
+    strictBoundaries: ["Semantix artifact state remains authoritative."],
+    successState: "Steer and resume calls are freshness checked.",
+    actor: "test",
+  });
+
+  const artifact = await service.compilePlan({
+    runId: "run-session-steer-resume",
+    actor: "test",
+  });
+  const executableNode = artifact.plan.nodes.find((node) => node.nodeType === "semantic_generation");
+  const freshEnvelope = createFreshnessEnvelope(artifact, executableNode);
+
+  const createResponse = await postJson(`${baseUrl}/runs/run-session-steer-resume/sessions`, {
+    actor: "operator",
+    ...freshEnvelope,
+  });
+  assert.equal(createResponse.status, 200);
+  const session = await createResponse.json();
+
+  const turnResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/turns`,
+    {
+      actor: "operator",
+      clientTurnId: "initial-turn",
+      input: "Initial runtime turn.",
+      ...freshEnvelope,
+    },
+  );
+  assert.equal(turnResponse.status, 200);
+  const startedTurn = await turnResponse.json();
+
+  const staleSteerResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/steer`,
+    {
+      actor: "operator",
+      turnId: startedTurn.turn.turnId,
+      runtimeTurnId: startedTurn.turn.runtimeTurnId,
+      input: "Stale steering request.",
+      ...freshEnvelope,
+      planVersion: artifact.planVersion + 1,
+    },
+  );
+  assert.equal(staleSteerResponse.status, 409);
+
+  const steerResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/steer`,
+    {
+      actor: "operator",
+      turnId: startedTurn.turn.turnId,
+      runtimeTurnId: startedTurn.turn.runtimeTurnId,
+      input: "Fresh steering request.",
+      ...freshEnvelope,
+    },
+  );
+  assert.equal(steerResponse.status, 200);
+  const steered = await steerResponse.json();
+  assert.equal(steered.turn.turnId, startedTurn.turn.turnId);
+  assert.equal(steered.turn.runtimeTurnId, startedTurn.turn.runtimeTurnId);
+  assert.equal(steered.turn.input[0].text, "Fresh steering request.");
+  assert.equal(steered.turn.resultSummary, "steered");
+
+  const interruptResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/interrupt`,
+    {
+      actor: "operator",
+    },
+  );
+  assert.equal(interruptResponse.status, 200);
+
+  const staleResumeResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/resume`,
+    {
+      actor: "operator",
+      ...freshEnvelope,
+      planVersion: artifact.planVersion + 1,
+    },
+  );
+  assert.equal(staleResumeResponse.status, 409);
+
+  const resumeResponse = await postJson(
+    `${baseUrl}/runs/run-session-steer-resume/sessions/${session.sessionId}/resume`,
+    {
+      actor: "operator",
+      ...freshEnvelope,
+    },
+  );
+  const resumeBody = await resumeResponse.json();
+  assert.equal(resumeResponse.status, 200, JSON.stringify(resumeBody));
+  const resumed = resumeBody;
+  assert.equal(resumed.session.status, "waiting_for_input");
+  assert.equal(resumed.session.runtimeSessionId, session.runtimeSessionId);
+  assert.equal(resumed.runtimeThread.id, session.runtimeSessionId);
+  await new Promise((resolve) => setTimeout(resolve, 20));
 });
 
 test("serves the bundled stx UI build and redirects legacy UI routes to /index.html", async (t) => {

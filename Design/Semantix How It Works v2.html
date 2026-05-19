@@ -1,8 +1,10 @@
-<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8">
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
 <title>Semantix — How It Works</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #faf8f4;
@@ -29,7 +31,7 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
   body {
-    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-family: 'Source Serif 4', Georgia, serif;
     font-size: 16.5px;
     line-height: 1.62;
     -webkit-font-smoothing: antialiased;
@@ -39,11 +41,11 @@
   /* --- Masthead --- */
   .masthead { border-bottom: 1px solid var(--rule); padding-bottom: 36px; margin-bottom: 64px; }
   .eyebrow {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700;
+    font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700;
     letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent);
   }
   h1 {
-    font-family: Georgia, 'Times New Roman', Times, serif; font-weight: 500;
+    font-family: 'Source Serif 4', serif; font-weight: 500;
     font-size: clamp(34px, 4.5vw, 52px); line-height: 1.08; letter-spacing: -0.02em;
     margin: 14px 0 20px; max-width: 18ch; text-wrap: balance;
   }
@@ -62,7 +64,7 @@
   }
   .hero-diagram .cell {
     padding: 20px 22px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Inter', sans-serif;
     position: relative;
   }
   .hero-diagram .cell + .cell { border-left: 1px solid var(--rule); }
@@ -81,7 +83,7 @@
     text-transform: uppercase; color: var(--ink-4); margin-bottom: 8px;
   }
   .hero-diagram .v {
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 13px; font-weight: 500;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500;
     color: var(--ink); margin-bottom: 6px;
   }
   .hero-diagram .d { font-size: 12.5px; color: var(--ink-3); line-height: 1.45; }
@@ -89,13 +91,13 @@
 
   /* --- Section heading --- */
   h2 {
-    font-family: Georgia, 'Times New Roman', Times, serif; font-weight: 500;
+    font-family: 'Source Serif 4', serif; font-weight: 500;
     font-size: 30px; line-height: 1.2; letter-spacing: -0.012em;
     margin: 96px 0 6px;
   }
   h2 .num {
     display: block;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 700;
+    font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
     margin-bottom: 10px;
   }
@@ -103,7 +105,7 @@
 
   p { margin: 0 0 16px; text-wrap: pretty; }
   p code, li code, td code {
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 0.86em;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.86em;
     background: var(--accent-soft); color: var(--accent);
     padding: 1px 6px; border-radius: 4px; font-weight: 500; white-space: nowrap;
   }
@@ -127,7 +129,7 @@
     border: none;
     cursor: pointer;
     text-align: left;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Inter', sans-serif;
     border-right: 1px solid var(--rule);
     transition: background .15s;
     position: relative;
@@ -156,18 +158,18 @@
   .follow-pane { padding: 28px 30px; }
   .follow-pane + .follow-pane { border-left: 1px solid var(--rule); background: #fdfbf7; }
   .pane-label {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 10.5px; font-weight: 700;
+    font-family: 'Inter', sans-serif; font-size: 10.5px; font-weight: 700;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-4);
     margin-bottom: 14px;
   }
-  .pane-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+  .pane-body { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
   .pane-body p { margin: 0 0 12px; }
   .pane-body p:last-child { margin-bottom: 0; }
   .pane-body strong { color: var(--ink); font-weight: 600; }
 
   /* Code block */
   .code {
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 12.5px; line-height: 1.7;
     background: var(--code-bg); color: var(--code-ink);
     border-radius: 8px; padding: 18px 20px;
@@ -187,7 +189,7 @@
     border: 1px solid var(--rule);
     border-radius: 8px;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 12.5px;
     background: #fbf8f2;
   }
@@ -214,14 +216,14 @@
   .rm-node.warn { border-color: rgba(184,121,31,.4); background: var(--warn-soft); }
   .rm-node.block { border-color: rgba(168,65,58,.4); background: var(--block-soft); }
   .rm-node .t { font-weight: 600; color: var(--ink); }
-  .rm-node .m { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+  .rm-node .m { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-4); margin-top: 2px; }
   .rm-kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; font-size: 12px; }
   .rm-kv dt { color: var(--ink-4); font-weight: 500; }
-  .rm-kv dd { color: var(--ink-2); margin: 0; font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11.5px; }
+  .rm-kv dd { color: var(--ink-2); margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
 
   /* Dispatch log */
   .log {
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.8;
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.8;
     background: var(--code-bg); color: var(--code-ink);
     border-radius: 8px; padding: 18px 20px; overflow-x: auto;
   }
@@ -239,7 +241,7 @@
     background: var(--paper);
     overflow: hidden;
   }
-  .layer { padding: 22px 20px; border-right: 1px solid var(--rule); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .layer { padding: 22px 20px; border-right: 1px solid var(--rule); font-family: 'Inter', sans-serif; }
   .layer:last-child { border-right: none; }
   .layer-num {
     font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
@@ -248,7 +250,7 @@
   .layer-name { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
   .layer-body { font-size: 13px; color: var(--ink-3); line-height: 1.55; margin-bottom: 14px; }
   .layer-artifact {
-    font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 11.5px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11.5px;
     padding: 6px 10px; background: var(--accent-soft); color: var(--accent);
     border-radius: 5px; font-weight: 500; display: inline-block;
   }
@@ -265,7 +267,7 @@
   .split-col { padding: 28px 32px; }
   .split-col + .split-col { border-left: 1px solid var(--rule); background: #fbf8f2; }
   .split-col h3 {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 700;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700;
     letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4);
     margin: 0 0 4px;
   }
@@ -276,12 +278,12 @@
     vertical-align: 2px;
   }
   .split-col:last-child h3 .tag { background: var(--warn-soft); color: var(--warn); }
-  .split-col .headline { font-family: Georgia, 'Times New Roman', Times, serif; font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin: 10px 0 16px; }
-  .split-col ul { margin: 0; padding-left: 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: var(--ink-2); }
+  .split-col .headline { font-family: 'Source Serif 4', serif; font-size: 22px; font-weight: 500; letter-spacing: -0.01em; margin: 10px 0 16px; }
+  .split-col ul { margin: 0; padding-left: 18px; font-family: 'Inter', sans-serif; font-size: 14px; color: var(--ink-2); }
   .split-col li { margin-bottom: 8px; line-height: 1.5; }
   .split-col .footnote {
     margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--rule);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12.5px; color: var(--ink-4); line-height: 1.5;
+    font-family: 'Inter', sans-serif; font-size: 12.5px; color: var(--ink-4); line-height: 1.5;
   }
 
   /* --- Kicker quote --- */
@@ -289,21 +291,21 @@
     margin-top: 72px; padding: 36px 40px;
     border-left: 3px solid var(--accent);
     background: var(--accent-soft);
-    font-family: Georgia, 'Times New Roman', Times, serif;
+    font-family: 'Source Serif 4', serif;
     font-size: 22px; line-height: 1.4; letter-spacing: -0.005em;
     color: var(--ink); font-style: italic; font-weight: 400;
     border-radius: 0 8px 8px 0;
   }
   .kicker strong { font-style: normal; font-weight: 600; color: var(--accent); }
   .kicker .attr {
-    display: block; margin-top: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: block; margin-top: 14px; font-family: 'Inter', sans-serif;
     font-size: 12px; font-style: normal; color: var(--ink-4);
     letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600;
   }
 
   footer {
     margin-top: 72px; padding-top: 28px; border-top: 1px solid var(--rule);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; color: var(--ink-4);
+    font-family: 'Inter', sans-serif; font-size: 12px; color: var(--ink-4);
     display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
   }
 
@@ -414,7 +416,7 @@
     </div>
 
     <!-- STEP 2 -->
-    <div class="follow-stage" data-step="2" hidden="">
+    <div class="follow-stage" data-step="2" hidden>
       <div class="follow-pane">
         <div class="pane-label">What the compiler emits</div>
 <div class="code"><span class="key">ExecutionNode</span> {
@@ -445,7 +447,7 @@
     </div>
 
     <!-- STEP 3 -->
-    <div class="follow-stage" data-step="3" hidden="">
+    <div class="follow-stage" data-step="3" hidden>
       <div class="follow-pane">
         <div class="pane-label">What the reviewer sees</div>
         <div class="review-mock">
@@ -464,7 +466,7 @@
             <div class="rm-col">
               <h5>Inspector · n4</h5>
               <dl class="rm-kv">
-                <dt>Purpose</dt><dd style="font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Generate GET /auth/verify handler</dd>
+                <dt>Purpose</dt><dd style="font-family:'Inter',sans-serif;">Generate GET /auth/verify handler</dd>
                 <dt>Context</dt><dd>routes.ts · auth_logic.ts</dd>
                 <dt>Hard</dt><dd>token_must_be_single_use</dd>
                 <dt>Hybrid</dt><dd>must_not_use_prod_smtp</dd>
@@ -492,7 +494,7 @@
     </div>
 
     <!-- STEP 4 -->
-    <div class="follow-stage" data-step="4" hidden="">
+    <div class="follow-stage" data-step="4" hidden>
       <div class="follow-pane">
         <div class="pane-label">Control plane → adapter → runtime</div>
 <div class="log"><span class="ts">14:22:07.118</span> <span class="lbl">[plan]</span>         approval granted · n4 · planVersion=7 · artifactHash=9cbf12a7
@@ -519,7 +521,7 @@
     </div>
 
     <!-- STEP 5 -->
-    <div class="follow-stage" data-step="5" hidden="">
+    <div class="follow-stage" data-step="5" hidden>
       <div class="follow-pane">
         <div class="pane-label">The effect, merged back into the artifact</div>
 <div class="code"><span class="key">StateEffect</span> {
@@ -671,5 +673,5 @@
     });
   })();
 </script>
-
-</body></html>
+</body>
+</html>

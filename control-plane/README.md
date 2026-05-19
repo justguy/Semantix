@@ -65,11 +65,20 @@ The runtime adapter now uses two replaceable Codex connector surfaces:
 
 Current local evidence from the installed CLI on this machine:
 
-- `codex exec --version` returns `codex-cli-exec 0.122.0`
+- `codex --version` returns `codex-cli 0.130.0`
+- `codex exec --version` returns `codex-cli-exec 0.130.0`
 - `codex exec -c approval_policy="never" -c sandbox_mode="workspace-write" --version` is accepted
 - `CODEX_HOME=/tmp/... codex exec --version` is honored and warns if the directory does not exist
 - `codex exec "ping"` without a writable Codex home fails on session creation under `~/.codex/sessions`
-- `codex app-server` accepts JSON-RPC `initialize`, `thread/start`, `thread/read`, `thread/turns/list`, `turn/start`, and `turn/interrupt`
+- `codex app-server` accepts JSON-RPC `initialize`, `thread/start`, `turn/start`,
+  `thread/read` without turns, and `turn/interrupt` with both `turnId` and `expectedTurnId`
+- `thread/turns/list` requires the client to advertise `experimentalApi`; empty threads still
+  report that turns are unavailable before the first materialized user message
+- `thread/read` with `includeTurns: true` has the same pre-materialization limitation
+- `turn/steer` accepts `expectedTurnId`; the control plane now routes steering through a
+  freshness-checked Semantix session operation
+- `thread/resume` is integrated only for paused Semantix sessions after control-plane freshness and
+  approval checks pass; checkpoint resume remains the authoritative workflow resume path
 - `codex -c approval_policy="never" -c sandbox_mode="workspace-write" app-server` returns thread settings showing `approvalPolicy: "never"` and `sandbox.type: "workspaceWrite"`
 
 `CodexCliConnector` behavior:
@@ -83,10 +92,14 @@ Current local evidence from the installed CLI on this machine:
 `CodexAppServerConnector` behavior:
 
 - spawns one long-lived `codex app-server` process and initializes it once
+- advertises the current `experimentalApi` capability during JSON-RPC initialize
 - multiplexes concurrent runtime sessions by Codex `threadId`
 - submits multi-turn input via `turn/start`
 - streams normalized notifications back into the control plane event bus
-- supports interrupting active turns via `turn/interrupt`
+- supports interrupting active turns via `turn/interrupt` using `turnId` and `expectedTurnId`
+- supports steering active turns via `turn/steer` using the tracked runtime turn id as
+  `expectedTurnId`
+- supports resuming paused runtime threads via `thread/resume` after Semantix state checks pass
 
 ## Multi-Turn Sessions
 
@@ -94,8 +107,12 @@ Interactive Codex sessions are now managed under the control plane instead of by
 
 - the reviewed `run` and `ReviewArtifact` remain the authoritative Semantix objects
 - runtime interaction is tracked as a durable session + turn layer under the run
-- session creation and turn submission are freshness-checked against the current artifact
-- stale turns are rejected server-side after interventions or other artifact changes
+- session creation, turn submission, turn steering, and paused-thread resume are
+  freshness-checked against the current artifact
+- stale turns, stale steering requests, and stale resume requests are rejected server-side after
+  interventions or other artifact changes
+- interrupted sessions remain Semantix-paused until a fresh resume request is accepted, even if the
+  runtime reports the underlying thread as idle
 - browser UI and `stx` consume the same session routes and the same normalized SSE stream
 
 Current HTTP routes for runtime sessions:
@@ -105,7 +122,9 @@ Current HTTP routes for runtime sessions:
 - `GET /runs/:runId/sessions/:sessionId`
 - `POST /runs/:runId/sessions/:sessionId/turns`
 - `GET /runs/:runId/sessions/:sessionId/turns`
+- `POST /runs/:runId/sessions/:sessionId/steer`
 - `POST /runs/:runId/sessions/:sessionId/interrupt`
+- `POST /runs/:runId/sessions/:sessionId/resume`
 - `GET /runs/:runId/events?after=<sequence>&sessionId=<sessionId>`
 
 Known gaps for the current multi-turn implementation are tracked in
@@ -149,6 +168,14 @@ Preview it locally:
 cd control-plane
 TPF_LLM_TOOL=codex tpf npm run preview:ui
 ```
+
+Current closeout evidence from 2026-05-12:
+
+- `npm run build:ui --workspace @semantix/stx` succeeds
+- `stx serve --host 127.0.0.1 --port 4555` binds successfully when run outside the
+  socket-restricted sandbox
+- the live host served `/`, `/health`, the `/chat` legacy redirect, a previewRef lookup, and the
+  SSE event route
 
 Routes after startup:
 

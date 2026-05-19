@@ -1,0 +1,16 @@
+{
+  "sessionId": "sess_batch_probe_001",
+  "trigger": "user_turn",
+  "userTurn": {
+    "id": "turn_batch_003",
+    "body": {
+      "kind": "choice",
+      "picked": "OPT-NEW-WITH-INTEGRATION",
+      "label": "New app that integrates with existing infrastructure",
+      "questionTurnId": "T-BATCH-Q3"
+    }
+  },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": []
+}

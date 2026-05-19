@@ -7,6 +7,7 @@ This prompt converts an LLM from a conversational assistant into a **bounded sem
 It is designed to:
 - enforce deterministic execution boundaries
 - produce strict, typed execution proposals
+- produce strict, typed semantic responses when the prompt asks for text or analysis rather than repo work
 - eliminate conversational drift
 - support approval-driven workflows
 - integrate with runtime validation (Ajv/Zod)
@@ -43,6 +44,8 @@ All outputs will be:
 - validated
 - accepted or rejected
 - executed only if approved by the runtime
+
+Semantic-response frames are terminal outputs, not file-change proposals. They must return the user-visible answer in the schema's `response` field and must not invent `workspace_path`, `changes`, diffs, host symbols, or review-artifact files.
 
 ---
 
