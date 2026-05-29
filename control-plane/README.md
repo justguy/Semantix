@@ -150,23 +150,34 @@ explicit loopback permission for the HTTP tests.
 
 ## Browser UI
 
-The browser control surface can now be staged and served from the same control-plane process.
-The build is intentionally dependency-free: it copies `../Design` and `../shared` into
-`control-plane/dist/ui`, then the HTTP server exposes those files on the same origin as the
-review APIs and SSE stream.
-
-Build the UI bundle:
+The browser control surface is built from `@semantix/stx` and served from the same
+control-plane process. From the repository root, the normal local development path is:
 
 ```bash
-cd control-plane
-TPF_LLM_TOOL=codex tpf npm run build:ui
+npm run dev
 ```
 
-Preview it locally:
+That command builds the UI bundle, then starts `node ./stx serve` on
+`127.0.0.1:4401` by default. Pass server options after `--`:
 
 ```bash
-cd control-plane
-TPF_LLM_TOOL=codex tpf npm run preview:ui
+npm run dev -- --host 127.0.0.1 --port 4555
+```
+
+The server runs directly from Node ESM sources, so there is no separate server
+compile step. The current bundled UI includes its React runtime locally and can
+run offline when dependencies are already installed.
+
+Build only the UI bundle:
+
+```bash
+npm run build:ui
+```
+
+Preview it locally through the workspace script:
+
+```bash
+npm run preview:ui
 ```
 
 Current closeout evidence from 2026-05-12:
@@ -184,6 +195,3 @@ Routes after startup:
 - `/canvas` -> design canvas sandbox
 - `/how-it-works` -> companion architecture page from language to governed execution
 - `/runs/:runId/*` -> control-plane JSON/SSE APIs
-
-The current UI still loads React, ReactDOM, and Babel from CDN at runtime, so the browser needs
-network access for those vendor assets even though the Semantix source files are served locally.
