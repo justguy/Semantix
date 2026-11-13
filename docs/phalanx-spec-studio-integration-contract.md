@@ -75,6 +75,7 @@ lightweight documentation-grill pattern into Semantix and Phalanx.
 | Hoplon-grounded facts | Supported as inputs | Phalanx/Hoplon provide evidence refs | Hoplon facts become `groundedFacts`; they do not become spec authority by themselves. |
 | Grounded facts separate from assumptions/recommendations | Supported | Schema validation should enforce this | `groundedFacts` hold evidence-backed facts only. Semantix interpretation belongs in assumptions, risks, findings, recommendations, or requirements. |
 | Turn log entry | Supported | Phalanx persists and renders chronology | Semantix returns one `turnLogEntry` per evaluation response. Phalanx appends entries to the session `turnLog` and renders them beside the question interface. |
+| Batched post-answer turns | Supported | Phalanx sends answered question refs | Semantix accepts `userTurn.body.kind = "batch"` with an `answers` array and applies those answers against the prior packet before re-evaluation. |
 | Retry/discrepancy diagnostics | Supported | Phalanx surfaces user-visible status | Semantix exposes corrective retry events and `turnLogEntry.diagnostics`, including `needs_user` without an answerable question. |
 | `readiness = ready` | Supported | Phalanx recomputes lock eligibility | Semantix can recommend ready; Phalanx remains the lock authority. |
 | `readiness = needs_user` | Supported | UI must prompt for input | Used for ambiguity, missing target surface, missing acceptance, unknown new-vs-update, or unresolved non-blocking decisions. |
@@ -92,9 +93,9 @@ lightweight documentation-grill pattern into Semantix and Phalanx.
    - findings
    - section coverage deltas
    - readiness
-4. User answers by selecting an option or entering free text.
-5. Phalanx appends the user turn and asks Semantix to re-evaluate the full current session state.
-6. Semantix returns updated findings, decisions, sections, coverage, and next turn.
+4. User answers by selecting an option, entering free text, or answering a batch of open questions.
+5. Phalanx appends the user turn and asks Semantix to re-evaluate the full current session state. For every non-initial turn, Phalanx must include the prior `currentPacket`; for batch answers it must include each answered question id as `questionRef` or `questionId`.
+6. Semantix applies the user turn to a stable baseline, calls the live evaluator, and returns updated findings, decisions, sections, coverage, and next turn.
 7. Phalanx appends `turnLogEntry` to the persisted session Turn log and renders it beside the question interface.
 8. Loop continues until Semantix reports readiness `ready`.
 9. User explicitly locks the spec.
@@ -646,7 +647,18 @@ export type SemantixEvaluateRequest = {
     body:
       | { kind: "text"; text: string }
       | { kind: "free"; text: string }
-      | { kind: "choice"; picked: string; label: string };
+      | { kind: "choice"; picked: string; label: string; questionTurnId?: string }
+      | { kind: "skip"; questionTurnId: string; reason?: string }
+      | { kind: "delegate"; questionTurnId: string; note?: string }
+      | { kind: "reconsider"; priorTurnId: string; reason?: string }
+      | {
+          kind: "batch";
+          answers: Array<
+            | { questionRef?: string; questionId?: string; kind?: "choice"; picked?: string; optId?: string; label?: string; decisionId?: string }
+            | { questionRef?: string; questionId?: string; kind?: "free" | "text"; text: string; decisionId?: string }
+            | { questionRef?: string; questionId?: string; kind: "skip" | "dismiss"; reason?: string; decisionId?: string }
+          >;
+        };
   };
   currentPacket?: SemantixAlignmentPacket;
   decisions: UserDecision[];
@@ -654,6 +666,66 @@ export type SemantixEvaluateRequest = {
   contextResponses: SemantixContextResponse[];
 };
 ```
+
+## Post-Answer and Batch Turn Expectations
+
+This section is load-bearing for the Phalanx live run path that posts operator answers back to Semantix after a batch of guided questions.
+
+Phalanx request requirements:
+
+- Use `trigger: "user_turn"` for post-answer evaluation.
+- Include the full prior `currentPacket` from the same session. Semantix is stateless and cannot preserve stable IDs, open questions, findings, or coverage from omitted state.
+- For a batch response, send `userTurn.body.kind: "batch"` and a non-empty `answers` array.
+- Each batch answer must identify the answered question with `questionRef` or `questionId`. The value should match an open question id from `currentPacket.openQuestions` or the active `currentPacket.nextTurn.body.questions[]`.
+- Choice answers may use `picked` or `optId`; free-text answers must include non-empty `text`; skipped answers must use `kind: "skip"` or `kind: "dismiss"`.
+- If Phalanx already minted canonical decision IDs for the user answers, include them either as `answer.decisionId` or in `decisions[]` entries tied to the same `userTurn.id`. Otherwise Semantix will use provisional `sem_dec_*` IDs that Phalanx should replace before final audit lock.
+
+Minimal batch post-answer request:
+
+```json
+{
+  "sessionId": "spec_session_id",
+  "trigger": "user_turn",
+  "currentPacket": { "...": "prior SemantixAlignmentPacket" },
+  "decisions": [],
+  "findings": [],
+  "contextResponses": [],
+  "userTurn": {
+    "id": "u_batch_answers_001",
+    "body": {
+      "kind": "batch",
+      "answers": [
+        {
+          "questionRef": "Q-TARGET-SURFACE",
+          "kind": "free",
+          "text": "Refresh the existing Ask MR Gambler article page."
+        },
+        {
+          "questionRef": "Q-AUDIENCE",
+          "kind": "choice",
+          "picked": "OPT-RETURNING-PLAYERS",
+          "label": "Returning players"
+        }
+      ]
+    }
+  }
+}
+```
+
+Semantix response expectations:
+
+- Valid post-answer requests should return HTTP 200 with a `SemantixEvaluateResponse`.
+- The response always includes `packet`, `events`, `contextRequests`, and `turnLogEntry`.
+- If the live evaluator cannot produce a valid packet, Semantix returns a visible non-lockable degraded packet with `events[].kind` containing `degraded`; it should not return HTTP 400 for evaluator/model failure.
+- HTTP 400 is reserved for malformed JSON or invalid request shape, such as missing `currentPacket` on a non-initial turn, unsupported `userTurn.body.kind`, an empty batch `answers` array, or a batch answer that lacks both question identity and answer content.
+- Semantix applies batch answers to a stable baseline before model re-evaluation: answered open questions are consumed, linked findings are resolved for choice and batch free-text answers, and previously stable IDs are preserved where the prior packet supplied them.
+- Phalanx must still block lock and Staff start when the returned packet is degraded, `turnLogEntry.diagnostics.degraded === true`, readiness is not `ready`, or readiness is `needs_user` with no usable next question.
+
+Phalanx should not expect:
+
+- A lockable packet after every valid post-answer call. Semantix may correctly ask another question, report `needs_user`, or degrade.
+- Semantix to recover omitted prior state. Missing `currentPacket` on post-answer turns is a caller contract failure.
+- Semantix to mint final Phalanx audit authority. Phalanx remains the lock authority and decision-id authority.
 
 Semantix evaluation response:
 
@@ -1258,9 +1330,21 @@ Semantix does not:
 - Phalanx can create a Spec Studio session from a raw directive.
 - Semantix can return a structured packet with readiness and findings.
 - User free text triggers full re-evaluation.
+- User batch answers trigger full re-evaluation without HTTP 400 when the request includes prior `currentPacket` and valid question refs.
 - Negative requirements are preserved as stable requirement facts.
 - Existing-system update context can be supplied before lock.
 - Hoplon facts can be included as grounded evidence.
 - Lock is refused unless readiness is `ready` and blocker count is zero.
 - Staff receives the locked packet as authoritative context.
 - Phalanx Run can raise spec-drift findings that reference the locked artifact.
+
+## PMO Gap Closeout Evidence
+
+For `gap://ui-phalanx-complete-flow/amg-phalanx-semantix-advisory-intake/semantix-post-answer-evaluation-http-400-2026-05-29`, closure requires pointer evidence that Phalanx replayed the failing post-answer flow against a Semantix build with this contract behavior:
+
+- `GET /spec-studio/mode` reports `evaluatorMode: "llm"` and `ready: true`, or the evidence explicitly names an approved non-live connector test scope.
+- The Phalanx post-answer request uses `trigger: "user_turn"`, includes the prior `currentPacket`, and sends `userTurn.body.kind: "batch"` with non-empty answers that reference current open question IDs.
+- `POST /spec-studio/evaluate` returns HTTP 200, not HTTP 400.
+- The response includes `turnLogEntry` and either a valid non-degraded packet or a visible non-lockable Semantix degraded packet. A degraded packet is acceptable evidence that the HTTP contract no longer hard-fails, but it does not by itself prove lock readiness.
+- Phalanx persists/renders the returned `turnLogEntry` and blocks lock/Staff start unless its own lock gate confirms readiness.
+- To close `blocker://ui-phalanx-complete-flow/amg-phalanx-semantix-advisory-intake/phalanx-run-5d20a05f-no-locked-packet-2026-05-29`, Phalanx also needs evidence that run `5d20a05f` is no longer stuck in `IDLE` because of missing Semantix packet state, or that an approved recovery path supersedes that run.

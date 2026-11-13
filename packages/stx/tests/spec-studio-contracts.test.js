@@ -22,6 +22,7 @@ import {
   isContextSourceKind,
   isExistingSystemMode,
   isReadiness,
+  normalizeSemantixAlignmentPacketForContract,
   validateContextSource,
   validateFinding,
   validateGroundedFact,
@@ -273,6 +274,70 @@ test("standalone grounded fact validator rejects missing evidenceRef", () => {
     confidence: "high",
   });
   expectErrorCode(result, "grounded_fact_missing_evidence_ref");
+});
+
+test("rejects packets whose groundedFacts entry is missing confidence", () => {
+  const packet = deepClone(hoplonGroundedPacket);
+  delete packet.groundedFacts[0].confidence;
+  expectErrorCode(
+    validateSemantixAlignmentPacket(packet),
+    "grounded_fact_missing_confidence",
+  );
+});
+
+test("normalizes Phalanx-facing risk severity and acceptance summary shape", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.risks = [
+    { text: "Auth scope could block implementation.", severity: "high" },
+    { id: "RISK-LOW", text: "Telemetry is optional.", sev: "low", ref: "u1" },
+  ];
+  packet.acceptanceSummary = { summary: "CRUD tasks work behind auth." };
+
+  const normalized = normalizeSemantixAlignmentPacketForContract(packet);
+
+  assert.deepEqual(
+    normalized.risks.map((risk) => ({
+      id: risk.id,
+      severity: risk.severity,
+      section: risk.section,
+      sourceRef: risk.sourceRef,
+    })),
+    [
+      {
+        id: "RISK-001",
+        severity: "blocker",
+        section: "risks",
+        sourceRef: "semantix",
+      },
+      {
+        id: "RISK-LOW",
+        severity: "fyi",
+        section: "risks",
+        sourceRef: "u1",
+      },
+    ],
+  );
+  assert.deepEqual(normalized.acceptanceSummary, ["CRUD tasks work behind auth."]);
+  const result = validateSemantixAlignmentPacket(normalized);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
+test("rejects unnormalized risks with invalid severity", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.risks = [{ id: "RISK-001", text: "Auth scope is unresolved.", severity: "high" }];
+  expectErrorCode(
+    validateSemantixAlignmentPacket(packet),
+    "risk_invalid_severity",
+  );
+});
+
+test("rejects non-array acceptanceSummary", () => {
+  const packet = deepClone(greenfieldReadyPacket);
+  packet.acceptanceSummary = { summary: "CRUD tasks work." };
+  expectErrorCode(
+    validateSemantixAlignmentPacket(packet),
+    "invalid_acceptance_summary",
+  );
 });
 
 // ---- Rejection: Staff-owned output fields ---------------------------------

@@ -2,6 +2,11 @@ import { CONTRACT_VERSION, SOURCE_SEMANTIX } from "./spec-studio-contracts.js";
 
 const AT = "2026-04-30T00:00:00.000Z";
 const ORIGINAL_REQUEST = "Build an expense reporting app";
+export const SPEC_STUDIO_BATCH_PROBE_EVALUATOR_QUARANTINE = Object.freeze({
+  scope: "fixture-probe-only",
+  publicServerSelectable: false,
+  liveReadinessEvidence: false,
+});
 
 // Keywords in free text that signal a reference to existing infrastructure.
 const EXISTING_INFRA_PATTERN = /\b(existing|legacy|current|sap|erp|oracle|salesforce)\b/i;
@@ -144,7 +149,7 @@ function evt(kind, sessionId, iteration) {
 }
 
 export function createSpecStudioBatchProbeEvaluator() {
-  return function evaluate(request) {
+  const evaluate = function evaluate(request) {
     const sessionId = request.sessionId;
     const prior = request.currentPacket ?? null;
     const iteration = (prior?.iteration ?? -1) + 1;
@@ -163,10 +168,10 @@ export function createSpecStudioBatchProbeEvaluator() {
           nextTurn: batchTurn("T-BATCH-Q1", "socratic", "intent", [
             {
               id: "Q-SYSTEM-TYPE",
-              q: "Is this a new system or updating an existing one?",
+              q: "What product goal should this probe fixture represent?",
               options: [
-                { id: "OPT-NEW", label: "New system" },
-                { id: "OPT-UPDATE", label: "Updating existing" },
+                { id: "OPT-PRODUCT-GOAL", label: "Product goal fixture" },
+                { id: "OPT-WORKFLOW-GOAL", label: "Workflow goal fixture" },
               ],
             },
             {
@@ -294,4 +299,9 @@ export function createSpecStudioBatchProbeEvaluator() {
       contextRequests: [],
     };
   };
+  evaluate.evaluatorMode = "probe";
+  evaluate.fixtureOnly = true;
+  evaluate.liveReadinessEvidence = false;
+  evaluate.quarantine = SPEC_STUDIO_BATCH_PROBE_EVALUATOR_QUARANTINE;
+  return evaluate;
 }

@@ -213,14 +213,236 @@ These three primitives do not replace normal programming features. Semantix stil
 The difference is that these traditional features now coexist with first-class semantic
 operations instead of sitting outside the language as ad hoc prompt glue.
 
+## Phase 2 Lowering Examples
+
+The Phase 2 Constraint Engine treats the beginner syntax as source language and lowers it into
+`ConstraintIR` records. These examples are illustrative contracts, not a broad syntax
+implementation.
+
+### Example 1: Constrained Tweet
+
+Source:
+
+```rust
+constraint TwitterRules {
+    max_length: 280 characters,
+    tone: "enthusiastic and brief",
+    formatting: "use exactly one emoji at the end"
+}
+
+with context { product_info } {
+    string tweet ~> "Write a promotional tweet for this product." :: TwitterRules;
+}
+```
+
+Lowered IR:
+
+```json
+{
+  "id": "constraint.twitter_rules.tweet",
+  "version": 1,
+  "sourceRef": "TwitterRules",
+  "target": { "kind": "semantic_output", "outputRef": "tweet" },
+  "schema": {
+    "format": "text",
+    "requiredFields": ["tweet"],
+    "parser": "plain_text"
+  },
+  "retry": {
+    "maxAttempts": 2,
+    "retryOn": ["SCHEMA_TOO_LONG", "FORMAT_MISMATCH"],
+    "repairInstructions": "Regenerate a shorter tweet that keeps exactly one emoji at the end."
+  },
+  "verifier": {
+    "mode": "advisory",
+    "checks": [{ "id": "tone.brief", "kind": "custom", "failureSeverity": "soft" }]
+  },
+  "provenance": {
+    "required": true,
+    "sources": ["product_info"],
+    "attachToOutput": true
+  },
+  "failure": {
+    "defaultSeverity": "hard",
+    "classes": [
+      {
+        "code": "SCHEMA_TOO_LONG",
+        "class": "schema",
+        "severity": "hard",
+        "retryable": true,
+        "message": "tweet exceeds max_length"
+      },
+      {
+        "code": "TONE_WEAK",
+        "class": "verifier",
+        "severity": "soft",
+        "retryable": false,
+        "message": "tone verifier did not agree"
+      }
+    ]
+  }
+}
+```
+
+### Example 2: Typed Extraction
+
+Source:
+
+```rust
+constraint CustomerEmail {
+    format: JSON,
+    schema: {
+        customer_name: string,
+        issue_type: "billing" | "technical" | "general",
+        urgency: "low" | "normal" | "high"
+    }
+}
+
+with context { email_body } {
+    CustomerEmail parsed ~> "Extract the support request." :: CustomerEmail;
+}
+```
+
+Lowered IR:
+
+```json
+{
+  "id": "constraint.customer_email.parsed",
+  "version": 1,
+  "sourceRef": "CustomerEmail",
+  "target": { "kind": "semantic_output", "outputRef": "parsed" },
+  "schema": {
+    "format": "json",
+    "jsonSchema": {
+      "type": "object",
+      "required": ["customer_name", "issue_type", "urgency"],
+      "properties": {
+        "customer_name": { "type": "string" },
+        "issue_type": { "enum": ["billing", "technical", "general"] },
+        "urgency": { "enum": ["low", "normal", "high"] }
+      }
+    },
+    "requiredFields": ["customer_name", "issue_type", "urgency"],
+    "forbiddenFields": ["password", "payment_card"]
+  },
+  "retry": {
+    "maxAttempts": 1,
+    "retryOn": ["SCHEMA_REQUIRED_FIELD_MISSING"],
+    "failOn": ["SCHEMA_FORBIDDEN_FIELD_PRESENT"]
+  },
+  "provenance": {
+    "required": true,
+    "sources": ["email_body"],
+    "attachToOutput": true
+  },
+  "failure": {
+    "defaultSeverity": "hard",
+    "classes": [
+      {
+        "code": "SCHEMA_REQUIRED_FIELD_MISSING",
+        "class": "schema",
+        "severity": "hard",
+        "retryable": true,
+        "message": "required extraction field is missing"
+      },
+      {
+        "code": "SCHEMA_FORBIDDEN_FIELD_PRESENT",
+        "class": "schema",
+        "severity": "hard",
+        "retryable": false,
+        "message": "sensitive field appeared in extracted output"
+      }
+    ]
+  }
+}
+```
+
+### Example 3: Safe File Proposal
+
+Source:
+
+```rust
+constraint FileOperation {
+    format: JSON,
+    allowed_paths: ["docs/**", "packages/core/**"],
+    forbidden_paths: ["/system", "/root", ".env"],
+    approval_required: true
+}
+
+with context { repo_summary, requested_change } {
+    FilePatch proposal ~> "Propose the minimal file changes." :: FileOperation;
+}
+```
+
+Lowered IR:
+
+```json
+{
+  "id": "constraint.file_operation.proposal",
+  "version": 1,
+  "sourceRef": "FileOperation",
+  "target": { "kind": "state_effect", "outputRef": "proposal" },
+  "schema": {
+    "format": "json",
+    "requiredFields": ["path", "operation", "summary"],
+    "forbiddenFields": ["raw_secret"]
+  },
+  "pathPolicy": {
+    "root": "workspace",
+    "allow": ["docs/**", "packages/core/**"],
+    "deny": ["/system", "/root", ".env"],
+    "operations": ["create", "modify"]
+  },
+  "capabilities": {
+    "required": ["filesystem.propose_patch"],
+    "forbidden": ["filesystem.write_unreviewed"],
+    "approvalRequired": ["filesystem.apply_patch"]
+  },
+  "approval": {
+    "required": true,
+    "gateId": "gate.file_patch.apply",
+    "reason": "File effects require fresh human approval.",
+    "freshness": "state_effect"
+  },
+  "retry": {
+    "maxAttempts": 0,
+    "failOn": ["PATH_DENIED", "APPROVAL_REQUIRED"]
+  },
+  "provenance": {
+    "required": true,
+    "sources": ["repo_summary", "requested_change"],
+    "attachToOutput": true
+  },
+  "failure": {
+    "defaultSeverity": "hard",
+    "classes": [
+      {
+        "code": "PATH_DENIED",
+        "class": "path_policy",
+        "severity": "hard",
+        "retryable": false,
+        "message": "candidate path is outside allowed policy"
+      },
+      {
+        "code": "APPROVAL_REQUIRED",
+        "class": "approval",
+        "severity": "hard",
+        "retryable": false,
+        "message": "fresh approval is required before applying this state effect"
+      }
+    ]
+  }
+}
+```
+
 ## Open Questions
 
-The beginner model is simple, but several details still need a formal spec:
+The beginner model is simple, and Phase 2 resolves the first enforcement shape. Remaining details
+still need formal specs:
 
-- How exactly are constraints compiled and enforced?
 - What syntax should exist for multiple constraints on one generation?
 - How much implicit context should Semantix allow before requiring explicit `context` blocks?
-- Should generated values expose provenance metadata by default or only in tooling?
+- Which generated values expose provenance metadata by default versus only in tooling?
 - What is the minimum surface area needed for a first prototype of the language?
 
 ## Near-Term Next Steps

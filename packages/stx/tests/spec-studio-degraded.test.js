@@ -22,6 +22,10 @@ import {
 } from "./fixtures/spec-studio-samples.js";
 import { checkIdContinuity } from "../src/spec-studio-id-continuity.js";
 
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 // ---- createDegradedPacket -------------------------------------------------
 
 test("creates a Semantix-source degraded packet that validates", () => {
@@ -95,6 +99,22 @@ test("when staleSafe is set with a prior packet, carries forward prior coverage 
     packet.existingSystemContext.mode,
     prior.existingSystemContext.mode,
   );
+});
+
+test("degraded packets normalize carried grounded fact confidence", () => {
+  const prior = deepClone(hoplonGroundedPacket);
+  prior.groundedFacts[0].confidence = "low-confidence";
+  const packet = createDegradedPacket({
+    sessionId: "spec_stale_safe_confidence",
+    iteration: prior.iteration + 1,
+    reason: "model unavailable; prior packet still trusted by Phalanx",
+    priorPacket: prior,
+    staleSafe: true,
+  });
+
+  assert.equal(packet.groundedFacts[0].confidence, "low");
+  const result = validateSemantixAlignmentPacket(packet);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
 });
 
 test("fallback degradation on follow-up preserves prior stable IDs", async () => {

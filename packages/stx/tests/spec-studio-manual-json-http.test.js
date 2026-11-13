@@ -7,18 +7,26 @@ import http from "node:http";
 
 import { createControlPlaneServer } from "../src/http/server.js";
 import { createSemantixHandshakeAdapter } from "../src/spec-studio-handshake.js";
-import { isPacketLockable } from "../src/spec-studio-degraded.js";
+import { createDegradedPacket, isDegradedPacket, isPacketLockable } from "../src/spec-studio-degraded.js";
+import { validatePlanningHandoff } from "../src/spec-studio-planning-handoff.js";
 import {
   DEFAULT_PROBE_URL,
+  isManualProofDegradedOrFallbackPacket,
   parseProbeArgs,
   parseProbeUrl,
   runProbe,
 } from "../scripts/probe-spec-studio-json.js";
 
-const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "spec-studio-manual-json");
+const testDir = dirname(fileURLToPath(import.meta.url));
+const fixtureDir = join(testDir, "fixtures", "spec-studio-manual-json");
+const planningHandoffFixtureDir = join(testDir, "fixtures", "spec-studio-planning-handoff");
 
 function loadFixture(name) {
   return JSON.parse(readFileSync(join(fixtureDir, name), "utf8"));
+}
+
+function loadPlanningHandoffFixture(name) {
+  return JSON.parse(readFileSync(join(planningHandoffFixtureDir, name), "utf8"));
 }
 
 async function post(url, body) {
@@ -112,7 +120,36 @@ async function startServer(options = {}) {
   };
 }
 
-test("initial request without optional arrays returns 200 needs_user packet", async (t) => {
+function assertUnavailableDegradedVisibility(res, expected) {
+  assert.equal(res.status, 200);
+  assert.equal(res.body.packet.source, "semantix");
+  assert.equal(res.body.packet.readiness, "needs_user");
+  assert.equal(res.body.packet.nextTurn, null);
+  assert.equal(res.body.packet.coverage.alignmentPct, 0);
+  assert.equal(res.body.packet.requirements.length, 0);
+  assert.equal(res.body.contextRequests.length, 0);
+  assert.ok(isDegradedPacket(res.body.packet));
+  assert.equal(isPacketLockable(res.body.packet), false);
+
+  const findingText = res.body.packet.findings[0].text;
+  assert.match(findingText, /live LLM connector/i);
+  assert.match(findingText, new RegExp(`trigger="${expected.trigger}"`));
+  if (expected.userTurnKind) {
+    assert.match(findingText, new RegExp(`userTurn\\.body\\.kind="${expected.userTurnKind}"`));
+  }
+  if (expected.contextResponseCount !== undefined) {
+    assert.match(findingText, new RegExp(`contextResponses=${expected.contextResponseCount}`));
+  }
+
+  assert.equal(res.body.events[0].kind, "semantix.unavailable");
+  assert.equal(res.body.events[0].payload.reason, findingText);
+  assert.equal(res.body.events[0].payload.trigger, expected.trigger);
+  assert.equal(res.body.events[0].payload.userTurnKind ?? null, expected.userTurnKind ?? null);
+  assert.equal(res.body.events[0].payload.contextResponseCount, expected.contextResponseCount ?? 0);
+  return findingText;
+}
+
+test("initial request without live connector returns unavailable degraded packet", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
@@ -122,11 +159,13 @@ test("initial request without optional arrays returns 200 needs_user packet", as
   assert.equal(res.status, 200);
   assert.equal(res.body.packet.sessionId, body.sessionId);
   assert.equal(res.body.packet.readiness, "needs_user");
-  assert.ok(res.body.packet.nextTurn, "initial response should have a nextTurn question");
+  assert.equal(res.body.packet.nextTurn, null);
+  assert.ok(isDegradedPacket(res.body.packet));
+  assert.match(res.body.packet.findings[0].text, /requires a live LLM connector/i);
   assert.equal(typeof res.body.packet.coverage.alignmentPct, "number");
 });
 
-test("default JSON probe evaluator is deterministic for identical requests", async (t) => {
+test("default evaluator never falls back to probe for identical requests", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
@@ -135,10 +174,61 @@ test("default JSON probe evaluator is deterministic for identical requests", asy
   const second = await post(url, body);
 
   assert.equal(first.status, 200);
-  assert.deepEqual(second.body, first.body);
+  assert.equal(second.status, 200);
+  assert.equal(isDegradedPacket(first.body.packet), true);
+  assert.equal(isDegradedPacket(second.body.packet), true);
+  assert.match(first.body.packet.findings[0].text, /no probe or mocked evaluator/i);
+  assert.match(second.body.packet.findings[0].text, /no probe or mocked evaluator/i);
 });
 
-test("user choice with currentPacket returns 200 ready packet", async (t) => {
+test("SPEC_STUDIO_EVALUATOR=probe is quarantined from the public server path", async (t) => {
+  const previousMode = process.env.SPEC_STUDIO_EVALUATOR;
+  process.env.SPEC_STUDIO_EVALUATOR = "probe";
+  t.after(() => {
+    if (previousMode === undefined) {
+      delete process.env.SPEC_STUDIO_EVALUATOR;
+    } else {
+      process.env.SPEC_STUDIO_EVALUATOR = previousMode;
+    }
+  });
+
+  const { url, close } = await startServer();
+  t.after(close);
+
+  const mode = await get(url.replace("/spec-studio/evaluate", "/spec-studio/mode"));
+  assert.deepEqual(mode.body, {
+    evaluatorMode: "unavailable",
+    ready: false,
+  });
+
+  const res = await post(url, loadFixture("initial.json"));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.packet.source, "semantix");
+  assert.equal(res.body.packet.nextTurn, null);
+  assert.equal(isDegradedPacket(res.body.packet), true);
+  assert.match(res.body.packet.findings[0].text, /fixture-only/i);
+  assert.doesNotMatch(res.body.packet.findings[0].text, /Product goal fixture/i);
+  assert.equal(res.body.events[0].kind, "semantix.unavailable");
+});
+
+test("planning handoff endpoint compiles locked packet inputs", async (t) => {
+  const { url, close } = await startServer();
+  t.after(close);
+
+  const res = await post(url.replace("/spec-studio/evaluate", "/spec-studio/planning-handoff"), {
+    packet: loadPlanningHandoffFixture("greenfield-minimal.packet.json"),
+    lockedArtifact: loadPlanningHandoffFixture("greenfield-minimal.locked-artifact.json"),
+    auditState: loadPlanningHandoffFixture("greenfield-minimal.audit-state.json"),
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.summary.valid, true);
+  assert.equal(res.body.summary.byteIdentical, true);
+  assert.equal(res.body.handoff.handoffId, res.body.summary.handoffId);
+  assert.equal(validatePlanningHandoff(res.body.handoff).ok, true);
+});
+
+test("user choice without live connector returns unavailable degraded packet", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
@@ -146,18 +236,19 @@ test("user choice with currentPacket returns 200 ready packet", async (t) => {
   const res = await post(url, body);
 
   assert.equal(res.status, 200);
-  assert.equal(res.body.packet.readiness, "ready");
-  assert.equal(res.body.packet.coverage.alignmentPct, 100);
-  assert.ok(isPacketLockable(res.body.packet), "ready packet should be lockable");
+  assert.equal(res.body.packet.readiness, "needs_user");
+  assert.ok(isDegradedPacket(res.body.packet));
+  assert.equal(isPacketLockable(res.body.packet), false);
 });
 
-test("free text user turn returns 200 needs_user packet", async (t) => {
+test("free text user turn without live connector returns unavailable degraded packet", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
   const res = await post(url, loadFixture("free-turn.json"));
   assert.equal(res.status, 200);
   assert.equal(res.body.packet.readiness, "needs_user");
+  assert.ok(isDegradedPacket(res.body.packet));
 });
 
 test("manual probe URL parser defaults and validates CLI args", () => {
@@ -189,15 +280,31 @@ test("manual probe URL parser defaults and validates CLI args", () => {
   );
 });
 
-test("manual probe runner completes the two-turn HTTP discussion loop", async (t) => {
+test("manual proof degraded/fallback predicate rejects non-live packets", () => {
+  assert.equal(
+    isManualProofDegradedOrFallbackPacket({
+      source: "phalanx-degraded",
+      readiness: "needs_user",
+    }),
+    true,
+  );
+  assert.equal(
+    isManualProofDegradedOrFallbackPacket(createDegradedPacket({
+      sessionId: "spec_manual_predicate_degraded",
+      reason: "Manual proof negative test degraded packet.",
+    })),
+    true,
+  );
+});
+
+test("manual probe runner fails closed against unavailable server", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
-  const result = await runProbe({ url, log: () => {} });
-
-  assert.equal(result.first.packet.readiness, "needs_user");
-  assert.equal(result.second.packet.readiness, "ready");
-  assert.equal(result.second.packet.coverage.alignmentPct, 100);
+  await assert.rejects(
+    () => runProbe({ url, log: () => {} }),
+    /expected evaluatorMode="probe" but server reports "unavailable"/,
+  );
 });
 
 test("manual probe runner fails closed when expected evaluator mode does not match server", async (t) => {
@@ -206,11 +313,57 @@ test("manual probe runner fails closed when expected evaluator mode does not mat
 
   await assert.rejects(
     () => runProbe({ url, mode: "llm", log: () => {} }),
-    /expected evaluatorMode="llm" but server reports "probe"/,
+    /expected evaluatorMode="llm" but server reports "unavailable"/,
   );
 });
 
-test("server reports unavailable instead of falling back to probe when llm mode lacks connector", async (t) => {
+test("manual probe runner fails closed on Semantix degraded packet success", async (t) => {
+  const degradedAdapter = {
+    evaluatorMode: "probe",
+    evaluate: async (request) => ({
+      packet: createDegradedPacket({
+        sessionId: request.sessionId,
+        reason: "Manual proof negative test degraded packet.",
+      }),
+      events: [],
+      contextRequests: [],
+    }),
+  };
+  const { url, close } = await startServer({ specStudioAdapter: degradedAdapter });
+  t.after(close);
+
+  await assert.rejects(
+    () => runProbe({ url, log: () => {} }),
+    /initial response is degraded and cannot prove live readiness/,
+  );
+});
+
+test("manual probe runner fails closed on Phalanx fallback packet success", async (t) => {
+  const fallbackAdapter = {
+    evaluatorMode: "probe",
+    evaluate: async (request) => ({
+      packet: {
+        source: "phalanx-degraded",
+        sessionId: request.sessionId,
+        iteration: 0,
+        readiness: "needs_user",
+        coverage: { alignmentPct: 0 },
+        findings: [],
+      },
+      events: [],
+      contextRequests: [],
+    }),
+  };
+  const { url, close } = await startServer({ specStudioAdapter: fallbackAdapter });
+  t.after(close);
+
+  await assert.rejects(
+    () => runProbe({ url, log: () => {} }),
+    /initial response used fallback source "phalanx-degraded"/,
+  );
+});
+
+test("server reports unavailable instead of falling back to probe when no connector exists", async (t) => {
   const previousMode = process.env.SPEC_STUDIO_EVALUATOR;
   process.env.SPEC_STUDIO_EVALUATOR = "llm";
   t.after(() => {
@@ -235,43 +388,125 @@ test("server reports unavailable instead of falling back to probe when llm mode 
   const res = await post(url, loadFixture("initial.json"));
   assert.equal(res.status, 200);
   assert.equal(res.body.packet.readiness, "needs_user");
-  assert.match(res.body.packet.findings[0].text, /no LLM connector/i);
+  assert.match(res.body.packet.findings[0].text, /live LLM connector/i);
 });
 
-test("skip trigger returns 200 valid packet", async (t) => {
+test("llm evaluate endpoint degrades empty initial request without calling connector", async (t) => {
+  const previousMode = process.env.SPEC_STUDIO_EVALUATOR;
+  process.env.SPEC_STUDIO_EVALUATOR = "llm";
+  t.after(() => {
+    if (previousMode === undefined) {
+      delete process.env.SPEC_STUDIO_EVALUATOR;
+    } else {
+      process.env.SPEC_STUDIO_EVALUATOR = previousMode;
+    }
+  });
+
+  let calls = 0;
+  const connector = {
+    execute: async () => {
+      calls += 1;
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  };
+  const { url, close } = await startServer({ connector });
+  t.after(close);
+
+  const res = await post(url, {
+    sessionId: "spec_http_empty_initial",
+    trigger: "initial",
+    originalUserRequest: "",
+    userTurn: {
+      id: "u1",
+      body: { kind: "text", text: "   " },
+    },
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(calls, 0);
+  assert.equal(res.body.packet.readiness, "needs_user");
+  assert.equal(res.body.packet.nextTurn, null);
+  assert.equal(res.body.packet.findings[0].id, "F-DEGRADED-001");
+  assert.match(res.body.packet.findings[0].text, /initial request is empty/i);
+  assert.equal(res.body.events[0].kind, "llm.evaluator.degraded");
+});
+
+test("llm evaluate endpoint degrades instead of mocking when connector stdout is empty", async (t) => {
+  const previousMode = process.env.SPEC_STUDIO_EVALUATOR;
+  process.env.SPEC_STUDIO_EVALUATOR = "llm";
+  t.after(() => {
+    if (previousMode === undefined) {
+      delete process.env.SPEC_STUDIO_EVALUATOR;
+    } else {
+      process.env.SPEC_STUDIO_EVALUATOR = previousMode;
+    }
+  });
+
+  const connector = {
+    execute: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  };
+  const { url, close } = await startServer({ connector });
+  t.after(close);
+
+  const res = await post(url, {
+    sessionId: "spec_http_empty_output_fallback",
+    trigger: "initial",
+    userTurn: {
+      id: "u1",
+      body: { kind: "text", text: "Build a notes app." },
+    },
+    decisions: [],
+    findings: [],
+    contextResponses: [],
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.packet.readiness, "needs_user");
+  assert.equal(res.body.packet.originalUserRequest, "Build a notes app.");
+  assert.ok(isDegradedPacket(res.body.packet), "empty LLM output must not be replaced by a probe packet");
+  assert.ok(
+    res.body.packet.findings.some((finding) => /LLM evaluator returned empty output/i.test(finding.text)),
+  );
+  assert.equal(res.body.events[0].kind, "llm.evaluator.degraded");
+  assert.equal(res.body.llmResponses.length, 2);
+  assert.equal(res.body.llmResponses[0].stdout, "");
+  assert.equal(res.body.llmResponses[0].rawText, "");
+});
+
+test("manual HTTP trigger flows expose trigger-specific degraded visibility", async (t) => {
   const { url, close } = await startServer();
   t.after(close);
 
-  const res = await post(url, loadFixture("skip-turn.json"));
-  assert.equal(res.status, 200);
-  assert.ok(["needs_user", "ready", "blocked"].includes(res.body.packet.readiness));
-});
-
-test("delegate turn returns 200 valid packet", async (t) => {
-  const { url, close } = await startServer();
-  t.after(close);
-
-  const res = await post(url, loadFixture("delegate-turn.json"));
-  assert.equal(res.status, 200);
-  assert.ok(["needs_user", "ready", "blocked"].includes(res.body.packet.readiness));
-});
-
-test("reconsider turn returns 200 valid packet", async (t) => {
-  const { url, close } = await startServer();
-  t.after(close);
-
-  const res = await post(url, loadFixture("reconsider-turn.json"));
-  assert.equal(res.status, 200);
-  assert.ok(["needs_user", "ready", "blocked"].includes(res.body.packet.readiness));
-});
-
-test("nested context-response episode returns 200 valid packet", async (t) => {
-  const { url, close } = await startServer();
-  t.after(close);
-
-  const res = await post(url, loadFixture("context-response-nested.json"));
-  assert.equal(res.status, 200);
-  assert.ok(["needs_user", "ready", "blocked"].includes(res.body.packet.readiness));
+  const cases = [
+    {
+      fixture: "skip-turn.json",
+      trigger: "skip",
+    },
+    {
+      fixture: "delegate-turn.json",
+      trigger: "user_turn",
+      userTurnKind: "delegate",
+    },
+    {
+      fixture: "reconsider-turn.json",
+      trigger: "reconsider",
+      userTurnKind: "reconsider",
+    },
+    {
+      fixture: "context-response-nested.json",
+      trigger: "context_response",
+      contextResponseCount: 1,
+    },
+  ];
+  const visibleReasons = new Set();
+  for (const entry of cases) {
+    const res = await post(url, loadFixture(entry.fixture));
+    visibleReasons.add(assertUnavailableDegradedVisibility(res, entry));
+  }
+  assert.equal(visibleReasons.size, cases.length);
 });
 
 test("malformed request body returns 400", async (t) => {
@@ -301,5 +536,13 @@ test("evaluator failure returns 200 with non-lockable degraded packet", async (t
   const res = await post(url, { sessionId: "sess_broken", trigger: "initial" });
   assert.equal(res.status, 200);
   assert.equal(res.body.packet.readiness, "needs_user");
+  assert.equal(res.body.packet.source, "semantix");
+  assert.equal(res.body.packet.nextTurn, null);
+  assert.equal(res.body.packet.coverage.alignmentPct, 0);
+  assert.equal(res.body.packet.requirements.length, 0);
+  assert.ok(isDegradedPacket(res.body.packet));
+  assert.match(res.body.packet.findings[0].text, /Deliberate evaluator failure for test/);
+  assert.equal(res.body.events[0].kind, "semantix.degraded");
+  assert.match(res.body.events[0].payload.reason, /Deliberate evaluator failure for test/);
   assert.ok(!isPacketLockable(res.body.packet), "degraded packet must not be lockable");
 });

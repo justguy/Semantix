@@ -1,0 +1,199 @@
+{
+  "acceptanceSummary": [
+    "The existing storefront hero copy is refreshed without changing checkout behavior."
+  ],
+  "alignedRequirement": "Update the existing storefront landing page hero copy while preserving checkout behavior, existing selectors, and public-publish boundaries.",
+  "approvalRequired": true,
+  "assumptions": [],
+  "blockingReasons": [],
+  "contextSources": [],
+  "contractVersion": "semantix.phalanx.spec-studio.v1",
+  "coverage": {
+    "alignmentPct": 100,
+    "openBlockers": 0,
+    "openConcerns": 0,
+    "openFYI": 0,
+    "sections": []
+  },
+  "existingSystemContext": {
+    "compatibilityRequirements": [
+      {
+        "evidenceRefs": [
+          "evidence:ev-update-scope"
+        ],
+        "grounding": {
+          "assumptionRefs": [],
+          "confidence": "high",
+          "decisionRefs": [
+            "decision:dec-update-scope"
+          ],
+          "evidenceRefs": [
+            "evidence:ev-update-scope"
+          ],
+          "provenanceRefs": [
+            "provenance:prov-boundary-existing-css-contract"
+          ],
+          "sourceFactRefs": [],
+          "status": "grounded"
+        },
+        "id": "boundary-existing-css-contract",
+        "relatedRequirementRefs": [
+          "req-refresh-hero-copy"
+        ],
+        "sourceRef": "decision:dec-update-scope",
+        "text": "Keep existing storefront CSS selectors and data-testid hooks used by smoke tests compatible."
+      }
+    ],
+    "doNotChange": [
+      {
+        "evidenceRefs": [
+          "evidence:ev-update-scope"
+        ],
+        "grounding": {
+          "assumptionRefs": [],
+          "confidence": "high",
+          "decisionRefs": [
+            "decision:dec-update-scope"
+          ],
+          "evidenceRefs": [
+            "evidence:ev-update-scope"
+          ],
+          "provenanceRefs": [
+            "provenance:prov-boundary-checkout-unchanged"
+          ],
+          "sourceFactRefs": [],
+          "status": "grounded"
+        },
+        "id": "boundary-checkout-unchanged",
+        "relatedRequirementRefs": [
+          "req-refresh-hero-copy"
+        ],
+        "sourceRef": "decision:dec-update-scope",
+        "text": "Do not alter checkout routes, cart state, payment settings, or order confirmation behavior."
+      }
+    ],
+    "mode": "update",
+    "reuseRequirements": [],
+    "targetSurfaces": [
+      {
+        "evidenceRefs": [
+          "evidence:ev-update-scope"
+        ],
+        "grounding": {
+          "assumptionRefs": [],
+          "confidence": "high",
+          "decisionRefs": [
+            "decision:dec-update-scope"
+          ],
+          "evidenceRefs": [
+            "evidence:ev-update-scope"
+          ],
+          "provenanceRefs": [
+            "provenance:prov-surface-storefront-hero"
+          ],
+          "sourceFactRefs": [],
+          "status": "grounded"
+        },
+        "id": "surface-storefront-hero",
+        "kind": "page_section",
+        "name": "Storefront landing page hero section",
+        "sourceRef": "decision:dec-update-scope"
+      }
+    ]
+  },
+  "findings": [],
+  "flow": {
+    "dataNeeded": [],
+    "pages": [
+      {
+        "id": "page-storefront",
+        "name": "Storefront landing page",
+        "purpose": "Present the existing storefront offer.",
+        "sourceRef": "req-refresh-hero-copy"
+      }
+    ],
+    "states": [],
+    "transitions": []
+  },
+  "groundedFacts": [],
+  "iteration": 4,
+  "nextTurn": null,
+  "openQuestions": [],
+  "originalUserRequest": "update the storefront hero copy but do not touch checkout",
+  "readiness": "ready",
+  "readinessReason": "The update target surface, do-not-change boundary, compatibility boundary, negative requirement, and verification intent are locked.",
+  "requirements": [
+    {
+      "acceptance": "A reviewer can see the updated hero headline and CTA copy on the existing landing page while checkout routes and selectors remain unchanged.",
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "grounding": {
+        "assumptionRefs": [],
+        "confidence": "high",
+        "decisionRefs": [
+          "decision:dec-update-scope"
+        ],
+        "evidenceRefs": [
+          "evidence:ev-update-scope"
+        ],
+        "provenanceRefs": [
+          "provenance:prov-req-refresh-hero-copy"
+        ],
+        "sourceFactRefs": [],
+        "status": "grounded"
+      },
+      "id": "req-refresh-hero-copy",
+      "priority": "must",
+      "sourceRef": "decision:dec-update-scope",
+      "status": "confirmed",
+      "text": "Refresh the storefront hero copy on the existing landing page.",
+      "type": "functional"
+    },
+    {
+      "acceptance": "The handoff contains no public publish, deploy, or production promotion instruction.",
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "grounding": {
+        "assumptionRefs": [],
+        "confidence": "high",
+        "decisionRefs": [
+          "decision:dec-update-scope"
+        ],
+        "evidenceRefs": [
+          "evidence:ev-update-scope"
+        ],
+        "provenanceRefs": [
+          "provenance:prov-req-no-public-publish"
+        ],
+        "sourceFactRefs": [],
+        "status": "grounded"
+      },
+      "id": "req-no-public-publish",
+      "priority": "must",
+      "relatedRequirementRefs": [
+        "req-refresh-hero-copy"
+      ],
+      "sourceRef": "decision:dec-update-scope",
+      "status": "confirmed",
+      "text": "Do not publish or deploy the update to the public storefront as part of this planning handoff.",
+      "type": "negative"
+    }
+  ],
+  "risks": [],
+  "scope": {
+    "inScope": [
+      "Existing storefront landing hero copy update"
+    ],
+    "negativeRequirements": [],
+    "outOfScope": [
+      "Checkout behavior changes",
+      "Public publish or deploy"
+    ]
+  },
+  "semanticObligations": [],
+  "sessionId": "spec_update_minimal",
+  "source": "semantix",
+  "userDecisions": []
+}

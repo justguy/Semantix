@@ -418,6 +418,8 @@ test("Codex Semantix layer routes creative prompts to semantic output without fi
   assert.equal(flow.result.stateEffects.length, 0);
   assert.equal(flow.result.outputs[0].response, responseText);
   assert.equal(flow.advanced.graph.nodes.some((node) => node.nodeType === "deterministic_execution"), false);
+  assert.equal(flow.steps.some((step) => step.id === 2), false);
+  assert.equal(flow.steps.some((step) => step.id === 5), false);
   assert.equal(flow.steps.some((step) => step.id === 10), false);
   assert.equal(flow.steps.some((step) => step.id === 11), false);
   assert.equal(flow.issues.some((issue) => /workspace_path|semantix\.host|file/i.test(issue.summary)), false);

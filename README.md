@@ -72,6 +72,13 @@ The handoff builder must not ask questions, call an LLM, invent
 architecture, infer product intent, or produce implementation tasks. It
 must fail closed when the locked inputs are not safe to delegate.
 
+The current local demo includes the browser UI and fixture-based proofs
+of greenfield and update-mode handoff compilation. Live Spec Studio
+evaluation requires a configured Codex CLI. Host lock/persistence and
+downstream planner integration remain follow-up work; the broader
+authority, freshness-resume, planner-ready, and readiness-closeout proof
+milestones are still pending.
+
 ## Phase 2 Handoff Verticals
 
 Phase 2 is organized as end-to-end verticals rather than implementation

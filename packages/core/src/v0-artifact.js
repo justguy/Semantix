@@ -986,7 +986,7 @@ function createDefaultBlueprint({ runId, intent, cwd }) {
 }
 
 function buildCanonicalArtifactDocument({ artifactMetadata, intentContract, semanticFrames, executionGraph }) {
-  return {
+  const document = {
     artifact_metadata: {
       artifact_id: artifactMetadata.artifact_id,
       run_id: artifactMetadata.run_id,
@@ -1000,6 +1000,12 @@ function buildCanonicalArtifactDocument({ artifactMetadata, intentContract, sema
     semantic_frames: cloneJson(semanticFrames),
     execution_graph: cloneJson(executionGraph),
   };
+
+  if (Array.isArray(executionGraph.constraintIRs) && executionGraph.constraintIRs.length) {
+    document.constraint_irs = cloneJson(executionGraph.constraintIRs);
+  }
+
+  return document;
 }
 
 export function validateArtifactDocument({ artifact, cwd = process.cwd() }) {
@@ -1108,6 +1114,7 @@ function buildRuntimePlan({
   executionGraph,
 }) {
   const frameById = new Map(semanticFrames.map((frame) => [frame.frame_id, frame]));
+  const constraintIRs = cloneJson(executionGraph.constraintIRs ?? executionGraph.constraint_irs ?? []);
   const runtimeNodes = executionGraph.nodes.map((node) => {
     const base = {
       id: node.node_id,
@@ -1165,6 +1172,8 @@ function buildRuntimePlan({
         semanticFrameId: node.frame_id,
         hardValidationSchema,
         pathPolicies,
+        constraintIrRefs: cloneJson(node.constraint_ir_refs ?? node.constraintIrRefs ?? node.constraintIRRefs ?? []),
+        constraintIRs: cloneJson(node.constraint_irs ?? node.constraintIRs ?? []),
         admittedOutput: null,
         runtimeBinding: {
           runtimeId: DEFAULT_RUNTIME_ID,
@@ -1253,6 +1262,7 @@ function buildRuntimePlan({
     approvalGates,
     stateEffects,
     checkpoints,
+    constraintIRs,
     status: "pending_review",
   };
 }
@@ -1283,12 +1293,16 @@ export function buildSemantixV0Artifact({
     frame_id: ensureString(frame.frame_id, "semantic_frames[].frame_id"),
     node_id: ensureString(frame.node_id, "semantic_frames[].node_id"),
     prompt: ensureString(frame.prompt, "semantic_frames[].prompt"),
-    context: cloneJson(frame.context ?? {}),
+    context: {
+      workspace_root: cwd,
+      ...cloneJson(frame.context ?? {}),
+    },
     hard_constraints: cloneJson(frame.hard_constraints ?? []),
   }));
 
   const executionGraph = {
     runtime_backend: DEFAULT_RUNTIME_ID,
+    constraintIRs: cloneJson(effectiveBlueprint.constraint_irs ?? effectiveBlueprint.constraintIRs ?? []),
     nodes: ensureArray(effectiveBlueprint.execution_graph?.nodes, "execution_graph.nodes").map((node) => ({
       node_id: ensureString(node.node_id, "execution_graph.nodes[].node_id"),
       kind: ensureString(node.kind, `execution_graph.nodes[${node.node_id}].kind`),
@@ -1297,6 +1311,8 @@ export function buildSemantixV0Artifact({
       frame_id: node.frame_id,
       base_validation_schema: cloneJson(node.base_validation_schema),
       hard_constraints: cloneJson(node.hard_constraints ?? []),
+      constraint_ir_refs: cloneJson(node.constraint_ir_refs ?? node.constraintIrRefs ?? node.constraintIRRefs ?? []),
+      constraint_irs: cloneJson(node.constraint_irs ?? node.constraintIRs ?? []),
       target_node_id: node.target_node_id,
       target_symbol: node.target_symbol,
       input_node_id: node.input_node_id,
@@ -1374,6 +1390,7 @@ export function buildSemantixV0Artifact({
     },
     semantic_frames: semanticFrames,
     execution_graph: executionGraph,
+    constraintIRs: cloneJson(executionGraph.constraintIRs ?? []),
     plan,
   };
 }

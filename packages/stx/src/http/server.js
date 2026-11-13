@@ -5,8 +5,12 @@ import http from "node:http";
 import { URL } from "node:url";
 
 import { createSemantixHandshakeAdapter } from "../spec-studio-handshake.js";
-import { createSpecStudioJsonProbeEvaluator } from "../spec-studio-json-probe-evaluator.js";
 import { createLlmSpecStudioEvaluator } from "../spec-studio-llm-evaluator.js";
+import {
+  buildPlanningHandoff,
+  canonicalizePlanningHandoff,
+  validatePlanningHandoff,
+} from "../spec-studio-planning-handoff.js";
 
 const MAIN_UI_ROUTE = "/index.html";
 const LEGACY_UI_ROUTES = new Set([
@@ -31,6 +35,8 @@ const CONTENT_TYPES = {
   ".md": "text/markdown; charset=utf-8",
   ".svg": "image/svg+xml",
 };
+const SPEC_STUDIO_PUBLIC_PROBE_DISABLED_REASON =
+  "Probe Spec Studio evaluators are fixture-only and disabled on the public server path; configure a live LLM connector.";
 
 function json(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -96,6 +102,38 @@ function compactInspectorPayload(payload) {
   });
 }
 
+function createPlanningHandoffResponse(input, metadata = {}) {
+  const handoff = buildPlanningHandoff(input);
+  const repeatedHandoff = buildPlanningHandoff(input);
+  const canonicalJson = canonicalizePlanningHandoff(handoff);
+  const repeatedCanonicalJson = canonicalizePlanningHandoff(repeatedHandoff);
+  const validation = validatePlanningHandoff(handoff);
+
+  return {
+    ...compactRecord({
+      demoId: metadata.demoId,
+    }),
+    summary: {
+      valid: validation.ok,
+      byteIdentical: canonicalJson === repeatedCanonicalJson,
+      sameFingerprint: handoff.fingerprint === repeatedHandoff.fingerprint,
+      canonicalBytes: Buffer.byteLength(canonicalJson, "utf8"),
+      handoffId: handoff.handoffId,
+      fingerprint: handoff.fingerprint,
+      packetHash: handoff.inputHashes.packet.value,
+      buildInputHash: handoff.inputHashes.buildInput.value,
+      requirementCount: handoff.requirements.length,
+      acceptanceCount: handoff.acceptanceCriteria.length,
+      assumptionCount: handoff.assumptions.length,
+      evidenceCount: handoff.evidence.length,
+      plannerSeedCount: handoff.plannerInputs.featureChecklistSeeds.length,
+      verificationObligationCount: handoff.verificationObligations.length,
+    },
+    handoff,
+    canonicalJson,
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -148,6 +186,10 @@ function routeMatch(pathname, method) {
 
   if (method === "GET" && pathname === "/spec-studio/mode") {
     return { name: "spec-studio.mode" };
+  }
+
+  if (method === "POST" && pathname === "/spec-studio/planning-handoff") {
+    return { name: "spec-studio.planning-handoff.compile" };
   }
 
   if (runs !== "runs" || !runId) {
@@ -368,7 +410,7 @@ function handleError(response, error) {
     });
   }
 
-  if (error?.code === "VALIDATION_ERROR") {
+  if (error?.code === "VALIDATION_ERROR" || error?.code === "PLANNING_HANDOFF_VALIDATION_ERROR") {
     return json(response, 400, {
       error: error.code,
       message: error.message,
@@ -385,18 +427,22 @@ function handleError(response, error) {
 export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRunCwd, specStudioAdapter, connector } = {}) {
   let adapter = specStudioAdapter;
   if (!adapter) {
-    const llmRequested = process.env.SPEC_STUDIO_EVALUATOR === "llm";
-    if (llmRequested && !connector) {
+    const probeRequested = process.env.SPEC_STUDIO_EVALUATOR === "probe";
+    if (probeRequested) {
+      adapter = createSemantixHandshakeAdapter({
+        unavailable: true,
+        unavailableReason: SPEC_STUDIO_PUBLIC_PROBE_DISABLED_REASON,
+      });
+      adapter.evaluatorMode = "unavailable";
+    } else if (!connector) {
       adapter = createSemantixHandshakeAdapter({
         unavailable: true,
         unavailableReason:
-          "SPEC_STUDIO_EVALUATOR=llm was requested, but no LLM connector is configured.",
+          "Spec Studio requires a live LLM connector; no probe or mocked evaluator is available.",
       });
       adapter.evaluatorMode = "unavailable";
     } else {
-      const evaluator = llmRequested
-        ? createLlmSpecStudioEvaluator({ connector })
-        : createSpecStudioJsonProbeEvaluator();
+      const evaluator = createLlmSpecStudioEvaluator({ connector });
       adapter = createSemantixHandshakeAdapter({ evaluator });
     }
   }
@@ -491,6 +537,21 @@ export function createControlPlaneServer({ service, codexLayer, uiDir, defaultRu
         }
         const result = await adapter.evaluate(body);
         return json(response, 200, result);
+      }
+
+      if (match.name === "spec-studio.planning-handoff.compile") {
+        let body;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          return json(response, 400, {
+            error: "VALIDATION_ERROR",
+            message: "Request body is not valid JSON.",
+            details: [],
+          });
+        }
+
+        return json(response, 200, createPlanningHandoffResponse(body));
       }
 
       const body =

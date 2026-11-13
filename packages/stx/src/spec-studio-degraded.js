@@ -33,6 +33,7 @@ import {
   READINESS,
   SOURCE_PHALANX_DEGRADED,
   SOURCE_SEMANTIX,
+  normalizeSemantixAlignmentPacketForContract,
   validateSemantixAlignmentPacket,
 } from "./spec-studio-contracts.js";
 
@@ -62,6 +63,10 @@ function safePriorArray(priorPacket, key) {
   if (!isPlainObject(priorPacket)) return [];
   if (!Array.isArray(priorPacket[key])) return [];
   return JSON.parse(JSON.stringify(priorPacket[key]));
+}
+
+function normalizePacketGroundedFacts(packet) {
+  return normalizeSemantixAlignmentPacketForContract(packet);
 }
 
 function nextDegradedFindingId(priorPacket, preferredId) {
@@ -100,6 +105,20 @@ function safeScope(priorPacket) {
     return JSON.parse(JSON.stringify(priorPacket.scope));
   }
   return { inScope: [], outOfScope: [], negativeRequirements: [] };
+}
+
+function requestOriginalUserText(request) {
+  if (!isPlainObject(request)) return "";
+  if (typeof request.originalUserRequest === "string") return request.originalUserRequest;
+  const body = request.userTurn?.body;
+  if (
+    isPlainObject(body) &&
+    (body.kind === "text" || body.kind === "free") &&
+    typeof body.text === "string"
+  ) {
+    return body.text;
+  }
+  return "";
 }
 
 /**
@@ -175,7 +194,7 @@ export function createDegradedPacket({
   };
   const priorFindings = staleSafe ? safePriorArray(priorPacket, "findings") : [];
 
-  return {
+  return normalizePacketGroundedFacts({
     contractVersion: CONTRACT_VERSION,
     source: SOURCE_SEMANTIX,
     sessionId,
@@ -207,7 +226,7 @@ export function createDegradedPacket({
       openFYI: 0,
     },
     nextTurn: null,
-  };
+  });
 }
 
 /**
@@ -282,6 +301,12 @@ export function withDegradationFallback(evaluator, options = {}) {
     let raisedError = null;
     try {
       response = await evaluator(request);
+      if (isPlainObject(response) && isPlainObject(response.packet)) {
+        response = {
+          ...response,
+          packet: normalizePacketGroundedFacts(response.packet),
+        };
+      }
     } catch (error) {
       raisedError = error instanceof Error ? error : new Error(String(error));
     }
@@ -309,17 +334,17 @@ export function withDegradationFallback(evaluator, options = {}) {
         isPlainObject(request) && isPlainObject(request.currentPacket)
           ? request.currentPacket
           : null;
-      const packet = createDegradedPacket({
+      const packet = normalizePacketGroundedFacts(createDegradedPacket({
         sessionId,
         iteration:
           priorPacket && typeof priorPacket.iteration === "number"
             ? priorPacket.iteration + 1
             : 0,
-        originalUserRequest: priorPacket?.originalUserRequest,
+        originalUserRequest: priorPacket?.originalUserRequest ?? requestOriginalUserText(request),
         reason: raisedError.message,
         priorPacket,
         staleSafe: Boolean(priorPacket),
-      });
+      }));
       const event = buildEvent
         ? buildEvent({ request, error: raisedError })
         : {
@@ -331,6 +356,9 @@ export function withDegradationFallback(evaluator, options = {}) {
       return {
         packet,
         events: [event],
+        ...(Array.isArray(raisedError.llmResponses)
+          ? { llmResponses: raisedError.llmResponses }
+          : {}),
         contextRequests: [],
       };
     }
@@ -342,7 +370,7 @@ export function withDegradationFallback(evaluator, options = {}) {
         typeof response.packet.sessionId === "string"
           ? response.packet.sessionId
           : "spec_unknown_session";
-      const packet = createDegradedPacket({
+      const packet = normalizePacketGroundedFacts(createDegradedPacket({
         sessionId,
         iteration: response.packet.iteration ?? 0,
         originalUserRequest: response.packet.originalUserRequest,
@@ -350,7 +378,7 @@ export function withDegradationFallback(evaluator, options = {}) {
           "Evaluator marked readiness=\"ready\" but coverage or blocker findings disagree.",
         priorPacket: response.packet,
         staleSafe: true,
-      });
+      }));
       return {
         packet,
         events: [

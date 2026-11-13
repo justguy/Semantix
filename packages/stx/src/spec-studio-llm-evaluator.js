@@ -84,6 +84,7 @@ export function buildEvaluatorSystemPrompt() {
     `- finding.kind values: ${FINDING_KIND_VALUES.join(", ")}.`,
     `- finding.sev values: ${FINDING_SEVERITY_VALUES.join(", ")}.`,
     `- finding.raisedBy values: ${FINDING_RAISED_BY_VALUES.join(", ")}.`,
+    `- risks[].severity values: ${FINDING_SEVERITY_VALUES.join(", ")}.`,
     `- section values: ${SECTION_ID_VALUES.join(", ")}.`,
     `- existingSystemContext.mode values: ${Object.values(EXISTING_SYSTEM_MODE).join(", ")}.`,
     `- contextSources[].kind values: ${CONTEXT_SOURCE_KIND_VALUES.join(", ")}; include contextSources[].evidenceRefs when evidence is available.`,
@@ -2002,12 +2003,18 @@ export function parseEvaluatorOutput(sessionId, iteration, rawText, request) {
   canonicalizeLlmPacket(packet, normalizedRequest);
   packet = stripPlaceholderLiterals(packet);
   repairRequiredPacketFields(packet, normalizedRequest);
+  packet = normalizeSemantixAlignmentPacketForContract(packet);
 
   // Ensure required arrays exist
   if (!Array.isArray(packet.requirements)) packet.requirements = [];
   if (!Array.isArray(packet.findings)) packet.findings = [];
   if (!Array.isArray(packet.contextSources)) packet.contextSources = [];
   if (!Array.isArray(packet.groundedFacts)) packet.groundedFacts = [];
+  if (!Array.isArray(packet.assumptions)) packet.assumptions = [];
+  if (!Array.isArray(packet.openQuestions)) packet.openQuestions = [];
+  if (!Array.isArray(packet.risks)) packet.risks = [];
+  if (!Array.isArray(packet.userDecisions)) packet.userDecisions = [];
+  if (!Array.isArray(packet.acceptanceSummary)) packet.acceptanceSummary = [];
 
   // Strip groundedFacts with invalid source values so schema validation passes.
   // groundedFacts are supplemental; silently dropping malformed items is safer

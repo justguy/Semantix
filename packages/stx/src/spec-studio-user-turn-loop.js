@@ -29,6 +29,7 @@ import { ValidationError } from "@semantix/core/contracts";
 import { READINESS } from "./spec-studio-contracts.js";
 
 export const TURN_ACTION = Object.freeze({
+  BATCH: "batch",
   CHOICE: "choice",
   FREE: "free",
   RECONSIDER: "reconsider",
@@ -269,6 +270,173 @@ export function applyUserFreeTurn({
   // because the spec changed.
   clearReadinessGate(next);
   return { packet: next, decisionId: newId };
+}
+
+// ---- Batch ---------------------------------------------------------------
+
+function normalizeBatchAnswer(answer) {
+  if (!isPlainObject(answer)) return null;
+  const questionRef = answer.questionRef ?? answer.questionId;
+  if (!isNonEmptyString(questionRef)) return null;
+  const kind =
+    answer.kind ??
+    (isNonEmptyString(answer.picked) || isNonEmptyString(answer.optId)
+      ? "choice"
+      : isNonEmptyString(answer.text)
+        ? "free"
+        : "");
+  if (!isNonEmptyString(kind)) return null;
+  return {
+    ...answer,
+    kind,
+    questionRef,
+  };
+}
+
+function applyResolvedFreeAnswer({
+  packet,
+  userTurn,
+  questionRef,
+  text,
+  decisionId,
+  now,
+}) {
+  const next = deepClone(packet);
+  ensureArrays(next);
+  const at = nowIso(now);
+  const newId = decisionId ?? nextSemDecisionId(next);
+  const question = findOpenQuestion(next, questionRef);
+
+  next.userDecisions.push({
+    id: newId,
+    turnId: userTurn.id,
+    section: question?.section ?? "intent",
+    questionRef,
+    question: question?.question ?? "",
+    kind: "free",
+    answer: {
+      kind: "free",
+      text,
+    },
+    at,
+  });
+
+  resolveFindingsForQuestion({
+    packet: next,
+    questionRef,
+    decisionId: newId,
+    at,
+  });
+  consumeOpenQuestion(next, questionRef);
+  clearReadinessGate(next);
+  return { packet: next, decisionId: newId };
+}
+
+/**
+ * Apply a batch user turn. Batch answers are explicit responses to
+ * specific open questions, so each answered question is recorded as a
+ * separate decision and consumed before the next evaluator pass.
+ *
+ * @param {{
+ *   packet: object,
+ *   userTurn: object,
+ *   answers?: Array<object>,
+ *   decisionIdsByQuestionRef?: Record<string, string>,
+ *   now?: string | (() => string)
+ * }} input
+ * @returns {{ packet: object, decisionIds: string[] }}
+ */
+export function applyUserBatchTurn({
+  packet,
+  userTurn,
+  answers,
+  decisionIdsByQuestionRef = {},
+  now,
+}) {
+  if (!isPlainObject(packet)) {
+    throw new ValidationError("applyUserBatchTurn requires a packet object.");
+  }
+  if (!isPlainObject(userTurn) || !isNonEmptyString(userTurn.id)) {
+    throw new ValidationError("applyUserBatchTurn requires a userTurn object with an id.");
+  }
+  const resolvedAnswers = Array.isArray(answers)
+    ? answers
+    : Array.isArray(userTurn.body?.answers)
+      ? userTurn.body.answers
+      : [];
+  if (resolvedAnswers.length === 0) {
+    throw new ValidationError("applyUserBatchTurn requires a non-empty answers array.");
+  }
+
+  let next = deepClone(packet);
+  const decisionIds = [];
+
+  for (const rawAnswer of resolvedAnswers) {
+    const answer = normalizeBatchAnswer(rawAnswer);
+    if (!answer) {
+      throw new ValidationError(
+        "Each batch answer requires questionId/questionRef and either a picked option or text.",
+      );
+    }
+    const decisionId =
+      answer.decisionId ??
+      (isPlainObject(decisionIdsByQuestionRef)
+        ? decisionIdsByQuestionRef[answer.questionRef]
+        : undefined);
+
+    if (answer.kind === "choice") {
+      const pickedOptionId = answer.picked ?? answer.optId;
+      const applied = applyUserChoiceTurn({
+        packet: next,
+        userTurn,
+        questionRef: answer.questionRef,
+        pickedOptionId,
+        pickedLabel: answer.label ?? answer.pickedLabel ?? "",
+        tag: answer.tag,
+        decisionId,
+        now,
+      });
+      next = applied.packet;
+      decisionIds.push(applied.decisionId);
+      continue;
+    }
+
+    if (answer.kind === "free" || answer.kind === "text") {
+      const text = answer.text;
+      if (!isNonEmptyString(text)) {
+        throw new ValidationError("Batch free-text answers require non-empty text.");
+      }
+      const applied = applyResolvedFreeAnswer({
+        packet: next,
+        userTurn,
+        questionRef: answer.questionRef,
+        text,
+        decisionId,
+        now,
+      });
+      next = applied.packet;
+      decisionIds.push(applied.decisionId);
+      continue;
+    }
+
+    if (answer.kind === "skip" || answer.kind === "dismiss") {
+      const applied = applySkipTurn({
+        packet: next,
+        userTurn,
+        questionRef: answer.questionRef,
+        reason: answer.reason ?? "Skipped in batch answer.",
+        decisionId,
+        now,
+      });
+      next = applied.packet;
+      decisionIds.push(applied.decisionId);
+      continue;
+    }
+
+    throw new ValidationError(`Unsupported batch answer kind "${answer.kind}".`);
+  }
+
+  return { packet: next, decisionIds };
 }
 
 // ---- Reconsider ----------------------------------------------------------

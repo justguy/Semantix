@@ -137,6 +137,45 @@ Depending on the target, a constraint may become:
 
 The key idea is that constraints are compiled into machinery, not merely remembered as advice.
 
+### ConstraintIR Compatibility Contract
+
+Phase 2 introduces `ConstraintIR` as the durable compiler output for `context`, `constraint`, and
+`~>` lowering. The first version is intentionally narrow and attaches to the existing contracts
+without replacing them:
+
+- `IntentContract.strictBoundaries` remains the human-readable review summary. `ConstraintIR`
+  records are the machine-readable enforcement surface produced from those boundaries and from
+  explicit `constraint` declarations.
+- `ExecutionPlan.nodes[*].constraints` can continue to carry review copy. Semantic and tool nodes
+  may also carry `constraintIrRefs` that point to compiled IR records included on the plan.
+- `StateEffect.policyState` remains the final admission-facing policy state. State effects may
+  carry `constraintIrRefs`, and their `policyState` is derived from the corresponding schema,
+  path, capability, approval, and verifier outcomes.
+- Strict compiler envelopes should add a `constraintBundle` containing the `ConstraintIR` records,
+  their stable identities, and any compiled artifact refs. Existing envelope consumers may ignore
+  the bundle until they opt into Phase 2 admission.
+- The first implemented bundle shape carries deterministic artifact refs for structural schema
+  validators, required/forbidden field validators, path policies, approval markers, retry policy,
+  failure policy, and verifier policy markers. When an existing semantic node has no explicit
+  `ConstraintIR`, the strict compiler emits a fallback bundle from the node
+  `hard_validation_schema` to preserve compatibility while still exposing the Phase 2 contract.
+
+The strict boundary is unchanged: providers and runtimes may propose candidates, but Semantix owns
+admission. A provider result is never trusted merely because a prompt mentioned the constraint.
+
+### Lowering Rules
+
+The first lowering pass should produce one `ConstraintIR` per semantic output or state effect:
+
+1. `context` lowers into `provenance.sources` and the candidate's allowed evidence scope.
+2. `constraint` lowers into schema, path, capability, approval, retry, verifier, and failure
+   policy fields.
+3. `~>` lowers into the target binding that names the output, runtime node, tool call, or state
+   effect the constraint guards.
+
+If a construct cannot be lowered deterministically yet, the compiler should emit an explicit open
+question or follow-up task. It should not silently preserve the construct as prompt-only advice.
+
 ### Why This Matters
 
 This is where Semantix starts eliminating the apology loop at the runtime level.
@@ -149,6 +188,12 @@ This is the shift from pleading to parsing.
 
 Instead of telling the model "please follow this rule carefully," the compiler prepares the
 runtime to reject outputs that do not satisfy the rule mechanically.
+
+The first runtime admission loop uses the strict compiler's `constraintBundle` directly. It records
+each attempt with a deterministic status (`admitted`, `retry_scheduled`, or `rejected`), reason
+code, failure class, retryability, constraint identity, evidence, and stdout hash. Control-plane
+state only receives `admittedOutput` after that loop succeeds; rejected candidates preserve audit
+evidence but never become trusted state.
 
 For sensitive capabilities, the compiler should also be able to emit policy-mode transitions so
 the runtime knows when to:

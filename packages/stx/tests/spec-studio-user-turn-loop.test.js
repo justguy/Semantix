@@ -6,6 +6,7 @@ import {
   applyDecideAllTurn,
   applyReconsiderTurn,
   applySkipTurn,
+  applyUserBatchTurn,
   applyUserChoiceTurn,
   applyUserFreeTurn,
 } from "../src/spec-studio-user-turn-loop.js";
@@ -39,6 +40,7 @@ const FIXED_NOW = "2026-04-30T12:00:00.000Z";
 
 test("TURN_ACTION enumerates the supported user-turn kinds", () => {
   assert.deepEqual(Object.values(TURN_ACTION).sort(), [
+    "batch",
     "choice",
     "decide_all",
     "free",
@@ -152,6 +154,58 @@ test("applyUserFreeTurn rejects empty text", () => {
       }),
     (error) => error.name === "ValidationError",
   );
+});
+
+// ---- Batch ---------------------------------------------------------------
+
+test("applyUserBatchTurn records each answer and consumes answered questions", () => {
+  const packet = basePacketWithQuestion();
+  packet.openQuestions = [
+    ...packet.openQuestions,
+    {
+      id: "Q-002",
+      section: "success",
+      question: "What should the primary button do?",
+      options: ["Open contact flow", "Navigate sections"],
+    },
+  ];
+  packet.findings = [
+    ...packet.findings,
+    {
+      id: "F-002",
+      kind: "gap",
+      sev: "blocker",
+      section: "success",
+      ref: "Q-002",
+      text: "Primary button behavior is unresolved.",
+      resolved: false,
+      raisedBy: "semantix",
+    },
+  ];
+
+  const { packet: next, decisionIds } = applyUserBatchTurn({
+    packet,
+    userTurn: {
+      id: "u_batch",
+      body: {
+        kind: "batch",
+        answers: [
+          { questionId: "Q-001", kind: "choice", picked: "opt_new", label: "Create a new dashboard" },
+          { questionId: "Q-002", kind: "free", text: "Open a contact form." },
+        ],
+      },
+    },
+    now: FIXED_NOW,
+  });
+
+  assert.equal(decisionIds.length, 2);
+  assert.equal(next.userDecisions.length, 2);
+  assert.deepEqual(next.openQuestions, []);
+  assert.equal(next.findings.find((finding) => finding.id === "F-001").resolved, true);
+  assert.equal(next.findings.find((finding) => finding.id === "F-002").resolved, true);
+  assert.equal(next.userDecisions[0].answer.optId, "opt_new");
+  assert.equal(next.userDecisions[1].answer.text, "Open a contact form.");
+  assert.equal(validateSemantixAlignmentPacket(next).ok, true);
 });
 
 // ---- Reconsider -----------------------------------------------------------

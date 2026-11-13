@@ -2,6 +2,11 @@ import { CONTRACT_VERSION, SOURCE_SEMANTIX } from "./spec-studio-contracts.js";
 
 const AT = "2026-04-30T00:00:00.000Z";
 const ORIGINAL_REQUEST = "Build an expense reporting app";
+export const SPEC_STUDIO_MULTI_TURN_PROBE_EVALUATOR_QUARANTINE = Object.freeze({
+  scope: "fixture-probe-only",
+  publicServerSelectable: false,
+  liveReadinessEvidence: false,
+});
 
 function basePacket(sessionId, iteration, originalUserRequest) {
   return {
@@ -161,7 +166,7 @@ function evt(kind, sessionId, iteration) {
 }
 
 export function createSpecStudioMultiTurnProbeEvaluator() {
-  return function evaluate(request) {
+  const evaluate = function evaluate(request) {
     const sessionId = request.sessionId;
     const prior = request.currentPacket ?? null;
     const iteration = (prior?.iteration ?? -1) + 1;
@@ -178,10 +183,10 @@ export function createSpecStudioMultiTurnProbeEvaluator() {
           openConcerns: 4,
           readinessReason: "System type, user type, core action, and auth approach are all undefined.",
           nextTurn: question("T-MT-Q1", "socratic", "intent",
-            "Is this a new system or updating an existing one?",
+            "What product goal should this probe fixture represent?",
             [
-              { id: "OPT-NEW", label: "New system" },
-              { id: "OPT-UPDATE", label: "Updating existing" },
+              { id: "OPT-PRODUCT-GOAL", label: "Product goal fixture" },
+              { id: "OPT-WORKFLOW-GOAL", label: "Workflow goal fixture" },
             ],
           ),
         }),
@@ -330,4 +335,9 @@ export function createSpecStudioMultiTurnProbeEvaluator() {
       contextRequests: [],
     };
   };
+  evaluate.evaluatorMode = "probe";
+  evaluate.fixtureOnly = true;
+  evaluate.liveReadinessEvidence = false;
+  evaluate.quarantine = SPEC_STUDIO_MULTI_TURN_PROBE_EVALUATOR_QUARANTINE;
+  return evaluate;
 }

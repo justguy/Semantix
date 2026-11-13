@@ -2,13 +2,37 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { validateSemantixAlignmentPacket } from "../src/spec-studio-contracts.js";
-import { createSpecStudioBatchProbeEvaluator } from "../src/spec-studio-batch-probe-evaluator.js";
-import { createSpecStudioMultiTurnProbeEvaluator } from "../src/spec-studio-multi-turn-probe-evaluator.js";
+import {
+  SPEC_STUDIO_BATCH_PROBE_EVALUATOR_QUARANTINE,
+  createSpecStudioBatchProbeEvaluator,
+} from "../src/spec-studio-batch-probe-evaluator.js";
+import {
+  SPEC_STUDIO_MULTI_TURN_PROBE_EVALUATOR_QUARANTINE,
+  createSpecStudioMultiTurnProbeEvaluator,
+} from "../src/spec-studio-multi-turn-probe-evaluator.js";
 
 function expectValid(packet) {
   const validation = validateSemantixAlignmentPacket(packet);
   assert.equal(validation.ok, true, JSON.stringify(validation.errors));
 }
+
+test("batch and multi-turn probe evaluators are explicitly quarantined as fixture-only", () => {
+  const batch = createSpecStudioBatchProbeEvaluator();
+  const multiTurn = createSpecStudioMultiTurnProbeEvaluator();
+
+  for (const [evaluator, quarantine] of [
+    [batch, SPEC_STUDIO_BATCH_PROBE_EVALUATOR_QUARANTINE],
+    [multiTurn, SPEC_STUDIO_MULTI_TURN_PROBE_EVALUATOR_QUARANTINE],
+  ]) {
+    assert.equal(quarantine.scope, "fixture-probe-only");
+    assert.equal(quarantine.publicServerSelectable, false);
+    assert.equal(quarantine.liveReadinessEvidence, false);
+    assert.equal(evaluator.evaluatorMode, "probe");
+    assert.equal(evaluator.fixtureOnly, true);
+    assert.equal(evaluator.liveReadinessEvidence, false);
+    assert.equal(evaluator.quarantine, quarantine);
+  }
+});
 
 test("batch probe emits contract-valid update context for existing-system answers", () => {
   const evaluator = createSpecStudioBatchProbeEvaluator();

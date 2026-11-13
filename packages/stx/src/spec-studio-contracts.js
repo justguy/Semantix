@@ -60,6 +60,12 @@ export const CONTEXT_SOURCE_KIND_VALUES = Object.freeze([
   "upload",
 ]);
 
+export const GROUNDED_FACT_CONFIDENCE_VALUES = Object.freeze([
+  "high",
+  "medium",
+  "low",
+]);
+
 export const CONTEXT_SOURCE_STATUS_VALUES = Object.freeze([
   "used",
   "unavailable",
@@ -337,6 +343,177 @@ function isString(value) {
   return typeof value === "string";
 }
 
+function slug(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+export function normalizeGroundedFactConfidence(value) {
+  if (GROUNDED_FACT_CONFIDENCE_VALUES.includes(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (value >= 0.67) return "high";
+    if (value >= 0.34) return "medium";
+    if (value >= 0) return "low";
+    return undefined;
+  }
+
+  const normalized = slug(value);
+  if (
+    !normalized ||
+    normalized === "high_medium_low" ||
+    normalized === "high_medium_or_low" ||
+    normalized === "high_or_medium_or_low"
+  ) {
+    return undefined;
+  }
+  if (GROUNDED_FACT_CONFIDENCE_VALUES.includes(normalized)) return normalized;
+  if (
+    [
+      "certain",
+      "strong",
+      "confident",
+      "high_confidence",
+      "very_high",
+      "very_high_confidence",
+    ].includes(normalized)
+  ) {
+    return "high";
+  }
+  if (
+    [
+      "moderate",
+      "normal",
+      "medium_confidence",
+      "moderate_confidence",
+      "partial",
+    ].includes(normalized)
+  ) {
+    return "medium";
+  }
+  if (
+    [
+      "weak",
+      "uncertain",
+      "low_confidence",
+      "low_confidence_fact",
+      "low_certainty",
+    ].includes(normalized)
+  ) {
+    return "low";
+  }
+  return undefined;
+}
+
+export function normalizeGroundedFactForContract(fact) {
+  if (!isPlainObject(fact)) return null;
+  const normalizedFact = { ...fact };
+  const confidence = normalizeGroundedFactConfidence(normalizedFact.confidence);
+  if (!confidence) return null;
+  normalizedFact.confidence = confidence;
+  return normalizedFact;
+}
+
+function textOf(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (isPlainObject(value)) {
+    for (const key of ["text", "summary", "label", "name", "description", "reason"]) {
+      if (isNonEmptyString(value[key])) return value[key].trim();
+    }
+  }
+  return "";
+}
+
+function normalizeStringListForContract(value) {
+  if (Array.isArray(value)) {
+    return value.map(textOf).filter(Boolean);
+  }
+  if (isPlainObject(value)) {
+    for (const key of ["items", "summaries", "criteria", "acceptance", "checks", "lines", "bullets"]) {
+      if (Array.isArray(value[key])) return normalizeStringListForContract(value[key]);
+    }
+    const text = textOf(value);
+    return text ? [text] : [];
+  }
+  const text = textOf(value);
+  return text ? [text] : [];
+}
+
+function normalizeFindingSeverityForContract(value) {
+  if (FINDING_SEVERITY_VALUES.includes(value)) return value;
+  const normalized = slug(value);
+  if (FINDING_SEVERITY_VALUES.includes(normalized)) return normalized;
+  if (["critical", "high", "error", "blocking", "block", "hard", "p0", "p1"].includes(normalized)) {
+    return "blocker";
+  }
+  if (["medium", "warning", "warn", "moderate", "normal", "soft", "p2"].includes(normalized)) {
+    return "concern";
+  }
+  if (["low", "info", "informational", "note", "optional", "p3"].includes(normalized)) {
+    return "fyi";
+  }
+  return "concern";
+}
+
+function normalizeSectionIdForContract(value, fallback = "risks") {
+  const normalized = slug(value);
+  return SECTION_ID_VALUES.includes(normalized) ? normalized : fallback;
+}
+
+function normalizeRiskForContract(risk, index) {
+  const text = textOf(risk);
+  if (!text) return null;
+  if (isPlainObject(risk)) {
+    return {
+      ...risk,
+      id: isNonEmptyString(risk.id) ? risk.id : `RISK-${String(index + 1).padStart(3, "0")}`,
+      text,
+      severity: normalizeFindingSeverityForContract(risk.severity ?? risk.sev ?? risk.level),
+      section: normalizeSectionIdForContract(risk.section ?? risk.target ?? risk.area, "risks"),
+      sourceRef: isNonEmptyString(risk.sourceRef)
+        ? risk.sourceRef
+        : isNonEmptyString(risk.ref)
+          ? risk.ref
+          : "semantix",
+    };
+  }
+  return {
+    id: `RISK-${String(index + 1).padStart(3, "0")}`,
+    text,
+    severity: "concern",
+    section: "risks",
+    sourceRef: "semantix",
+  };
+}
+
+function normalizeRisksForContract(value) {
+  if (value === undefined || value === null) return [];
+  const items = Array.isArray(value) ? value : [value];
+  return items.map(normalizeRiskForContract).filter(Boolean);
+}
+
+export function normalizeSemantixAlignmentPacketForContract(packet) {
+  if (!isPlainObject(packet)) return packet;
+  const normalizedPacket = { ...packet };
+  if (Array.isArray(normalizedPacket.groundedFacts)) {
+    normalizedPacket.groundedFacts = normalizedPacket.groundedFacts
+      .map(normalizeGroundedFactForContract)
+      .filter(Boolean);
+  }
+  if (Object.prototype.hasOwnProperty.call(normalizedPacket, "risks")) {
+    normalizedPacket.risks = normalizeRisksForContract(normalizedPacket.risks);
+  }
+  if (Object.prototype.hasOwnProperty.call(normalizedPacket, "acceptanceSummary")) {
+    normalizedPacket.acceptanceSummary = normalizeStringListForContract(
+      normalizedPacket.acceptanceSummary,
+    );
+  }
+  return normalizedPacket;
+}
+
 function isStringArray(value) {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -393,7 +570,14 @@ function validateGroundedFactInternal(fact, path, errors) {
   if (!isNonEmptyString(fact.text)) {
     pushError(errors, `${path}.text`, "grounded_fact_missing_text", "Grounded fact requires text.");
   }
-  if (fact.confidence !== undefined && !["high", "medium", "low"].includes(fact.confidence)) {
+  if (fact.confidence === undefined) {
+    pushError(
+      errors,
+      `${path}.confidence`,
+      "grounded_fact_missing_confidence",
+      "Grounded fact requires confidence.",
+    );
+  } else if (!GROUNDED_FACT_CONFIDENCE_VALUES.includes(fact.confidence)) {
     pushError(
       errors,
       `${path}.confidence`,
@@ -559,6 +743,30 @@ function validateFindingInternal(finding, path, errors) {
       `${path}.raisedBy`,
       "finding_invalid_raised_by",
       `Finding raisedBy must be one of ${FINDING_RAISED_BY_VALUES.join(", ")}.`,
+    );
+  }
+}
+
+function validateRiskInternal(risk, path, errors) {
+  if (!isPlainObject(risk)) {
+    pushError(errors, path, "risk_not_object", "Risk must be an object.");
+    return;
+  }
+  if (!isNonEmptyString(risk.id)) {
+    pushError(errors, `${path}.id`, "risk_missing_id", "Risk requires a stable id.");
+  }
+  if (!isString(risk.text)) {
+    pushError(errors, `${path}.text`, "risk_missing_text", "Risk requires a text body.");
+  }
+  if (
+    risk.severity !== undefined &&
+    !FINDING_SEVERITY_VALUES.includes(risk.severity)
+  ) {
+    pushError(
+      errors,
+      `${path}.severity`,
+      "risk_invalid_severity",
+      `Risk severity must be one of ${FINDING_SEVERITY_VALUES.join(", ")}.`,
     );
   }
 }
@@ -890,6 +1098,29 @@ export function validateSemantixAlignmentPacket(packet) {
     });
   } else {
     pushError(errors, "$.findings", "invalid_findings", "findings must be an array.");
+  }
+
+  if (packet.risks !== undefined) {
+    if (!Array.isArray(packet.risks)) {
+      pushError(errors, "$.risks", "invalid_risks", "risks must be an array.");
+    } else {
+      validateUniqueIds(packet.risks, "$.risks", errors, "duplicate_risk_id");
+      packet.risks.forEach((risk, index) => {
+        validateRiskInternal(risk, `$.risks[${index}]`, errors);
+      });
+    }
+  }
+
+  if (
+    packet.acceptanceSummary !== undefined &&
+    !isStringArray(packet.acceptanceSummary)
+  ) {
+    pushError(
+      errors,
+      "$.acceptanceSummary",
+      "invalid_acceptance_summary",
+      "acceptanceSummary must be an array of strings.",
+    );
   }
 
   if (!isPlainObject(packet.coverage)) {

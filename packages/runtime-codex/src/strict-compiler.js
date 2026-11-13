@@ -4,7 +4,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join, normalize, relative, resolve, sep } from "node:path";
 
-import { ValidationError } from "../../core/src/contracts.js";
+import {
+  ValidationError,
+  createConstraintIR,
+  createConstraintIRIdentity,
+} from "../../core/src/contracts.js";
 
 export const STRICT_COMPILER_PROMPT_VERSION = "semantix.semantic-admission.v0";
 export const STRICT_COMPILER_OUTPUT_SCHEMA_ID = "semantix.semantic_output.v0";
@@ -44,6 +48,24 @@ const CODE_CHANGE_OPERATIONS = new Set([
   "delete_file",
   "rename_file",
 ]);
+const CONSTRAINT_TARGET_KINDS = new Set([
+  "semantic_output",
+  "state_effect",
+  "tool_call",
+  "runtime_node",
+]);
+const VERIFIER_MODES = new Set(["none", "advisory", "required"]);
+const FAILURE_SEVERITIES = new Set(["hard", "soft"]);
+const CONSTRAINT_FAILURE_CLASSES = new Set([
+  "schema",
+  "path_policy",
+  "capability",
+  "approval",
+  "verifier",
+  "provenance",
+  "runtime",
+]);
+const ADMISSION_EVIDENCE_VERSION = 1;
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -636,8 +658,824 @@ function normalizeReviewMetadataList(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
 function hasOwnProperty(value, propertyName) {
   return Object.prototype.hasOwnProperty.call(Object(value), propertyName);
+}
+
+function normalizeConstraintIdentifier(value) {
+  return String(value ?? "")
+    .trim()
+    .replaceAll(/[^a-zA-Z0-9._:-]/g, "-");
+}
+
+function compileArtifactRef(constraintId, artifactKind) {
+  return `constraint-artifact://${normalizeConstraintIdentifier(constraintId)}/${artifactKind}`;
+}
+
+function assertStringArray(value, path, { optional = true } = {}) {
+  if (value === undefined || value === null) {
+    if (optional) {
+      return [];
+    }
+    throw new ValidationError(`${path} must be an array of strings.`, {
+      path,
+    });
+  }
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new ValidationError(`${path} must be an array of strings.`, {
+      path,
+    });
+  }
+  return value.map((entry) => entry.trim()).filter(Boolean);
+}
+
+function assertNoOverlap(left, right, path, message) {
+  const rightSet = new Set(right);
+  const overlaps = [...new Set(left.filter((entry) => rightSet.has(entry)))];
+  if (overlaps.length) {
+    throw new ValidationError(message, {
+      path,
+      overlaps,
+    });
+  }
+}
+
+function pathPolicyEntryCovers(entry, candidate) {
+  const normalizedEntry = normalize(entry);
+  const normalizedCandidate = normalize(candidate);
+  return (
+    normalizedEntry === normalizedCandidate ||
+    normalizedCandidate.startsWith(`${normalizedEntry}${sep}`)
+  );
+}
+
+function validateConstraintSchemaPolicy(schema, path) {
+  if (schema === undefined || schema === null) {
+    return;
+  }
+  if (!isObject(schema)) {
+    throw new ValidationError(`${path} must be an object.`, {
+      path,
+    });
+  }
+
+  if (schema.jsonSchema !== undefined) {
+    assertStrictSchema(schema.jsonSchema, `${path}.jsonSchema`, {
+      constraintPath: path,
+    });
+  }
+
+  const requiredFields = assertStringArray(schema.requiredFields, `${path}.requiredFields`);
+  const forbiddenFields = assertStringArray(schema.forbiddenFields, `${path}.forbiddenFields`);
+  assertNoOverlap(
+    requiredFields,
+    forbiddenFields,
+    path,
+    "ConstraintIR schema cannot require and forbid the same field.",
+  );
+}
+
+function validateConstraintPathPolicy(pathPolicy, path) {
+  if (pathPolicy === undefined || pathPolicy === null) {
+    return;
+  }
+  if (!isObject(pathPolicy)) {
+    throw new ValidationError(`${path} must be an object.`, {
+      path,
+    });
+  }
+
+  const allow = assertStringArray(pathPolicy.allow, `${path}.allow`);
+  const deny = assertStringArray(pathPolicy.deny, `${path}.deny`);
+  assertStringArray(pathPolicy.operations, `${path}.operations`);
+
+  if (!allow.length || !deny.length) {
+    return;
+  }
+
+  const deniedAllowEntries = allow.filter((allowedPath) =>
+    deny.some((deniedPath) => pathPolicyEntryCovers(deniedPath, allowedPath)),
+  );
+  if (deniedAllowEntries.length === allow.length) {
+    throw new ValidationError("ConstraintIR path policy denies every allowed path.", {
+      path,
+      deniedAllowEntries,
+    });
+  }
+}
+
+function validateConstraintCapabilities(capabilities, path) {
+  if (capabilities === undefined || capabilities === null) {
+    return;
+  }
+  if (!isObject(capabilities)) {
+    throw new ValidationError(`${path} must be an object.`, {
+      path,
+    });
+  }
+
+  const required = assertStringArray(capabilities.required, `${path}.required`);
+  const forbidden = assertStringArray(capabilities.forbidden, `${path}.forbidden`);
+  assertStringArray(capabilities.approvalRequired, `${path}.approvalRequired`);
+  assertNoOverlap(
+    required,
+    forbidden,
+    path,
+    "ConstraintIR capabilities cannot require and forbid the same capability.",
+  );
+}
+
+function validateConstraintApproval(approval, path) {
+  if (approval === undefined || approval === null) {
+    return;
+  }
+  if (!isObject(approval) || typeof approval.required !== "boolean") {
+    throw new ValidationError(`${path}.required must be a boolean.`, {
+      path,
+    });
+  }
+}
+
+function validateConstraintRetry(retry, path) {
+  if (retry === undefined || retry === null) {
+    return;
+  }
+  if (!isObject(retry) || !Number.isInteger(retry.maxAttempts) || retry.maxAttempts < 0) {
+    throw new ValidationError(`${path}.maxAttempts must be a non-negative integer.`, {
+      path,
+    });
+  }
+
+  const retryOn = assertStringArray(retry.retryOn, `${path}.retryOn`);
+  const failOn = assertStringArray(retry.failOn, `${path}.failOn`);
+  assertNoOverlap(
+    retryOn,
+    failOn,
+    path,
+    "ConstraintIR retry policy cannot retry and fail on the same class.",
+  );
+}
+
+function validateConstraintVerifier(verifier, path) {
+  if (verifier === undefined || verifier === null) {
+    return;
+  }
+  if (!isObject(verifier) || !VERIFIER_MODES.has(verifier.mode)) {
+    throw new ValidationError(`${path}.mode must be one of none, advisory, required.`, {
+      path,
+    });
+  }
+}
+
+function validateConstraintFailure(failure, path) {
+  if (failure === undefined || failure === null) {
+    return;
+  }
+  if (!isObject(failure) || !FAILURE_SEVERITIES.has(failure.defaultSeverity)) {
+    throw new ValidationError(`${path}.defaultSeverity must be hard or soft.`, {
+      path,
+    });
+  }
+  if (!Array.isArray(failure.classes)) {
+    throw new ValidationError(`${path}.classes must be an array.`, {
+      path,
+    });
+  }
+
+  failure.classes.forEach((entry, index) => {
+    const entryPath = `${path}.classes[${index}]`;
+    if (!isObject(entry)) {
+      throw new ValidationError(`${entryPath} must be an object.`, {
+        path: entryPath,
+      });
+    }
+    if (!CONSTRAINT_FAILURE_CLASSES.has(entry.class)) {
+      throw new ValidationError(`${entryPath}.class is not supported.`, {
+        path: entryPath,
+        class: entry.class,
+      });
+    }
+    if (!FAILURE_SEVERITIES.has(entry.severity)) {
+      throw new ValidationError(`${entryPath}.severity must be hard or soft.`, {
+        path: entryPath,
+      });
+    }
+    if (typeof entry.retryable !== "boolean") {
+      throw new ValidationError(`${entryPath}.retryable must be a boolean.`, {
+        path: entryPath,
+      });
+    }
+  });
+}
+
+function normalizeConstraintIR(ir, path) {
+  if (!isObject(ir)) {
+    throw new ValidationError(`${path} must be a ConstraintIR object.`, {
+      path,
+    });
+  }
+  if (!CONSTRAINT_TARGET_KINDS.has(ir.target?.kind)) {
+    throw new ValidationError(`${path}.target.kind is not supported.`, {
+      path: `${path}.target.kind`,
+      targetKind: ir.target?.kind,
+    });
+  }
+
+  validateConstraintSchemaPolicy(ir.schema, `${path}.schema`);
+  validateConstraintPathPolicy(ir.pathPolicy, `${path}.pathPolicy`);
+  validateConstraintCapabilities(ir.capabilities, `${path}.capabilities`);
+  validateConstraintApproval(ir.approval, `${path}.approval`);
+  validateConstraintRetry(ir.retry, `${path}.retry`);
+  validateConstraintVerifier(ir.verifier, `${path}.verifier`);
+  validateConstraintFailure(ir.failure, `${path}.failure`);
+
+  return createConstraintIR(ir);
+}
+
+function buildCompiledArtifacts(ir) {
+  const compiledArtifacts = {};
+
+  if (ir.schema?.jsonSchema) {
+    compiledArtifacts.schemaValidatorRef = compileArtifactRef(ir.id, "schema-validator");
+  }
+  if (ir.schema?.requiredFields?.length || ir.schema?.forbiddenFields?.length) {
+    compiledArtifacts.fieldValidatorRef = compileArtifactRef(ir.id, "field-validator");
+  }
+  if (ir.pathPolicy) {
+    compiledArtifacts.pathPolicyRef = compileArtifactRef(ir.id, "path-policy");
+  }
+  if (ir.approval?.required || ir.capabilities?.approvalRequired?.length) {
+    compiledArtifacts.approvalMarkerRef = compileArtifactRef(ir.id, "approval-marker");
+  }
+  if (ir.retry) {
+    compiledArtifacts.retryPolicyRef = compileArtifactRef(ir.id, "retry-policy");
+  }
+  if (ir.failure) {
+    compiledArtifacts.failurePolicyRef = compileArtifactRef(ir.id, "failure-policy");
+  }
+  if (ir.verifier?.mode && ir.verifier.mode !== "none") {
+    compiledArtifacts.verifierRef = compileArtifactRef(ir.id, "verifier-policy");
+  }
+
+  return compiledArtifacts;
+}
+
+function collectPlanConstraintIRs({ node, artifact, hardValidationSchema }) {
+  const planIRs =
+    artifact?.plan?.constraintIRs ??
+    artifact?.constraintIRs ??
+    [];
+  const nodeIRs = node?.constraintIRs ?? [];
+  if (!Array.isArray(planIRs) || !Array.isArray(nodeIRs)) {
+    throw new ValidationError("constraintIRs must be an array when provided.", {
+      path: "constraintIRs",
+    });
+  }
+
+  const refs = [
+    ...assertStringArray(node?.constraintIrRefs, "node.constraintIrRefs"),
+    ...assertStringArray(node?.constraintIRRefs, "node.constraintIRRefs"),
+  ];
+  if (!refs.length) {
+    return [
+      ...planIRs.filter((ir) => !ir?.target?.nodeId || ir.target.nodeId === node?.id),
+      ...nodeIRs,
+    ];
+  }
+
+  const availableIRs = [...planIRs, ...nodeIRs];
+  const missingRefs = refs.filter((ref) => !availableIRs.some((ir) => ir?.id === ref));
+  if (missingRefs.length) {
+    throw new ValidationError("Node references unknown ConstraintIR policies.", {
+      nodeId: node?.id,
+      missingRefs,
+    });
+  }
+  const refSet = new Set(refs);
+  return [...planIRs.filter((ir) => refSet.has(ir?.id)), ...nodeIRs];
+}
+
+function buildFallbackSemanticOutputIR({ node, hardValidationSchema }) {
+  if (!isObject(hardValidationSchema)) {
+    return null;
+  }
+  const nodeId = String(node?.id ?? "semantic-output");
+  return createConstraintIR({
+    id: `${nodeId}.hard-validation-schema`,
+    sourceRef: `${nodeId}.hard_validation_schema`,
+    target: {
+      kind: "semantic_output",
+      nodeId,
+    },
+    schema: {
+      format: "json",
+      jsonSchema: hardValidationSchema,
+    },
+    retry: {
+      maxAttempts: 0,
+      retryOn: [],
+      failOn: ["schema"],
+    },
+    failure: {
+      defaultSeverity: "hard",
+      classes: [
+        {
+          code: "schema_mismatch",
+          class: "schema",
+          severity: "hard",
+          retryable: false,
+          message: "Semantic output must match the node hard_validation_schema.",
+        },
+      ],
+    },
+  });
+}
+
+export function compileConstraintBundle({
+  node,
+  artifact,
+  hardValidationSchema,
+  constraintIRs,
+} = {}) {
+  const sourceIRs = Array.isArray(constraintIRs)
+    ? constraintIRs
+    : collectPlanConstraintIRs({ node, artifact, hardValidationSchema });
+  const fallbackIR = sourceIRs.length
+    ? null
+    : buildFallbackSemanticOutputIR({ node, hardValidationSchema });
+  const irs = fallbackIR ? [fallbackIR] : sourceIRs;
+  const compiledConstraints = [];
+  const identities = [];
+  const artifacts = [];
+
+  irs.forEach((ir, index) => {
+    const normalized = normalizeConstraintIR(ir, `constraintIRs[${index}]`);
+    const identity = createConstraintIRIdentity(normalized);
+    const compiledArtifacts = {
+      ...buildCompiledArtifacts(normalized),
+      ...cloneJson(normalized.compiledArtifacts ?? {}),
+    };
+    const compiled = {
+      ...normalized,
+      identity,
+      compiledArtifacts,
+    };
+
+    compiledConstraints.push(compiled);
+    identities.push({
+      id: compiled.id,
+      identity,
+    });
+    for (const [kind, ref] of Object.entries(compiledArtifacts)) {
+      artifacts.push({
+        ref,
+        kind,
+        constraintId: compiled.id,
+        deterministic: true,
+      });
+    }
+  });
+
+  return {
+    version: 1,
+    targetNodeId: node?.id ?? null,
+    identities,
+    constraints: compiledConstraints,
+    artifacts,
+    validators: {
+      structural: artifacts.filter((artifactRef) => artifactRef.kind === "schemaValidatorRef"),
+      fields: artifacts.filter((artifactRef) => artifactRef.kind === "fieldValidatorRef"),
+      pathPolicies: artifacts.filter((artifactRef) => artifactRef.kind === "pathPolicyRef"),
+      approvals: artifacts.filter((artifactRef) => artifactRef.kind === "approvalMarkerRef"),
+      retryPolicies: artifacts.filter((artifactRef) => artifactRef.kind === "retryPolicyRef"),
+      failurePolicies: artifacts.filter((artifactRef) => artifactRef.kind === "failurePolicyRef"),
+      verifiers: artifacts.filter((artifactRef) => artifactRef.kind === "verifierRef"),
+    },
+  };
+}
+
+function getConstraintRetryPolicies(constraintBundle) {
+  return Array.isArray(constraintBundle?.constraints)
+    ? constraintBundle.constraints.map((constraint) => constraint?.retry).filter(isObject)
+    : [];
+}
+
+export function getConstraintAdmissionRetryPolicy(constraintBundle) {
+  const policies = getConstraintRetryPolicies(constraintBundle);
+  const retryOn = new Set();
+  const failOn = new Set();
+  let maxAttempts = 0;
+
+  for (const policy of policies) {
+    if (Number.isInteger(policy.maxAttempts) && policy.maxAttempts > maxAttempts) {
+      maxAttempts = policy.maxAttempts;
+    }
+    for (const entry of normalizeStringList(policy.retryOn)) {
+      retryOn.add(entry);
+    }
+    for (const entry of normalizeStringList(policy.failOn)) {
+      failOn.add(entry);
+    }
+  }
+
+  return {
+    maxAttempts,
+    retryOn: [...retryOn].sort(),
+    failOn: [...failOn].sort(),
+  };
+}
+
+function findFailurePolicyEntry(constraintBundle, failureClass, reasonCode, constraintId) {
+  const entries = (constraintBundle?.constraints ?? [])
+    .filter((constraint) => !constraintId || constraint.id === constraintId)
+    .flatMap((constraint) => (constraint.failure?.classes ?? []).map((entry) => ({
+      constraintId: constraint.id,
+      ...entry,
+    })));
+  return entries.find((entry) => entry.code === reasonCode) ??
+    entries.find((entry) => entry.class === failureClass) ??
+    null;
+}
+
+function makeAdmissionViolation({
+  message,
+  details,
+  reasonCode,
+  failureClass,
+  constraint,
+  evidence = [],
+}) {
+  throw new ValidationError(message, {
+    ...details,
+    reasonCode,
+    failureClass,
+    constraintId: constraint?.id,
+    evidence,
+    admissionStatus: "rejected",
+  });
+}
+
+function validateConstraintSchemaFields(candidate, constraint, details) {
+  const requiredFields = normalizeStringList(constraint.schema?.requiredFields);
+  const forbiddenFields = normalizeStringList(constraint.schema?.forbiddenFields);
+  if (!requiredFields.length && !forbiddenFields.length) {
+    return;
+  }
+
+  if (!isObject(candidate)) {
+    makeAdmissionViolation({
+      message: "Semantic admission requires an object candidate for compiled field validation.",
+      details,
+      reasonCode: "field_contract_requires_object",
+      failureClass: "schema",
+      constraint,
+    });
+  }
+
+  const missing = requiredFields.filter((field) => !hasOwnProperty(candidate, field));
+  if (missing.length) {
+    makeAdmissionViolation({
+      message: `Semantic admission rejected missing required field '${missing[0]}'.`,
+      details,
+      reasonCode: "required_field_missing",
+      failureClass: "schema",
+      constraint,
+      evidence: missing.map((field) => ({
+        kind: "required_field",
+        detail: field,
+      })),
+    });
+  }
+
+  const presentForbidden = forbiddenFields.filter((field) => hasOwnProperty(candidate, field));
+  if (presentForbidden.length) {
+    makeAdmissionViolation({
+      message: `Semantic admission rejected forbidden field '${presentForbidden[0]}'.`,
+      details,
+      reasonCode: "forbidden_field_present",
+      failureClass: "schema",
+      constraint,
+      evidence: presentForbidden.map((field) => ({
+        kind: "forbidden_field",
+        detail: field,
+      })),
+    });
+  }
+}
+
+function validateConstraintSchema(candidate, constraint, details) {
+  if (constraint.schema?.jsonSchema) {
+    try {
+      validateAgainstSchema(candidate, constraint.schema.jsonSchema, "$", {
+        ...details,
+        constraintId: constraint.id,
+      });
+    } catch (error) {
+      makeAdmissionViolation({
+        message: error.message,
+        details: {
+          ...details,
+          originalError: error.details,
+        },
+        reasonCode: "schema_mismatch",
+        failureClass: "schema",
+        constraint,
+      });
+    }
+  }
+
+  validateConstraintSchemaFields(candidate, constraint, details);
+}
+
+function resolvePolicyPath(workspaceRoot, policyRoot, value) {
+  const raw = typeof value === "string" && value.trim() ? value.trim() : ".";
+  return normalize(resolve(policyRoot ?? workspaceRoot, raw));
+}
+
+function collectCandidatePathOperations(candidate) {
+  const operations = normalizeProposalChanges(candidate)
+    .filter((change) => typeof change.workspace_path === "string" || typeof change.new_workspace_path === "string")
+    .flatMap((change) => [
+      {
+        operation: change.operation ?? "modify_file",
+        workspacePath: change.workspace_path,
+      },
+      {
+        operation: change.operation === "rename_file" ? "rename_file" : change.operation ?? "modify_file",
+        workspacePath: change.new_workspace_path,
+      },
+    ])
+    .filter((entry) => typeof entry.workspacePath === "string" && entry.workspacePath.trim());
+
+  if (!operations.length && typeof candidate?.workspace_path === "string") {
+    operations.push({
+      operation: "modify_file",
+      workspacePath: candidate.workspace_path,
+    });
+  }
+
+  return operations;
+}
+
+function validateCandidatePathPolicy(candidate, constraint, semanticFrameContext, details) {
+  const pathPolicy = constraint.pathPolicy;
+  if (!isObject(pathPolicy)) {
+    return;
+  }
+
+  const candidateOperations = collectCandidatePathOperations(candidate);
+  if (!candidateOperations.length) {
+    return;
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(semanticFrameContext);
+  const policyRoot = resolvePolicyPath(workspaceRoot, workspaceRoot, pathPolicy.root ?? ".");
+  const allowedRoots = normalizeStringList(pathPolicy.allow).map((entry) =>
+    resolvePolicyPath(workspaceRoot, policyRoot, entry),
+  );
+  const deniedRoots = normalizeStringList(pathPolicy.deny).map((entry) =>
+    resolvePolicyPath(workspaceRoot, policyRoot, entry),
+  );
+  const allowedOperations = new Set(normalizeStringList(pathPolicy.operations));
+
+  for (const candidateOperation of candidateOperations) {
+    if (allowedOperations.size && !allowedOperations.has(candidateOperation.operation)) {
+      makeAdmissionViolation({
+        message: `Semantic admission rejected operation '${candidateOperation.operation}' by path policy.`,
+        details,
+        reasonCode: "path_operation_not_allowed",
+        failureClass: "path_policy",
+        constraint,
+        evidence: [{
+          kind: "path_operation",
+          detail: candidateOperation.operation,
+          path: candidateOperation.workspacePath,
+        }],
+      });
+    }
+
+    const targetPath = resolveProposalPath(workspaceRoot, candidateOperation.workspacePath);
+    if (!targetPath || !isPathInsideWorkspace(policyRoot, targetPath)) {
+      makeAdmissionViolation({
+        message: "Semantic admission rejected a path outside the compiled policy root.",
+        details,
+        reasonCode: "path_outside_policy_root",
+        failureClass: "path_policy",
+        constraint,
+        evidence: [{
+          kind: "path_policy_root",
+          detail: policyRoot,
+          path: candidateOperation.workspacePath,
+        }],
+      });
+    }
+
+    if (
+      allowedRoots.length &&
+      !allowedRoots.some((allowedRoot) => isPathInsideWorkspace(allowedRoot, targetPath))
+    ) {
+      makeAdmissionViolation({
+        message: "Semantic admission rejected a path outside the compiled allowlist.",
+        details,
+        reasonCode: "path_outside_allowlist",
+        failureClass: "path_policy",
+        constraint,
+        evidence: [{
+          kind: "path_allowlist",
+          detail: allowedRoots.map((entry) => toWorkspaceRelativePath(workspaceRoot, entry)).join(", "),
+          path: candidateOperation.workspacePath,
+        }],
+      });
+    }
+
+    const deniedRoot = deniedRoots.find((entry) => isPathInsideWorkspace(entry, targetPath));
+    if (deniedRoot) {
+      makeAdmissionViolation({
+        message: "Semantic admission rejected a path covered by the compiled denylist.",
+        details,
+        reasonCode: "path_denied",
+        failureClass: "path_policy",
+        constraint,
+        evidence: [{
+          kind: "path_denylist",
+          detail: toWorkspaceRelativePath(workspaceRoot, deniedRoot),
+          path: candidateOperation.workspacePath,
+        }],
+      });
+    }
+  }
+}
+
+function collectCandidateCapabilities(candidate) {
+  const values = [
+    candidate?.capabilities,
+    candidate?.requiredCapabilities,
+    candidate?.requestedCapabilities,
+    candidate?.capabilityScope?.permissions,
+  ];
+  return [...new Set(values.flatMap((value) => normalizeStringList(value)))].sort();
+}
+
+function validateConstraintCapabilitiesPolicy(candidate, constraint, details) {
+  if (!isObject(constraint.capabilities)) {
+    return;
+  }
+
+  const candidateCapabilities = collectCandidateCapabilities(candidate);
+  const capabilitySet = new Set(candidateCapabilities);
+  const missing = normalizeStringList(constraint.capabilities.required).filter(
+    (capability) => !capabilitySet.has(capability),
+  );
+  if (missing.length) {
+    makeAdmissionViolation({
+      message: `Semantic admission rejected missing required capability '${missing[0]}'.`,
+      details,
+      reasonCode: "capability_missing",
+      failureClass: "capability",
+      constraint,
+      evidence: missing.map((capability) => ({
+        kind: "required_capability",
+        detail: capability,
+      })),
+    });
+  }
+
+  const forbidden = normalizeStringList(constraint.capabilities.forbidden).filter((capability) =>
+    capabilitySet.has(capability),
+  );
+  if (forbidden.length) {
+    makeAdmissionViolation({
+      message: `Semantic admission rejected forbidden capability '${forbidden[0]}'.`,
+      details,
+      reasonCode: "capability_forbidden",
+      failureClass: "capability",
+      constraint,
+      evidence: forbidden.map((capability) => ({
+        kind: "forbidden_capability",
+        detail: capability,
+      })),
+    });
+  }
+}
+
+export function validateCandidateAgainstConstraintBundle({
+  candidate,
+  constraintBundle,
+  semanticFrameContext,
+  details = {},
+} = {}) {
+  for (const constraint of constraintBundle?.constraints ?? []) {
+    validateConstraintSchema(candidate, constraint, details);
+    validateCandidatePathPolicy(candidate, constraint, semanticFrameContext, details);
+    validateConstraintCapabilitiesPolicy(candidate, constraint, details);
+  }
+}
+
+export function classifyAdmissionError({ error, constraintBundle } = {}) {
+  const retryPolicy = getConstraintAdmissionRetryPolicy(constraintBundle);
+  const reasonCode =
+    error?.details?.reasonCode ??
+    (error?.details?.parseError ? "invalid_json" : "schema_mismatch");
+  const failureClass =
+    error?.details?.failureClass ??
+    (reasonCode.startsWith("path_") ? "path_policy" : "schema");
+  const failurePolicy = findFailurePolicyEntry(
+    constraintBundle,
+    failureClass,
+    reasonCode,
+    error?.details?.constraintId,
+  );
+  const failOn = new Set(retryPolicy.failOn);
+  const retryOn = new Set(retryPolicy.retryOn);
+  const policyRetryable =
+    failurePolicy?.retryable ??
+    (retryOn.has(failureClass) || retryOn.has(reasonCode));
+  const retryable =
+    Boolean(policyRetryable) &&
+    !failOn.has(failureClass) &&
+    !failOn.has(reasonCode) &&
+    retryPolicy.maxAttempts > 0;
+
+  return {
+    reasonCode,
+    failureClass,
+    severity: failurePolicy?.severity ?? "hard",
+    retryable,
+    message: failurePolicy?.message ?? error?.message ?? "Semantic admission rejected.",
+    constraintId: error?.details?.constraintId ?? failurePolicy?.constraintId ?? null,
+    evidence: error?.details?.evidence ?? [],
+    retryPolicy,
+  };
+}
+
+export function createAdmissionAttemptEvidence({
+  attemptNumber,
+  status,
+  stdout,
+  outputSummary,
+  failure,
+} = {}) {
+  return {
+    attemptNumber,
+    status,
+    reasonCode: failure?.reasonCode ?? (status === "admitted" ? "admitted" : "unknown"),
+    failureClass: failure?.failureClass ?? null,
+    severity: failure?.severity ?? null,
+    retryable: Boolean(failure?.retryable),
+    constraintId: failure?.constraintId ?? null,
+    message: failure?.message ?? outputSummary ?? null,
+    evidence: failure?.evidence ?? [],
+    stdoutSha256: stdout == null ? null : sha256Text(String(stdout)),
+  };
+}
+
+export function buildRetryCompilerInput({
+  input,
+  previousAttempts = [],
+  retryPolicy,
+  attemptNumber,
+} = {}) {
+  let parsed;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    return input;
+  }
+
+  return JSON.stringify(
+    {
+      ...parsed,
+      SemanticAdmissionContract: {
+        ...parsed.SemanticAdmissionContract,
+        retryAttempt: {
+          attemptNumber,
+          maxAttempts: retryPolicy?.maxAttempts ?? 0,
+        },
+      },
+      Context: {
+        ...parsed.Context,
+        previousAdmissionAttempts: previousAttempts,
+      },
+      Task:
+        "Return only one corrected raw JSON document. The prior candidate failed deterministic Semantix admission; do not explain, wrap, or include retry metadata in the output.",
+    },
+    null,
+    2,
+  );
+}
+
+function buildAdmissionEvidence({ status, attempts, constraintBundle }) {
+  return {
+    version: ADMISSION_EVIDENCE_VERSION,
+    status,
+    retryPolicy: getConstraintAdmissionRetryPolicy(constraintBundle),
+    attempts,
+    finalAttempt: attempts.at(-1) ?? null,
+  };
 }
 
 function resolveWorkspaceRoot(semanticFrameContext) {
@@ -2329,6 +3167,7 @@ export function buildStrictCompilerInput({
   hardValidationSchema,
   semanticFrameContext,
   constraintCatalog,
+  constraintBundle,
 }) {
   return JSON.stringify(
     {
@@ -2340,6 +3179,7 @@ export function buildStrictCompilerInput({
         noRetry: true,
         activeNodeId: node.id,
         hard_validation_schema: hardValidationSchema,
+        constraintBundle,
       },
       IntentContract: {
         id: intent?.id,
@@ -2366,6 +3206,7 @@ export function buildStrictCompilerInput({
           hard_validation_schema: hardValidationSchema,
         },
         constraintCatalog,
+        constraintBundle,
         stateEffectPreview: artifact?.plan?.stateEffects ?? [],
         approvalGates: (artifact?.plan?.approvalGates ?? []).filter((gate) => gate.targetNodeId === node?.id),
       },
@@ -2399,11 +3240,17 @@ export function buildStrictCompilerContext({ runId, node, intent, artifact }) {
     node,
     intent,
   });
+  const constraintBundle = compileConstraintBundle({
+    node,
+    artifact,
+    hardValidationSchema,
+  });
 
   return {
     hardValidationSchema,
     semanticFrameContext,
     constraintCatalog,
+    constraintBundle,
     input: buildStrictCompilerInput({
       runId,
       node,
@@ -2412,6 +3259,7 @@ export function buildStrictCompilerContext({ runId, node, intent, artifact }) {
       hardValidationSchema,
       semanticFrameContext,
       constraintCatalog,
+      constraintBundle,
     }),
   };
 }
@@ -2422,15 +3270,64 @@ export function normalizeStrictCompilerEnvelope({
   stdout,
   hardValidationSchema,
   semanticFrameContext,
+  constraintBundle,
+  artifact,
+  previousAdmissionAttempts = [],
+  attemptNumber = 1,
 }) {
   const details = {
     runId,
     nodeId: node.id,
     outputSchemaId: STRICT_COMPILER_OUTPUT_SCHEMA_ID,
   };
+  const compiledConstraintBundle =
+    constraintBundle ??
+    compileConstraintBundle({
+      node,
+      artifact,
+      hardValidationSchema,
+    });
 
-  const admittedOutput = parseStrictJsonStdout(stdout, details);
-  validateAgainstSchema(admittedOutput, hardValidationSchema, "$", details);
+  let admittedOutput;
+  try {
+    admittedOutput = parseStrictJsonStdout(stdout, details);
+    validateAgainstSchema(admittedOutput, hardValidationSchema, "$", details);
+    validateCandidateAgainstConstraintBundle({
+      candidate: admittedOutput,
+      constraintBundle: compiledConstraintBundle,
+      semanticFrameContext,
+      details,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      const failure = classifyAdmissionError({
+        error,
+        constraintBundle: compiledConstraintBundle,
+      });
+      error.details = {
+        ...(error.details ?? {}),
+        reasonCode: failure.reasonCode,
+        failureClass: failure.failureClass,
+        severity: failure.severity,
+        retryable: failure.retryable,
+        constraintId: failure.constraintId,
+        admissionEvidence: buildAdmissionEvidence({
+          status: "rejected",
+          constraintBundle: compiledConstraintBundle,
+          attempts: [
+            ...previousAdmissionAttempts,
+            createAdmissionAttemptEvidence({
+              attemptNumber,
+              status: "rejected",
+              stdout,
+              failure,
+            }),
+          ],
+        }),
+      };
+    }
+    throw error;
+  }
 
   const outputSummary = buildSemanticOutputSummary(admittedOutput, node);
   const diffPreview = getProposalDiffPreview(admittedOutput);
@@ -2439,6 +3336,19 @@ export function normalizeStrictCompilerEnvelope({
     semanticFrameContext,
   });
   const isCodeChange = isCodeChangeProposal(admittedOutput) && !semanticReview.semanticOnly;
+  const admissionEvidence = buildAdmissionEvidence({
+    status: "admitted",
+    constraintBundle: compiledConstraintBundle,
+    attempts: [
+      ...previousAdmissionAttempts,
+      createAdmissionAttemptEvidence({
+        attemptNumber,
+        status: "admitted",
+        stdout,
+        outputSummary,
+      }),
+    ],
+  });
 
   return {
     executionStatus: "succeeded",
@@ -2448,6 +3358,7 @@ export function normalizeStrictCompilerEnvelope({
     checkpoint: {
       reason: "semantic_output_admitted",
     },
+    admissionEvidence,
     admittedOutput,
     inspectorPatch: {
       proposedAction: {
@@ -2478,6 +3389,8 @@ export function normalizeStrictCompilerEnvelope({
         outputSchemaId: STRICT_COMPILER_OUTPUT_SCHEMA_ID,
         hardValidationSchema,
         semanticFrameContext,
+        constraintBundle: compiledConstraintBundle,
+        admission: admissionEvidence,
         admittedOutput,
       },
     },

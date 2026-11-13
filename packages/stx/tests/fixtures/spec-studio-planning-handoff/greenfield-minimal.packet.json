@@ -1,0 +1,108 @@
+{
+  "acceptanceSummary": [
+    "Hero copy and two accessible call-to-action buttons are visible and operable."
+  ],
+  "alignedRequirement": "Build a new single-page product website with accessible call-to-action buttons and clear success criteria.",
+  "approvalRequired": true,
+  "assumptions": [
+    {
+      "evidenceRefs": [
+        "evidence:ev-user-answers"
+      ],
+      "grounding": {
+        "assumptionRefs": [],
+        "confidence": "high",
+        "decisionRefs": [
+          "decision:dec-answer-purpose"
+        ],
+        "evidenceRefs": [
+          "evidence:ev-user-answers"
+        ],
+        "provenanceRefs": [
+          "provenance:prov-asm-static-site"
+        ],
+        "sourceFactRefs": [],
+        "status": "grounded"
+      },
+      "id": "asm-static-site",
+      "sourceRef": "decision:dec-answer-purpose",
+      "text": "The first version can be a static site without authentication."
+    }
+  ],
+  "blockingReasons": [],
+  "contextSources": [],
+  "contractVersion": "semantix.phalanx.spec-studio.v1",
+  "coverage": {
+    "alignmentPct": 100,
+    "openBlockers": 0,
+    "openConcerns": 0,
+    "openFYI": 0,
+    "sections": []
+  },
+  "existingSystemContext": {
+    "mode": "new"
+  },
+  "findings": [],
+  "flow": {
+    "dataNeeded": [],
+    "pages": [
+      {
+        "id": "page-landing",
+        "name": "Landing page",
+        "purpose": "Present the offer and calls to action.",
+        "sourceRef": "req-hero-actions"
+      }
+    ],
+    "states": [],
+    "transitions": []
+  },
+  "groundedFacts": [],
+  "iteration": 3,
+  "nextTurn": null,
+  "openQuestions": [],
+  "originalUserRequest": "create a website with buttons",
+  "readiness": "ready",
+  "readinessReason": "The greenfield purpose, audience, core interaction, and done criteria are locked.",
+  "requirements": [
+    {
+      "acceptance": "A visitor can see the hero copy and activate both call-to-action buttons with mouse or keyboard.",
+      "evidenceRefs": [
+        "evidence:ev-user-answers"
+      ],
+      "grounding": {
+        "assumptionRefs": [],
+        "confidence": "high",
+        "decisionRefs": [
+          "decision:dec-answer-purpose"
+        ],
+        "evidenceRefs": [
+          "evidence:ev-user-answers"
+        ],
+        "provenanceRefs": [
+          "provenance:prov-req-hero-actions"
+        ],
+        "sourceFactRefs": [],
+        "status": "grounded"
+      },
+      "id": "req-hero-actions",
+      "priority": "must",
+      "sourceRef": "decision:dec-answer-purpose",
+      "status": "confirmed",
+      "text": "The website presents a hero section with two accessible call-to-action buttons.",
+      "type": "functional"
+    }
+  ],
+  "risks": [],
+  "scope": {
+    "inScope": [
+      "Single-page product website",
+      "Accessible call-to-action buttons"
+    ],
+    "negativeRequirements": [],
+    "outOfScope": []
+  },
+  "semanticObligations": [],
+  "sessionId": "spec_greenfield_minimal",
+  "source": "semantix",
+  "userDecisions": []
+}

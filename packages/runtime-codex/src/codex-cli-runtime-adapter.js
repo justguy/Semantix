@@ -2,7 +2,13 @@ import { makeEvent } from "../../core/src/contracts.js";
 import { CodexAppServerConnector } from "./connectors/codex-app-server-connector.js";
 import { CodexCliConnector } from "./connectors/codex-cli-connector.js";
 import {
+  STRICT_COMPILER_OUTPUT_SCHEMA_ID,
+  STRICT_COMPILER_PROMPT_VERSION,
+  buildRetryCompilerInput,
   buildStrictCompilerContext as buildSemanticAdmissionContext,
+  classifyAdmissionError,
+  createAdmissionAttemptEvidence,
+  getConstraintAdmissionRetryPolicy,
   normalizeStrictCompilerEnvelope,
   writeStrictCompilerInstructionsFile,
 } from "./strict-compiler.js";
@@ -298,15 +304,26 @@ export class CodexCliRuntimeAdapter {
   }
 
   buildStrictCompilerContext({ runId, node, intent, artifact }) {
-    return buildSemanticAdmissionContext({
+    const compilerContext = buildSemanticAdmissionContext({
       runId,
       node,
       intent,
       artifact,
     });
+    return {
+      ...compilerContext,
+      artifact,
+    };
   }
 
-  normalizeRunnerPayload({ runId, node, result, compilerContext }) {
+  normalizeRunnerPayload({
+    runId,
+    node,
+    result,
+    compilerContext,
+    previousAdmissionAttempts = [],
+    attemptNumber = 1,
+  }) {
     const executionStatus = result.exitCode === 0 ? "succeeded" : "failed";
     const stdoutSummary = result.stdout.trim();
     const stderrSummary = result.stderr.trim();
@@ -345,12 +362,17 @@ export class CodexCliRuntimeAdapter {
       stdout: result.stdout,
       hardValidationSchema: compilerContext.hardValidationSchema,
       semanticFrameContext: compilerContext.semanticFrameContext,
+      constraintBundle: compilerContext.constraintBundle,
+      artifact: compilerContext.artifact,
+      previousAdmissionAttempts,
+      attemptNumber,
     });
 
     return {
       executionStatus: normalized.executionStatus,
       outputSummary: normalized.outputSummary,
       admittedOutput: normalized.admittedOutput,
+      admissionEvidence: normalized.admissionEvidence,
       stateEffects: normalized.stateEffects,
       riskSignals: normalized.riskSignals,
       checkpoint: normalized.checkpoint,
@@ -397,90 +419,220 @@ export class CodexCliRuntimeAdapter {
         runId,
         nodeId: node.id,
       });
-      const result = await this.connector.execute({
-        input: compilerContext.input,
-        context: {
-          runId,
-          node,
-          intent,
-          artifact,
-        },
-        cwd: this.connector.cwd,
-        rawOverrides: {
-          model_instructions_file: instructionsPath,
-        },
-        onStdoutLine: (line) => {
-          this.pushEvent(
+      const retryPolicy = getConstraintAdmissionRetryPolicy(compilerContext.constraintBundle);
+      const admissionAttempts = [];
+
+      for (let attemptNumber = 1; attemptNumber <= retryPolicy.maxAttempts + 1; attemptNumber += 1) {
+        const input =
+          attemptNumber === 1
+            ? compilerContext.input
+            : buildRetryCompilerInput({
+                input: compilerContext.input,
+                previousAttempts: admissionAttempts,
+                retryPolicy,
+                attemptNumber,
+              });
+        const result = await this.connector.execute({
+          input,
+          context: {
             runId,
-            makeEvent({
-              runId,
-              type: "node.updated",
-              timestamp: Date.now(),
-              nodeId: node.id,
-              payload: {
-                stream: "stdout",
-                line,
-              },
-            }),
-          );
-        },
-        onStderrLine: (line) => {
-          this.pushEvent(
-            runId,
-            makeEvent({
-              runId,
-              type: "node.updated",
-              timestamp: Date.now(),
-              nodeId: node.id,
-              payload: {
-                stream: "stderr",
-                line,
-              },
-            }),
-          );
-        },
-        onJsonMessage: (message) => {
-          if (typeof message?.type === "string") {
+            node,
+            intent,
+            artifact,
+            attemptNumber,
+            previousAdmissionAttempts: admissionAttempts,
+          },
+          cwd: this.connector.cwd,
+          rawOverrides: {
+            model_instructions_file: instructionsPath,
+          },
+          onStdoutLine: (line) => {
             this.pushEvent(
               runId,
               makeEvent({
                 runId,
-                type: message.type,
+                type: "node.updated",
                 timestamp: Date.now(),
-                nodeId: message.nodeId ?? node.id,
-                payload: message.payload ?? message,
+                nodeId: node.id,
+                payload: {
+                  stream: "stdout",
+                  line,
+                },
               }),
             );
-            return;
+          },
+          onStderrLine: (line) => {
+            this.pushEvent(
+              runId,
+              makeEvent({
+                runId,
+                type: "node.updated",
+                timestamp: Date.now(),
+                nodeId: node.id,
+                payload: {
+                  stream: "stderr",
+                  line,
+                },
+              }),
+            );
+          },
+          onJsonMessage: (message) => {
+            if (typeof message?.type === "string") {
+              this.pushEvent(
+                runId,
+                makeEvent({
+                  runId,
+                  type: message.type,
+                  timestamp: Date.now(),
+                  nodeId: message.nodeId ?? node.id,
+                  payload: message.payload ?? message,
+                }),
+              );
+              return;
+            }
+
+            this.pushEvent(
+              runId,
+              makeEvent({
+                runId,
+                type: "node.updated",
+                timestamp: Date.now(),
+                nodeId: node.id,
+                payload: {
+                  connectorMessage: message,
+                },
+              }),
+            );
+          },
+        });
+
+        if (result.exitCode !== 0) {
+          const normalized = this.normalizeRunnerPayload({
+            runId,
+            node,
+            result,
+            compilerContext,
+            previousAdmissionAttempts: admissionAttempts,
+            attemptNumber,
+          });
+          for (const event of normalized.events) {
+            this.pushEvent(runId, event);
           }
+          return normalized;
+        }
+
+        try {
+          const normalized = this.normalizeRunnerPayload({
+            runId,
+            node,
+            result,
+            compilerContext,
+            previousAdmissionAttempts: admissionAttempts,
+            attemptNumber,
+          });
+
+          for (const event of normalized.events) {
+            this.pushEvent(runId, event);
+          }
+
+          return normalized;
+        } catch (error) {
+          const failure = classifyAdmissionError({
+            error,
+            constraintBundle: compilerContext.constraintBundle,
+          });
+          const retryScheduled = failure.retryable && attemptNumber <= retryPolicy.maxAttempts;
+          const attemptEvidence = createAdmissionAttemptEvidence({
+            attemptNumber,
+            status: retryScheduled ? "retry_scheduled" : "rejected",
+            stdout: result.stdout,
+            failure,
+          });
+          admissionAttempts.push(attemptEvidence);
 
           this.pushEvent(
             runId,
             makeEvent({
               runId,
-              type: "node.updated",
+              type: retryScheduled ? "admission.retry_scheduled" : "admission.rejected",
               timestamp: Date.now(),
               nodeId: node.id,
               payload: {
-                connectorMessage: message,
+                attempt: attemptEvidence,
+                retryPolicy,
               },
             }),
           );
-        },
-      });
 
-      const normalized = this.normalizeRunnerPayload({
-        runId,
-        node,
-        result,
-        compilerContext,
-      });
+          if (retryScheduled) {
+            continue;
+          }
 
-      for (const event of normalized.events) {
-        this.pushEvent(runId, event);
+          return {
+            executionStatus: "failed",
+            outputSummary: `Semantic admission rejected (${failure.reasonCode}): ${failure.message}`,
+            admittedOutput: null,
+            admissionEvidence: {
+              version: 1,
+              status: "rejected",
+              retryPolicy,
+              attempts: admissionAttempts,
+              finalAttempt: admissionAttempts.at(-1) ?? null,
+            },
+            stateEffects: [],
+            riskSignals: [],
+            checkpoint: null,
+            inspectorPatch: {
+              compiler: {
+                promptVersion: STRICT_COMPILER_PROMPT_VERSION,
+                outputSchemaId: STRICT_COMPILER_OUTPUT_SCHEMA_ID,
+                hardValidationSchema: compilerContext.hardValidationSchema,
+                semanticFrameContext: compilerContext.semanticFrameContext,
+                constraintBundle: compilerContext.constraintBundle,
+                admission: {
+                  version: 1,
+                  status: "rejected",
+                  retryPolicy,
+                  attempts: admissionAttempts,
+                  finalAttempt: admissionAttempts.at(-1) ?? null,
+                },
+              },
+              critique: {
+                summary: `Semantic admission rejected (${failure.reasonCode}).`,
+                blocking: true,
+                issues: [{
+                  code: failure.reasonCode,
+                  type: failure.reasonCode,
+                  summary: failure.message,
+                  message: failure.message,
+                  blocking: true,
+                  evidence: failure.evidence,
+                  affectedFiles: [],
+                  affectedSymbols: [],
+                  interventions: [],
+                }],
+                evidence: failure.evidence,
+                interventions: [],
+              },
+            },
+            raw: result,
+            events: [
+              makeEvent({
+                runId,
+                type: "node.updated",
+                timestamp: Date.now(),
+                nodeId: node.id,
+                payload: {
+                  executionStatus: "failed",
+                  outputSummary: `Semantic admission rejected (${failure.reasonCode}): ${failure.message}`,
+                },
+              }),
+            ],
+          };
+        }
       }
 
-      return normalized;
+      throw new Error("Semantic admission retry loop exited unexpectedly.");
     } catch (error) {
       this.pushEvent(
         runId,
