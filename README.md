@@ -1,107 +1,157 @@
 # Semantix
 
-Semantix stops treating prompts as specs and stops using humans as glue
-between chat, evidence, and planning. It begins with human intent, but it
-does not hand raw chat downstream. It produces a deterministic,
-evidence-backed handoff contract, then hands off to the systems that own
-the rest of the SDLC.
+Semantix is a local Codex-backed workbench for clarifying intent, reviewing
+generated proposals, and approving code changes. It combines a browser UI,
+the `stx` CLI, a persistent control plane, and deterministic checks around
+model output.
 
-## Run Locally
+You can turn a vague request into requirements, inspect proposed file changes
+and their issues, request a correction, and approve execution. Requests for
+prose can produce a semantic response without file execution. A separate
+planning-handoff API compiles host-locked requirements into a canonical
+artifact for downstream planning.
 
-Use the root dev script to build the browser UI bundle and start the local
-Semantix server:
+## Run locally
+
+Use Node.js 24 and npm (the environment used for verification). Live
+clarification and generation require a configured, authenticated Codex CLI
+available as `codex`, or selected with `SEMANTIX_CODEX_COMMAND`.
 
 ```bash
+npm ci
 npm run dev
 ```
 
-The server listens on `127.0.0.1:4401` by default. Open:
+Open [http://127.0.0.1:4401/](http://127.0.0.1:4401/). The dev command builds
+the React UI and starts the Node server. UI dependencies are bundled locally;
+live model calls still require the configured Codex provider.
 
-```text
-http://127.0.0.1:4401/
+To work on another repository, select it explicitly:
+
+```bash
+SEMANTIX_WORKSPACE_ROOT=/absolute/path/to/project npm run dev
 ```
 
-Pass server options after `--` when you need a different host or port:
+The default execution workspace is the Semantix repository. Approving a code
+proposal can create, modify, delete, or rename files in the selected workspace.
+
+Server options can be passed after `--`:
 
 ```bash
 npm run dev -- --host 127.0.0.1 --port 4555
 ```
 
-The dev script runs `npm run build:ui` before starting `node ./stx serve`.
-There is no separate server compile step; the server runs directly from the
-Node ESM sources. The current `@semantix/stx` UI bundle includes its React
-runtime locally, so this path works offline when dependencies are already
-installed.
+## What the browser does
 
-## Design Principles
+1. **Clarify the request.** Spec Studio asks individual or grouped questions,
+   incorporates answers, and tracks requirements, acceptance criteria,
+   findings, scope, and readiness. Degraded evaluation cannot mark a packet ready.
+2. **Generate a proposal.** The browser passes the ready packet's selected
+   requirements and acceptance text into the Codex run. Classification routes
+   the request to a code-change proposal or a semantic response.
+3. **Review.** Inspect the execution graph, node details, proposed file diffs,
+   validation issues, and available corrections. Code proposals pass schema
+   admission and deterministic code-change review before host execution.
+4. **Correct or approve.** A correction updates the run and regenerates the
+   proposal. Approval is bound to the current artifact; stale approval or resume
+   requests are rejected. Approved code changes are applied by the registered
+   host function.
 
-1. A prompt is not a spec.
-   Semantix may begin with a prompt, but downstream planning must receive
-   only a locked, typed, evidence-backed handoff.
+Run state, approvals, checkpoints, audit records, and events are stored locally.
+The server exposes HTTP APIs and an SSE event stream for clients.
 
-2. The handoff is the delegation contract.
-   Bad downstream AI output is often caused by unclear delegation, so the
-   handoff must preserve requirements, acceptance criteria, boundaries,
-   provenance, capability scopes, and verification obligations.
+## Use the CLI
 
-3. Human intent must be locked before machine planning.
-   The host and user own lock authority. Semantix readiness is advisory.
-   A ready packet is not a locked spec.
+The CLI shares the control-plane implementation and local store. `run` starts
+the Codex flow directly; it does not perform the browser's Spec Studio intake.
 
-4. Semantix solves the handoff problem, not the whole SDLC.
-   Semantix does not produce architecture, task graphs, implementation
-   plans, verification-command choices, execution dispatch, or final
-   approval.
+```bash
+node ./stx run "Add validation to the settings form" --boundary "Preserve existing settings"
+node ./stx flow latest
+node ./stx graph latest
+node ./stx inspect latest
+node ./stx diff latest
+node ./stx fix latest
+```
 
-5. Agents act only after deterministic contracts.
-   Probabilistic clarification may occur before lock. Deterministic
-   guarantees begin at a locked packet plus compiler profile.
+After reviewing a proposal, approve and execute it with:
 
-## Spec Studio Planning Handoff
+```bash
+node ./stx approve latest
+```
 
-Spec Studio can use an LLM before lock to clarify fuzzy intent, ask
-questions, normalize answers, and produce a candidate alignment packet.
-After lock, the planning handoff must be a pure compiler step:
+Use `node ./stx --help` for the full command list. The CLI opens the local
+application directly; it does not require a running HTTP server.
+
+## Deterministic planning handoff
+
+Host integrations can use `buildPlanningHandoff()` or
+`POST /spec-studio/planning-handoff` to compile:
 
 ```text
 LockedIntentArtifact + SemantixAlignmentPacket + audit state
-  -> LockedSpecPlanningHandoff
+  → LockedSpecPlanningHandoff
 ```
 
-The handoff builder must not ask questions, call an LLM, invent
-architecture, infer product intent, or produce implementation tasks. It
-must fail closed when the locked inputs are not safe to delegate.
+The builder performs no model calls. It emits canonical JSON, input hashes,
+a handoff fingerprint, requirements, acceptance criteria, boundaries,
+provenance, and verification obligations. A separate pure function classifies
+freshness from observations supplied by the host. Greenfield and update-mode
+fixtures exercise this path.
 
-The current local demo includes the browser UI and fixture-based proofs
-of greenfield and update-mode handoff compilation. Live Spec Studio
-evaluation requires a configured Codex CLI. Host lock/persistence and
-downstream planner integration remain follow-up work; the broader
-authority, freshness-resume, planner-ready, and readiness-closeout proof
-milestones are still pending.
+**The browser does not yet use this locked-handoff API.** Its ready packet is
+advisory prompt context, not a host-locked planning artifact. The host still
+needs to implement the lock ceremony, immutable handoff persistence, and
+downstream planner integration. Full nested-schema, grounding/reference,
+and governance role-binding validation remain unfinished.
 
-## Phase 2 Handoff Verticals
+## Configuration
 
-Phase 2 is organized as end-to-end verticals rather than implementation
-layers. Each milestone must produce a demonstrable handoff behavior that
-crosses contract shape, deterministic mapping, validation, fixtures,
-tests, and documentation.
+| Variable | Purpose / default |
+| --- | --- |
+| `SEMANTIX_WORKSPACE_ROOT` | Workspace for generated code changes; defaults to this repository. |
+| `SEMANTIX_STX_DATA_DIR` | Local store; defaults to `data/` under the process working directory. `SEMANTIX_CONTROL_PLANE_DATA_DIR` is a fallback alias. |
+| `SEMANTIX_CODEX_COMMAND` | Codex executable; defaults to `codex`. |
+| `SEMANTIX_CODEX_HOME` | Optional prepared Codex home; otherwise uses normal Codex configuration. |
+| `SEMANTIX_CODEX_CONFIG_PROFILE` | Optional Codex configuration profile. |
+| `SEMANTIX_CODEX_MODEL` | General Codex model override. |
+| `SEMANTIX_SPEC_STUDIO_MODEL` | Spec Studio model override; otherwise uses the general override or Codex default. |
+| `SEMANTIX_SPEC_STUDIO_TIMEOUT_MS` | Spec Studio timeout; defaults to `300000`. |
+| `SEMANTIX_CLASSIFIER_MODEL` | Request classifier model; defaults to `gpt-5.3-codex-spark`. |
+| `SEMANTIX_CLASSIFIER_TIMEOUT_MS` | Classifier timeout; defaults to `20000`. |
 
-| Vertical | Demonstrable Value | Reasoning |
-| --- | --- | --- |
-| Greenfield lock-to-handoff | A vague greenfield request can become a locked packet and compile into a canonical handoff with stable IDs, input hashes, handoff ID, fingerprint, and planner-visible requirements. | This proves the core promise: prompts do not flow into planning; locked typed facts do. |
-| Update safety | An update-mode packet carries target surfaces, do-not-change or compatibility boundaries, negative requirements, and verification obligations. Unsafe update packets fail closed. | Update work is where prompt-as-spec failure is most expensive; the handoff must make boundaries explicit before planning. |
-| Fail-closed authority | Non-ready, degraded, unresolved-blocker, unauthorized, unclassified, missing-evidence, unused-evidence, and sensitive-persistence cases reject with stable errors. | The builder is a circuit breaker. It has no product authority, but it must prevent unsafe delegation. |
-| Freshness resume | A locked handoff plus host observations deterministically classifies clean, soft-stale, and hard-stale resume states. | Planning cannot safely resume from stale evidence unless the stale state is explicit and auditable. |
-| Planner-ready proof | A fixture shows a handoff carrying requirements, acceptance, boundaries, provenance, capability scopes, semantic obligations, verification obligations, and planner seeds without mutable chat state. | This demonstrates that downstream systems get a delegation contract, not a transcript and a hope. |
-| Readiness closeout | Focused and package-level tests pass, fixture fingerprints are pinned, import guards prove no LLM or IO dependency enters the builder, and host-owned follow-up work is explicit. | The milestone is complete only when the deterministic boundary can be replayed and maintained. |
+The public server does not substitute a mocked evaluator when live Spec Studio
+is unavailable. Probe evaluators are for explicit test/probe use.
 
-The goal is not to build a schema layer, then a validator layer, then a
-mapper layer, then a proof layer. The goal is to land narrow slices that
-prove usable delegation at every step.
+## Repository layout
 
-## Current Source Documents
+| Path | Responsibility |
+| --- | --- |
+| `packages/core` | Shared contracts, runtime registry, control-plane orchestration. |
+| `packages/runtime-codex` | Codex connectors, typed constraint compiler, output admission, code review and application. |
+| `packages/stx` | CLI, browser UI, HTTP/SSE server, persistence, Spec Studio and handoff builder. |
+| `control-plane` | Compatibility entry points and integration tests. |
+| `docs` | Current implementation spec, integration contracts, and broader design proposals. |
 
-- [Spec Studio deterministic planning handoff](docs/plans/spec-studio-deterministic-planning-handoff.md)
-- [Semantix overview](docs/semantix-overview.md)
-- [Semantix whitepaper](docs/semantix-whitepaper.md)
-- [Deterministic core and runtime boundary](docs/deterministic-core-and-runtime-boundary.md)
+## Verify
+
+```bash
+npm test
+npm run build:ui
+```
+
+The suite uses injected connectors and fixtures; passing it does not establish
+live model quality. HTTP tests need permission to bind loopback sockets.
+
+## Read more
+
+- [Current implementation spec](docs/semantix-control-plane-spec.md)
+- [Overview and broader design direction](docs/semantix-overview.md)
+- [Spec Studio integration contract](docs/phalanx-spec-studio-integration-contract.md)
+- [Planning-handoff contract and remaining work](docs/plans/spec-studio-deterministic-planning-handoff.md)
+- [Language design and typed constraint contracts](docs/language-fundamentals.md)
+
+The `context`, `constraint`, and `~>` syntax in the language documents describes
+the language design. The executable compiler currently consumes structured
+blueprints and typed ConstraintIR objects; `stx` is a CLI, not a parser for that
+surface language.

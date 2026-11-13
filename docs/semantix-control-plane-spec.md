@@ -1,787 +1,232 @@
-# Semantix Control Plane
-
-## Runtime Orchestration, Review Coordination, And Execution Governance
-
-## 0. Purpose Of This Spec
-
-This document defines the Semantix Control Plane as the backend service that sits between:
-
-- one or more Semantix Control Surface clients for user interaction
-- pluggable execution backends for actually doing work
-
-It is the system that turns Semantix review and approval semantics into a running execution loop.
-
-This spec is execution-facing. It assumes:
-
-- the architectural framing in [semantix-overview.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/semantix-overview.md:1090)
-- the review semantics and DTO expectations in [Semantix Control Plane UI.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/Semantix%20Control%20Plane%20UI.md:1)
-- the Codex-backed phase-1 implementation direction in [semantix-codex-poc-v2.md](/Users/adilevinshtein/Documents/dev/Semantix/semantix-codex-poc-v2.md:1)
-
-## 1. Position In The Stack
-
-The clean layering is:
-
-1. **Semantix Control Surface Clients**
-   Human review and control clients, such as:
-   - browser UI
-   - terminal-native CLI or TUI such as `stx`
-2. **Semantix Control Plane**
-   Backend daemon that owns review artifacts, approvals, freshness, execution coordination,
-   multi-turn runtime session and turn coordination, and event streaming
-3. **Execution Adapter Layer**
-   Pluggable adapters that bridge the control plane to concrete execution systems
-4. **Execution Backends**
-   CLI runtimes, domain runtimes, or provider-backed executors
-5. **Computation Providers And Tools**
-   Models, retrieval systems, tools, MCP servers, local shell and filesystem access
-
-The Control Plane is not the UI, not the raw provider layer, and not the execution engine itself.
-
-## 2. Design Goal
-
-The Control Plane should make execution:
-
-- bounded
-- inspectable
-- governable
-- resumable
-- reviewable
-
-It should be able to coordinate pluggable execution backends over time, including examples such as:
-
-- `CodexCliRuntimeAdapter`
-- `ClaudeCliRuntimeAdapter`
-- `PhalanxRuntimeAdapter`
-- provider-backed executors over services such as OpenRouter or Gemini
-
-For phase 1, the execution plug is intentionally narrow:
-
-- exactly one runtime adapter is implemented: `CodexCliRuntimeAdapter`
-- exactly one active execution backend is assumed per run
-- the UI and contract model must still be designed so additional adapters can be added later
-
-## 3. Core Responsibilities
-
-The Control Plane owns:
-
-- intent lifecycle
-- plan compilation and graph persistence
-- review artifact generation
-- multi-client consistency
-- node orchestration and dispatch
-- runtime adapter selection
-- approval gating
-- freshness checking
-- risk detection and escalation
-- state tracking and checkpointing
-- audit recording
-- event streaming to the Control Surface
-
-It does not:
-
-- derive authoritative state from transcripts
-- perform raw model generation as its primary job
-- directly mutate external systems outside adapters
-- depend on any single runtime implementation
-- allow one client to bypass shared approval and freshness rules
-
-## 4. Core Components
-
-### 4.1 Control Plane Daemon
-
-Central service responsible for:
-
-- run lifecycle management
-- review artifact persistence
-- plan and node state tracking
-- approval and freshness enforcement
-- event broadcasting
-
-### 4.2 Artifact Store
-
-Persists:
-
-- intent contracts
-- execution plans
-- review artifacts
-- approval decisions
-- audit records
-- checkpoints
-
-### 4.3 Adapter Registry
-
-Maintains available execution and provider adapters:
-
-- registers adapters
-- tracks capabilities and health
-- resolves runtime selection
-- exposes installed adapters to the control plane
-
-### 4.4 Execution Coordinator
-
-Responsible for:
-
-- dispatching approved work to adapters
-- collecting structured results
-- merging adapter events into normalized run events
-- pausing at approval gates or stale-state boundaries
-
-### 4.5 Approval And Freshness Gatekeeper
-
-Responsible for:
-
-- version binding
-- stale-state rejection
-- invalidation propagation
-- resume eligibility
-
-### 4.6 Event Streamer
-
-Streams normalized events to the Control Surface and other consumers.
-
-### 4.7 Client Session Gateway
-
-Coordinates multiple control-surface clients against the same backend truth.
-
-It is responsible for:
-
-- serving the current review artifact to browser and terminal-native clients
-- accepting approvals and interventions from either client form
-- rejecting stale actions consistently
-- broadcasting updated state to all subscribed clients
-
-## 5. Adapter Model
-
-The Control Plane should support two adapter families, while keeping phase 1 deliberately simple.
-
-### 5.1 ProviderAdapterContract
-
-This contract is for direct provider-facing capabilities:
-
-- completion
-- tool call
-- retrieval
-- embeddings
-- verifier call
-
-Examples:
-
-- `OpenRouterProviderAdapter`
-- `GeminiProviderAdapter`
-
-These adapters talk to computation providers directly.
-
-### 5.2 RuntimeAdapterContract
-
-This contract is for execution plugs that can carry out approved work on behalf of the control
-plane.
-
-Examples:
-
-- `CodexCliRuntimeAdapter`
-- `ClaudeCliRuntimeAdapter`
-- `PhalanxRuntimeAdapter`
-- provider-backed execution wrappers that use one or more provider adapters under the hood
-
-### 5.3 Phase 1 Decision
-
-In phase 1:
-
-- `CodexCliRuntimeAdapter` is the only implemented runtime adapter
-- provider adapters may exist later, but are not required for the first executable slice
-- runtime selection is effectively fixed to `codex_cli`
-
-This keeps the control-plane architecture pluggable without pretending the first build already
-supports many backends.
-
-## 6. System Diagram
-
-```text
-Browser Control Surface ─┐
-                         ├─> Semantix Control Plane (Daemon)
-stx Control Surface ─────┘
-                                ↓
-                        Execution Adapter Layer
-                                ↓
-                            Codex CLI (v1)
-
-Later:
-    ├─ Claude CLI
-    ├─ Phalanx Runtime
-    ├─ OpenRouter-backed Executor
-    └─ Gemini-backed Executor
-```
-
-## 7. Core Data Contracts
-
-These contracts are aligned to the current Control Surface spec. The backend may have additional
-internal fields, but it must preserve these meanings at the API boundary.
-
-### 7.1 IntentContract
-
-```ts
-interface IntentContract {
-  id: string;
-  primaryDirective: string;
-  strictBoundaries: string[];
-  successState: string;
-  status: "draft" | "pending_review" | "approved" | "rejected" | "modified" | "stale";
-  planVersion: number;
-  contractVersion: number;
-  artifactHash: string;
-}
-```
-
-### 7.2 ReviewArtifact
-
-```ts
-interface ReviewArtifact {
-  artifactId: string;
-  runId: string;
-  planVersion: number;
-  graphVersion: number;
-  artifactHash: string;
-  generatedAt: number;
-  freshnessState: "fresh" | "stale" | "superseded";
-  intent: IntentContract;
-  plan: ExecutionPlan;
-}
-```
-
-### 7.3 ExecutionPlan
-
-```ts
-interface ExecutionPlan {
-  id: string;
-  runtimeKind: string;
-  planVersion: number;
-  graphVersion: number;
-  artifactHash: string;
-  intent: IntentContract;
-  nodes: ExecutionNode[];
-  edges: ExecutionEdge[];
-  approvalGates: ApprovalGate[];
-  stateEffects: StateEffect[];
-  checkpoints: ResumeCheckpoint[];
-  status:
-    | "draft"
-    | "pending_review"
-    | "approved_for_execution"
-    | "running"
-    | "paused"
-    | "completed"
-    | "failed"
-    | "stale";
-}
-```
-
-### 7.4 ExecutionNode
-
-`ExecutionNode` needs both review-facing and execution-facing state. Do not collapse them into one
-ambiguous status field.
-
-```ts
-type SystemId =
-  | "semantix"
-  | "phalanx"
-  | "hoplon"
-  | "ct_mcp"
-  | "llm_tracker"
-  | "guardrail";
-
-type GroundingLabel = "grounded" | "transformed" | "bridged" | "unsupported";
-type ConfidenceBand = "high" | "medium" | "low";
-
-interface ExecutionNode {
-  id: string;
-  title: string;
-  nodeType: "semantic" | "deterministic" | "tool" | "policy_gate" | "approval";
-  revision: number;
-  dependsOn: string[];
-  gatingOwner: SystemId;
-  contributingSystems: SystemId[];
-  reviewStatus: "ready" | "warning" | "blocked" | "approved" | "stale";
-  executionStatus: "not_started" | "queued" | "running" | "succeeded" | "failed" | "paused";
-  grounding?: GroundingLabel;
-  confidenceBand?: ConfidenceBand;
-  confidenceScore?: number;
-  sourceCount?: number;
-  riskFlags: string[];
-  approvalRequired: boolean;
-  inputSummary?: string;
-  outputSummary?: string;
-  constraints?: ConstraintSet;
-  capabilityScope?: CapabilityScope;
-  runtimeBinding?: RuntimeTarget;
-}
-```
-
-### 7.5 NodeInspectorPayload
-
-```ts
-interface NodeInspectorPayload {
-  node: ExecutionNode;
-  overview?: object;
-  context?: object;
-  constraints?: object;
-  outputPreview?: object;
-  critique?: object;
-  tooling?: object;
-  proposedChanges?: ProposedChange[];
-  approvals?: object;
-  replay?: object;
-  audit?: object;
-}
-```
-
-### 7.6 StateEffect
-
-`StateEffect` is the control-plane abstraction for a proposed externally visible change. The Control
-Surface may render it as a `ProposedChange` in the diff panel.
-
-```ts
-type ReversibilityStatus =
-  | "reversible"
-  | "reversible_within_window"
-  | "irreversible";
-
-interface StateEffect {
-  id: string;
-  kind: "file" | "api" | "database" | "external_action";
-  operation: string;
-  target: string;
-  summary: string;
-  previewRef?: string;
-  policyState: "pass" | "block" | "review_required";
-  riskFlags: string[];
-  reversibility: {
-    status: ReversibilityStatus;
-    mechanism?: string;
-    windowSeconds?: number;
-  };
-  enforcement: {
-    owner: "phalanx" | "hoplon" | "policy";
-    status: "pass" | "block" | "review_required";
-    details?: string;
-  };
-}
-```
-
-### 7.7 ApprovalGate
-
-Approvals must bind to the exact reviewed artifact.
-
-```ts
-interface ApprovalGate {
-  id: string;
-  targetNodeId?: string;
-  required: boolean;
-  status: "pending" | "approved" | "rejected" | "stale";
-  planVersion: number;
-  artifactHash: string;
-  nodeRevision?: number;
-  reason?: string;
-}
-```
-
-### 7.8 ResumeCheckpoint
-
-```ts
-interface ResumeCheckpoint {
-  id: string;
-  runId: string;
-  planVersion: number;
-  artifactHash: string;
-  afterNodeId?: string;
-  createdAt: number;
-}
-```
-
-### 7.9 RiskSignal
-
-```ts
-interface RiskSignal {
-  id: string;
-  nodeId?: string;
-  severity: "low" | "medium" | "high";
-  message: string;
-  source: "policy" | "provenance" | "critique" | "runtime" | "system";
-}
-```
-
-### 7.10 RunEvent
-
-```ts
-interface RunEvent {
-  timestamp: number;
-  runId: string;
-  type:
-    | "run.created"
-    | "artifact.generated"
-    | "node.updated"
-    | "state_effect.available"
-    | "risk.detected"
-    | "approval.required"
-    | "approval.accepted"
-    | "approval.rejected"
-    | "approval.stale"
-    | "checkpoint.created"
-    | "run.paused"
-    | "run.resumed"
-    | "run.completed"
-    | "run.failed";
-  nodeId?: string;
-  planVersion?: number;
-  artifactHash?: string;
-  payload?: unknown;
-}
-```
-
-## 8. Runtime Adapter Contract
-
-All runtime adapters must implement:
-
-```ts
-interface RuntimeAdapter {
-  id: string;
-  family: "cli_runtime" | "provider_backed_runtime" | "domain_runtime";
-  displayName: string;
-
-  getCapabilities(): Promise<RuntimeCapabilities>;
-  healthCheck(): Promise<AdapterHealth>;
-
-  executeNode(input: ExecuteNodeInput): Promise<ExecuteNodeResult>;
-  simulateEffects?(input: SimulateEffectsInput): Promise<StateEffect[]>;
-
-  pauseRun(input: PauseRunInput): Promise<void>;
-  resumeRun(input: ResumeRunInput): Promise<void>;
-  cancelRun(input: CancelRunInput): Promise<void>;
-
-  streamEvents(input: StreamEventsInput): AsyncIterable<RunEvent>;
-}
-```
-
-Notes:
-
-- `executeNode` is the only truly required execution primitive in phase 1
-- `simulateEffects` is optional at the adapter boundary, but the control plane must still present
-  state effects before execution proceeds
-- adapters return structured results, not transcript-derived truth
-
-## 9. Provider Adapter Contract
-
-Direct provider adapters implement:
-
-```ts
-interface ProviderAdapter {
-  id: string;
-  providerKind: "llm" | "retrieval" | "embedding" | "verifier" | "tool_router";
-  displayName: string;
-
-  getCapabilities(): Promise<ProviderCapabilities>;
-  healthCheck(): Promise<AdapterHealth>;
-
-  completion?(input: CompletionInput): Promise<CompletionResult>;
-  retrieval?(input: RetrievalInput): Promise<RetrievalResult>;
-  embeddings?(input: EmbeddingsInput): Promise<EmbeddingsResult>;
-  verifierCall?(input: VerifierInput): Promise<VerifierResult>;
-  toolCall?(input: ToolCallInput): Promise<ToolCallResult>;
-}
-```
-
-Provider adapters are not required to ship phase 1, but the control plane should leave room for
-them in the registry model.
-
-### 9.1 Verifier Provider Hook
-
-Verifier providers are direct provider adapters whose only control-plane role is to return advisory
-evidence. They do not select runtime paths, approve work, reject work, or execute work by
-themselves.
-
-```ts
-type VerifierCheckKind =
-  | "contradiction"
-  | "entailment"
-  | "groundedness"
-  | "similarity"
-  | "custom";
-
-interface VerifierInput {
-  runId?: string;
-  nodeId?: string;
-  constraintIrId?: string;
-  target?: object;
-  subject: unknown;
-  reference?: unknown;
-  context?: object;
-  checks: Array<{
-    id: string;
-    kind: VerifierCheckKind;
-    threshold?: number;
-    comparator?: "gte" | "lte";
-    failureSeverity?: "hard" | "soft";
-  }>;
-}
-
-interface VerifierResult {
-  providerId?: string;
-  status?: "available" | "unavailable" | "error";
-  checks?: Array<{
-    id?: string;
-    kind: VerifierCheckKind;
-    score?: number;
-    passed?: boolean;
-    confidence?: number;
-    advisoryState?: "pass" | "concern" | "block" | "review_required";
-    message?: string;
-    evidence?: unknown[];
-  }>;
-  error?: string;
-  latencyMs?: number;
-}
-```
-
-Verifier policy is Semantix-owned:
-
-- contradiction scores default to lower-is-better (`lte`)
-- entailment, groundedness, and similarity scores default to higher-is-better (`gte`)
-- advisory verifier failures become `review_required`
-- required hard verifier failures become `block`
-- unavailable required verifier providers fail closed according to Semantix policy
-- provider `advisoryState` is evidence only; it never directly sets `policyState`
-
-Verifier drift guardrails are fixture-backed and deterministic. The default test suite uses checked-in
-provider results only; live provider sampling is an opt-in diagnostic path and must not run as part
-of default verification. Each verifier drift fixture records the check kind, threshold, comparator,
-provider result, Semantix policy decision, and expected risk flags. The guardrails distinguish these
-drift classes:
-
-- **provider-output drift**: the provider returns a different score, `passed` value,
-  `advisoryState`, status, message, or evidence for the same check. Semantix treats this as input
-  evidence and still derives `policyState` from the recorded policy.
-- **policy-threshold drift**: a Semantix-owned threshold, comparator, mode, or failure severity
-  changes the decision boundary for otherwise identical provider evidence. This is a policy change,
-  not provider authority.
-- **missing-evidence drift**: a configured check is absent from provider output, or the provider is
-  unavailable/error. Required hard checks fail closed; advisory or soft failures require review
-  according to Semantix policy.
-- **expected migration drift**: an intentional Semantix policy migration changes the expected
-  decision for a fixture. The fixture expectation and migration metadata must be updated together so
-  unchanged verifier evidence cannot silently produce a different policy decision.
-
-Provider-only execution remains outside this slice. A provider-backed runtime may call provider
-adapters internally, but the Control Plane still dispatches through a runtime adapter and Semantix
-still decides policy from structured evidence.
-
-## 10. Runtime Capabilities
-
-```ts
-interface RuntimeCapabilities {
-  supportsMultiTurn: boolean;
-  supportsFileMutation: boolean;
-  supportsToolUse: boolean;
-  supportsStructuredOutput: boolean;
-  supportsStreaming: boolean;
-  supportsPauseResume: boolean;
-  supportsLocalExecution: boolean;
-  supportsModelSelection: boolean;
-  supportsEffectSimulation: boolean;
-}
-```
-
-## 11. Runtime Selection Policy
-
-In the general model, runtime selection should consider:
-
-- node type
-- constraints
-- required capabilities
-- cost and latency targets
-- sensitivity level
-- local versus remote execution needs
-
-```ts
-interface RuntimeSelectionPolicy {
-  selectRuntime(
-    node: ExecutionNode,
-    context: RuntimeSelectionContext
-  ): RuntimeTarget;
-}
-```
-
-For phase 1:
-
-- the selection policy is fixed
-- every executable node binds to `codex_cli`
-
-## 12. UI-Facing Review And Control Contract
-
-The Control Plane must expose enough structured behavior for the Control Surface to do its job
-without consulting runtime transcripts.
-
-That contract should be identical whether the client is:
-
-- a browser UI
-- a terminal-native CLI or TUI
-
-Client form changes presentation and interaction ergonomics. It does not change backend truth.
-
-At minimum, it should support:
-
-- create or update intent
-- compile plan and generate review artifact
-- fetch current artifact by run
-- submit interventions on nodes
-- submit approval or rejection actions
-- reject stale approvals
-- execute approved nodes
-- pause and resume from checkpoints
-- stream normalized events
-
-Terminal-native clients may project these capabilities into commands such as:
-
-- `stx run`
-- `stx graph`
-- `stx inspect`
-- `stx diff`
-- `stx approve`
-- `stx resume`
-
-### 12.1 Bundled Browser Host
-
-For phase 1, the same daemon that serves the review API also hosts the bundled browser UI that
-`stx` builds into `packages/stx/dist/ui`.
-
-Operational rules:
-
-- static assets are served from that bundle directory by default unless `SEMANTIX_UI_DIR` overrides it
-- `GET /` redirects to `/index.html`
-- legacy browser entry routes such as `/chat`, `/canvas`, `/how-it-works`, and the older
-  `/Design/*.html` paths redirect to `/index.html` so existing bookmarks land on the bundled app
-- `GET /runs/:runId/previews?previewRef=...` resolves preview content JSON for the referenced
-  `StateEffect` and returns the resolved `previewRef`, `mediaType`, `content`, and current run/artifact
-  identity fields
-
-Every mutating UI action must carry:
-
-- `planVersion`
-- `artifactHash`
-- relevant node revision or change identifier
-
-The backend must reject actions against stale state.
-
-## 13. Freshness And Invalidation
-
-The Control Plane owns invalidation logic for reviewed state.
-
-Minimum rules:
-
-- if the intent contract changes, the entire plan becomes stale
-- if a node's context or constraints change, the node and downstream dependents become stale
-- if the runtime capability surface changes, approvals granted under the prior surface become stale
-- if reviewed state is stale, approval cannot be reused
-
-Expected stale-state behavior:
-
-1. the user submits an approval or intervention
-2. the control plane compares `planVersion`, `artifactHash`, and node revision to current state
-3. if they match, the action is accepted
-4. if they do not match, the action is rejected as stale
-5. a fresh review artifact is required before execution resumes
-
-## 14. Execution Flow
-
-1. The user submits a goal through the Control Surface.
-2. The Control Plane drafts an `IntentContract`.
-3. The Control Plane compiles a versioned `ExecutionPlan`.
-4. The Control Plane emits a `ReviewArtifact`.
-5. A browser UI or terminal-native client renders graph, inspector, and state effects from
-   structured objects.
-6. The user edits, approves, or rejects.
-7. The Control Plane freshness-checks the action.
-8. Approved nodes are dispatched to the selected runtime adapter.
-9. The adapter executes work and streams normalized events.
-10. The Control Plane merges execution results into node state, risk signals, and state effects,
-    then broadcasts them to subscribed clients.
-11. If an approval gate or stale-state boundary is reached, execution pauses.
-12. The Control Plane resumes from a `ResumeCheckpoint` only after valid approval.
-13. Audit records persist what was shown, what changed, and what was approved.
-
-## 15. Event Model
-
-Normalized events should include at least:
-
-- `run.created`
-- `artifact.generated`
-- `node.updated`
-- `state_effect.available`
-- `risk.detected`
-- `approval.required`
-- `approval.accepted`
-- `approval.rejected`
-- `approval.stale`
-- `checkpoint.created`
-- `run.paused`
-- `run.resumed`
-- `run.completed`
-- `run.failed`
-
-## 16. Non-Negotiable Rules
-
-- No transcript-driven UI
-- Runtimes are replaceable
-- Every meaningful action is a node or node-adjacent artifact
-- All state effects are explicit before execution proceeds
-- Review is structural, not conversational
-- Approvals are freshness-bound
-- Audit recording is required in v1
-
-## 17. v1 Scope
-
-Included:
-
-- one runtime adapter: `CodexCliRuntimeAdapter`
-- one shared control plane serving both browser and terminal-native clients
-- single-backend execution per run
-- execution graph persistence
-- node inspection payloads
-- state-effect preview
-- approval flow
-- freshness checks
-- event streaming
-- audit recording
-
-Excluded for later phases:
-
-- multi-user collaboration
-- multi-runtime execution within one run
-- advanced routing policies
-- enterprise policy engine
-- distributed execution
-- provider-only execution paths without a runtime wrapper
-
-## 18. Readiness Bar
-
-This spec is ready for phase-1 implementation when the first build can do all of the following:
-
-1. compile an `IntentContract` and `ExecutionPlan`
-2. generate a versioned review artifact with `planVersion` and `artifactHash`
-3. render that artifact in the Control Surface
-4. reject stale approvals
-5. dispatch approved work to `CodexCliRuntimeAdapter`
-6. stream normalized events back to the UI
-7. persist audit records for approval and execution events
-
-## 19. Summary
-
-The Semantix Control Plane:
-
-- decouples execution from control
-- standardizes structured interaction across pluggable runtimes
-- provides one backend truth to multiple control-surface clients
-- coordinates review, approval, freshness, and resume behavior
-- enables the Control Surface to form trust without consulting transcripts
-
-In phase 1, it does this with one execution plug: Codex CLI.
-Later, the same control plane can coordinate additional runtimes without changing the Semantix
-review model.
+# Semantix: Current Implementation Spec
+
+Status: implemented local prototype, with integration and validation gaps noted below.
+
+This document describes the code that runs in this repository. It replaces the
+earlier phase-1 control-plane proposal. The [language fundamentals](language-fundamentals.md),
+[review-surface design](semantix-review-surface-spec.md), and
+[planning-handoff contract](plans/spec-studio-deterministic-planning-handoff.md)
+describe broader design goals; they are not promises that every feature is implemented.
+
+## Product and scope
+
+Semantix turns a natural-language request into structured material that a person
+can inspect before authorizing a consequential action. The repository contains
+three related paths:
+
+| Path | Input and result | Current boundary |
+| --- | --- | --- |
+| Spec Studio alignment | A directive plus session state becomes a typed requirements packet, findings, questions, and an advisory readiness verdict. | The evaluator does not own the host's lock ceremony or downstream planning. |
+| Reviewed runtime execution | A directive becomes a compiled execution artifact, admitted semantic output, reviewable effects, and optionally an approved local code change. | The control plane owns approval and execution state; the configured Codex runtime generates candidates. |
+| Deterministic planning handoff | A host-supplied locked artifact, packet, and audit state become a canonical handoff with hashes and verification obligations. | This is a separate API/library prototype. It does not invoke a planner or execute the handoff. |
+
+The browser combines alignment with the reviewed runtime flow. It does **not**
+currently mint an immutable locked artifact or call the planning-handoff API.
+Those are separate integration steps, not hidden stages of the browser workflow.
+
+## Running system
+
+`npm run dev` builds the bundled React UI and starts the `stx` server at
+`http://127.0.0.1:4401/`. The UI, HTTP routes, runtime adapter, and local file store
+run in one Node application. The [README](../README.md) contains setup commands.
+
+The default application registers one `CodexCliRuntimeAdapter` backed by
+`CodexCliConnector`. Runtime session methods use the Codex app-server connector.
+Additional adapters and multi-runtime orchestration remain design directions.
+The separate `control-plane` package is a compatibility entry point to the shared
+implementation, not a second backend with separate behavior.
+
+Application composition is in [application.js](../packages/stx/src/application.js).
+The principal modules are:
+
+| Module | Responsibility |
+| --- | --- |
+| `packages/core` | Contracts, runtime/host-function registries, plan and approval state, execution coordination, sessions, events, and audit data. |
+| `packages/runtime-codex` | Codex CLI/app-server connectors, blueprint compilation, strict candidate admission, code-change review, and local application of admitted changes. |
+| `packages/stx` | CLI, HTTP server, browser UI, Codex flow projection, Spec Studio evaluation, and planning handoff. |
+| `FileRunStore` | Local JSON run/session snapshots and JSONL events, audit records, and session turns. |
+
+## Browser and reviewed runtime flow
+
+1. The user enters a directive in the browser.
+2. Spec Studio evaluates the request and asks for clarification when needed. The
+   UI accepts options, free text, and batch answers, and renders a turn log.
+3. Once alignment is ready, the user continues to compile. The UI converts the
+   accepted packet into prompt text, then derives the intent fields sent to
+   `/codex/runs`.
+   This conversion is not a locked planning handoff.
+4. The Codex layer classifies the request and selects a semantic-response or
+   code-change path. The control plane persists the intent, compiles an execution
+   artifact, and normally starts semantic admission automatically.
+5. Generated output must pass the node's structural and compiled constraint
+   checks. Admitted code changes produce concrete file targets and deterministic
+   diff/review information. Semantic-response requests produce structured output
+   without requiring a repository mutation.
+6. The UI presents the flow, issues, proposed fixes, inspector, and changes. A
+   supported fix updates the affected node and re-evaluates its semantic output.
+7. Code-change execution pauses for approval. Approval is tied to the current
+   artifact and checkpoint. The registered host function applies the admitted
+   change only after the control plane's approval and execution checks.
+8. The application persists the result and exposes normalized events and updated
+   review state to clients.
+
+The default deterministic target is `semantix.host.apply_admitted_semantic`.
+It previews code changes and delegates application to `applyAdmittedCodeChange`.
+This is a local code-change implementation, not a general implementation of every
+external action envisioned by the review-surface design.
+
+Source: [browser flow](../packages/stx/ui/control-surface/app.jsx),
+[Codex flow layer](../packages/stx/src/codex-semantix-layer.js), and
+[control-plane service](../packages/core/src/control-plane-service.js).
+
+## Runtime contracts and enforcement
+
+The control plane persists an intent, execution plan, and review artifact rather
+than reconstructing authority from a transcript. Plans contain nodes, edges,
+approval gates, state effects, and runtime/compiler metadata. The service uses
+`planVersion`, `artifactHash`, relevant node revisions, and checkpoint identity to
+reject stale approval, intervention, steering, or resume requests.
+
+The strict compiler accepts structured blueprints and candidate envelopes. It
+does not provide a general parser for the proposed `context`, `constraint`, and
+`~>` language syntax shown in design documents.
+
+Implemented candidate checks include:
+
+- Strict JSON/schema admission, including required and forbidden fields.
+- Compiled path roots, allow/deny lists, and operation restrictions.
+- Required and forbidden capabilities declared by the candidate.
+- Constraint selection from plan references and inline node constraints, with
+  unresolved references rejected and node-specific policies isolated.
+- Bounded retries, classified admission failures, and recorded attempt evidence.
+- Deterministic code-change review and blocking issues before host execution.
+
+Capability checks here inspect candidate declarations; they are not a general
+operating-system sandbox. Likewise, compiler verifier and approval metadata do
+not imply that arbitrary prose constraints have become deterministic validators.
+The configured connector's runtime sandbox and the host-function implementation
+remain part of the execution boundary.
+
+Source: [contracts](../packages/core/src/contracts.js),
+[strict compiler](../packages/runtime-codex/src/strict-compiler.js), and
+[runtime adapter](../packages/runtime-codex/src/codex-cli-runtime-adapter.js).
+
+## Spec Studio alignment contract
+
+`POST /spec-studio/evaluate` accepts the caller's session identifier, trigger,
+user turn, prior packet, decisions, findings, and optional context responses.
+Non-initial turns carry the prior packet. The evaluator normalizes the request,
+applies deterministic user-turn changes, invokes the live model, and validates
+the result's structure, identity continuity, and authority boundary.
+
+The response includes a `SemantixAlignmentPacket`, readiness, next-turn material,
+coverage information, and a `turnLogEntry`. Readiness is `needs_user`, `blocked`,
+or `ready`. It is advisory: `ready` is not a lock or an execution approval.
+
+The packet separates requirements, acceptance, scope, assumptions, risks,
+findings, decisions, existing-system context, and grounded facts. Context
+requests are returned to the host; the host brokers repository/evidence access
+and sends context responses back. Spec Studio does not obtain that authority
+merely by emitting a request.
+
+The default server uses a live evaluator through the Codex connector. Fixture
+probe evaluators are for tests and scripts; selecting public-server probe mode
+returns an unavailable/degraded path rather than simulated successful alignment.
+`GET /spec-studio/mode` reports the selected mode, not a live model health test.
+
+The evaluation route does not persist a host Spec Studio session or mint the
+host's canonical lock and decision records. Runtime session APIs are a different
+facility. Hosts must retain the alignment history and supply it on later turns.
+
+See the [integration contract](phalanx-spec-studio-integration-contract.md),
+[handshake](../packages/stx/src/spec-studio-handshake.js), and
+[evaluator](../packages/stx/src/spec-studio-llm-evaluator.js).
+
+## Deterministic planning handoff
+
+The library's `buildPlanningHandoff` accepts `{ lockedArtifact, packet,
+auditState, compilerProfileId? }`. It performs no model calls or host tool access.
+The host must supply the lock, governance, evidence, sensitivity, and audit inputs.
+
+The output contains requirements and acceptance criteria, update boundaries,
+provenance and evidence, capability scopes, semantic and verification obligations,
+planner checklist seeds, decision audit, input hashes, a stable handoff identifier,
+and a fingerprint. `canonicalizePlanningHandoff`, `validatePlanningHandoff`, and
+`fingerprintPlanningHandoff` expose the corresponding library operations.
+`classifyFreshnessGateResult` classifies host-supplied observations; it does not
+collect fresh evidence itself.
+
+`POST /spec-studio/planning-handoff` returns `handoff`, `canonicalJson`, and a
+`summary` with validation, repeat-build equality, hashes, and collection counts.
+It builds the same input twice to report byte/fingerprint equality. It does not
+persist the handoff, create a host lock, or invoke downstream planning.
+
+Implemented rejection checks include non-ready/degraded packets, unresolved
+blockers, missing required input, packet-hash and lock-identity mismatches,
+unauthorized sensitive persistence, and missing freshness evidence coverage.
+Greenfield and update fixtures exercise the boundary.
+
+Validation remains partial against the full target contract. Complete nested
+schemas, grounding/reference integrity, and governance role-binding enforcement
+are unfinished. The API must not be represented as a complete production
+authorization boundary. Host lock/persistence, planner loading, planning-output
+checks, and execution-resume integration remain host follow-up work.
+
+Source: [handoff module](../packages/stx/src/spec-studio-planning-handoff.js).
+The [detailed handoff design](plans/spec-studio-deterministic-planning-handoff.md)
+defines the intended contract beyond this implementation.
+
+## HTTP surface
+
+The authoritative routing and error mapping live in
+[server.js](../packages/stx/src/http/server.js).
+
+| Routes | Purpose |
+| --- | --- |
+| `GET /health` | Process health response. |
+| `GET /runs`, `POST /runs` | List runs; bootstrap an intent/plan and optionally perform semantic admission. |
+| `POST /codex/runs` | Start the classified Codex review flow. |
+| `PUT /runs/:runId/intent`, `POST /runs/:runId/compile` | Update intent and compile an artifact. |
+| `GET /runs/:runId/artifact`, `GET /runs/:runId/flow` | Fetch stored review state and its flow projection. |
+| `POST /runs/:runId/flow/fixes`, `POST /runs/:runId/flow/approve` | Apply a supported fix or approve/resume the reviewed flow. |
+| `GET /runs/:runId/previews?previewRef=...` | Resolve preview content from a state effect. |
+| `GET /runs/:runId/nodes/:nodeId/inspector`, `POST /runs/:runId/nodes/:nodeId/interventions` | Inspect or intervene on a node. |
+| `POST /runs/:runId/approvals`, `/execute`, `/pause`, `/resume` | Lower-level approval and execution controls. |
+| `GET /runs/:runId/events` | Server-sent events, with `after` and optional `sessionId` filtering. |
+| `GET` / `POST /runs/:runId/sessions` | List or create runtime sessions. |
+| `GET /runs/:runId/sessions/:sessionId` | Inspect a runtime session. |
+| `GET` / `POST /runs/:runId/sessions/:sessionId/turns` | Read or submit runtime turns. |
+| `POST /runs/:runId/sessions/:sessionId/steer`, `/resume`, `/interrupt` | Control an existing runtime session. |
+| `GET /spec-studio/mode`, `POST /spec-studio/evaluate` | Query evaluator mode or evaluate an alignment turn. |
+| `POST /spec-studio/planning-handoff` | Compile host-supplied locked inputs into a handoff. |
+
+The same server serves the bundled UI. `/` and legacy UI entry routes redirect
+to `/index.html`. The daemon is intended for local use; multi-user authentication
+and a hosted collaboration service are not implemented here.
+
+## Persistence and audit
+
+`FileRunStore` writes run and session snapshots as JSON and appends events,
+audit records, and session turns as JSONL. The default root is `./data`, overridden
+by `SEMANTIX_STX_DATA_DIR` or `SEMANTIX_CONTROL_PLANE_DATA_DIR`. The service
+coordinates in-process mutations and exposes event replay to connected clients.
+This is not a distributed store or a multi-process coordination guarantee.
+
+The service also supports audit-bundle generation with redaction/size policy and
+an explicit unsigned path. Audit storage does not imply that external signatures,
+external evidence systems, or production retention policies are configured.
+
+## Verification and remaining work
+
+Run `npm test` and `npm run build:ui` from the repository root. Focused coverage is
+in the [strict compiler tests](../packages/runtime-codex/tests/strict-compiler.test.js),
+[control-plane tests](../control-plane/tests/control-plane.test.js),
+[HTTP integration tests](../packages/stx/tests/spec-studio-manual-json-http.test.js),
+and [handoff tests](../packages/stx/tests/spec-studio-planning-handoff.test.js).
+
+These tests cover structural behavior, rejection cases, and fixture workflows.
+They do not establish live model quality or prove that every design contract is
+complete. Before claiming a production deployment, the remaining handoff
+validation and host integration must be completed and exercised. The proposed
+language frontend, additional runtime adapters, multi-user collaboration, and
+distributed orchestration are also outside the current implementation.

@@ -1,6 +1,6 @@
 # Spec Studio Deterministic Planning Handoff
 
-Status: proposed
+Status: partially implemented prototype; full contract below remains the target.
 Owner: Semantix alignment and deterministic handoff boundary
 Source contract: generalized Semantix planning handoff contract
 Related plans:
@@ -9,6 +9,22 @@ Related plans:
 - docs/plans/spec-studio-context-request-generator.md
 - docs/plans/spec-studio-grounded-context-ingestion.md
 - docs/plans/spec-studio-end-to-end-proof.md
+
+## Implementation status
+
+`packages/stx/src/spec-studio-planning-handoff.js` implements the pure builder,
+canonicalization, fingerprinting, validation, and observation-based freshness
+classification. `POST /spec-studio/planning-handoff` exposes compilation with
+canonical output and repeat-build diagnostics. Greenfield and update fixtures
+exercise the implemented behavior.
+
+The browser currently passes ready-packet text into a Codex run; it does not
+perform this lock-to-handoff flow. Immutable Spec Studio lock persistence and
+downstream planner integration remain host work. Complete nested-schema,
+grounding/reference-integrity, and governance role-binding enforcement are
+also unfinished. Requirements and acceptance criteria below specify the target
+contract, not a claim that every guarantee is implemented. See the
+[current implementation spec](../semantix-control-plane-spec.md) for current scope.
 
 ## Navigation
 

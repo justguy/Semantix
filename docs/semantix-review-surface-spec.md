@@ -1,5 +1,12 @@
 # Semantix Review Surface Spec
 
+Status: design proposal. The current browser implements prompt intake, Spec
+Studio clarification, graph/inspector/diff review, fixes, approval, and execution.
+This document also describes future interaction patterns and ecosystem
+integrations; those are not all wired into the runnable app. See the
+[current implementation spec](semantix-control-plane-spec.md) for actual flows
+and boundaries, and the [README](../README.md) for setup.
+
 ## Working Title
 
 **Semantix Review Surface v1**

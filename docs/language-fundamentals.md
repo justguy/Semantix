@@ -1,5 +1,11 @@
 # Semantix Language Fundamentals
 
+Implementation status: the surface syntax below is a language design, not a
+source language accepted by the `stx` CLI. The current implementation compiles
+structured blueprints and typed ConstraintIR objects and validates runtime
+candidate outputs. See the [current implementation spec](semantix-control-plane-spec.md)
+for the executable boundary and the [README](../README.md) for actual commands.
+
 ## Purpose
 
 Semantix is not just a new syntax for prompt engineering. It is a different programming

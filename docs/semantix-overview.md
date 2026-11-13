@@ -1,5 +1,25 @@
 # Semantix: A Clear Overview
 
+## Current implementation
+
+The runnable product is a local Codex-backed workbench: clarify a request in
+Spec Studio, generate a code proposal or semantic response, review the graph
+and diffs, correct issues, and approve host execution. The `stx` CLI starts the
+generation/review flow directly. A local store retains run artifacts, approvals,
+checkpoints, sessions, and events.
+
+There is also a pure planning-handoff builder and HTTP endpoint for host-locked
+packets. The browser currently sends ready-packet text into a Codex run; it does
+not consume a locked handoff. Host lock integration and complete handoff
+validation remain follow-up work.
+
+Use the [README](../README.md) to run the app and the
+[current implementation spec](semantix-control-plane-spec.md) for implemented
+behavior. The remainder of this document describes the broader architecture
+and language vision, including components and integrations that are not shipped.
+The `context`, `constraint`, and `~>` examples are language-design notation;
+the current compiler accepts structured blueprints and typed ConstraintIR.
+
 ## What Semantix Is
 
 Semantix is best understood as three things at once:
@@ -1477,13 +1497,13 @@ LLMs do bounded semantic work, and deterministic machinery stays in charge of wh
 
 This overview synthesizes the current design notes in:
 
-- [language-fundamentals.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/language-fundamentals.md)
-- [deterministic-core-and-runtime-boundary.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/deterministic-core-and-runtime-boundary.md)
-- [compiler-pipeline-and-neural-bytecode.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/compiler-pipeline-and-neural-bytecode.md)
-- [invariants-and-autonomous-systems.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/invariants-and-autonomous-systems.md)
-- [agent-orchestration-and-execution-discipline.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/agent-orchestration-and-execution-discipline.md)
-- [intent-review-authorize-workflow.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/intent-review-authorize-workflow.md)
-- [developer-experience-and-human-centered-programming.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/developer-experience-and-human-centered-programming.md)
-- [failure-recovery-and-the-apology-loop.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/failure-recovery-and-the-apology-loop.md)
-- [debugging-and-tooling.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/debugging-and-tooling.md)
-- [telemetry-auditing-and-policy-violations.md](/Users/adilevinshtein/Documents/dev/Semantix/docs/telemetry-auditing-and-policy-violations.md)
+- [language-fundamentals.md](language-fundamentals.md)
+- [deterministic-core-and-runtime-boundary.md](deterministic-core-and-runtime-boundary.md)
+- [compiler-pipeline-and-neural-bytecode.md](compiler-pipeline-and-neural-bytecode.md)
+- [invariants-and-autonomous-systems.md](invariants-and-autonomous-systems.md)
+- [agent-orchestration-and-execution-discipline.md](agent-orchestration-and-execution-discipline.md)
+- [intent-review-authorize-workflow.md](intent-review-authorize-workflow.md)
+- [developer-experience-and-human-centered-programming.md](developer-experience-and-human-centered-programming.md)
+- [failure-recovery-and-the-apology-loop.md](failure-recovery-and-the-apology-loop.md)
+- [debugging-and-tooling.md](debugging-and-tooling.md)
+- [telemetry-auditing-and-policy-violations.md](telemetry-auditing-and-policy-violations.md)
