@@ -6,6 +6,11 @@ const DOC_GRILL_QUESTION_ID = "T-DOC-GRILL-Q1";
 const DOC_GRILL_BLOCKER_ID = "BR-DOC-GRILL-TERM-001";
 const DOC_GRILL_FINDING_ID = "F-DOC-GRILL-TERM-001";
 const DOC_GRILL_DECISION_ID = "D-DOC-GRILL-TERM-001";
+export const SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE = Object.freeze({
+  scope: "fixture-probe-only",
+  publicServerSelectable: false,
+  liveReadinessEvidence: false,
+});
 
 function isDocGrillRequest(originalUserRequest) {
   return /\b(doc[-\s]?grill|documentation grill|grill with docs|terminology|glossary|context docs?|adr|canonical term|overloaded term)\b/i.test(
@@ -74,10 +79,10 @@ function buildNeedsUserPacket(sessionId, iteration, originalUserRequest) {
       target: "intent",
       body: {
         kind: "question",
-        q: "Is this a new system or updating an existing one?",
+        q: "What real product goal should this probe fixture represent?",
         options: [
-          { id: "OPT-NEW", label: "New system" },
-          { id: "OPT-UPDATE", label: "Updating existing" },
+          { id: "OPT-PRODUCT-GOAL", label: "Product goal fixture" },
+          { id: "OPT-WORKFLOW-GOAL", label: "Workflow goal fixture" },
         ],
       },
     },
@@ -411,5 +416,8 @@ export function createSpecStudioJsonProbeEvaluator() {
     };
   };
   evaluate.evaluatorMode = "probe";
+  evaluate.fixtureOnly = true;
+  evaluate.liveReadinessEvidence = false;
+  evaluate.quarantine = SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE;
   return evaluate;
 }

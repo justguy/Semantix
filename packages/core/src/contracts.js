@@ -60,12 +60,192 @@ const DEFAULT_RUNTIME_KIND = "cli_runtime";
  */
 
 /**
- * @typedef {"policy" | "provenance" | "critique" | "runtime" | "system"} RiskSource
+ * @typedef {"policy" | "provenance" | "critique" | "runtime" | "system" | "verifier"} RiskSource
  */
 
 /**
  * @typedef {"run.created" | "artifact.generated" | "node.updated" | "state_effect.available" | "risk.detected" | "approval.required" | "approval.accepted" | "approval.rejected" | "approval.stale" | "checkpoint.created" | "run.paused" | "run.resumed" | "run.completed" | "run.failed" | "session.created" | "session.updated" | "session.cancelled" | "turn.accepted" | "turn.started" | "turn.output.delta" | "turn.completed" | "turn.failed" | "turn.interrupted"} RunEventType
  */
+
+/**
+ * @typedef {"schema" | "path_policy" | "capability" | "approval" | "verifier" | "provenance" | "runtime"} ConstraintFailureClass
+ */
+
+/**
+ * @typedef {"hard" | "soft"} ConstraintFailureSeverity
+ */
+
+/**
+ * @typedef {{
+ *   format?: "json" | "text" | "markdown" | "code" | "custom",
+ *   jsonSchema?: object,
+ *   requiredFields?: string[],
+ *   forbiddenFields?: string[],
+ *   parser?: string
+ * }} ConstraintSchemaPolicy
+ */
+
+/**
+ * @typedef {{
+ *   root?: string,
+ *   allow?: string[],
+ *   deny?: string[],
+ *   operations?: string[]
+ * }} ConstraintPathPolicy
+ */
+
+/**
+ * @typedef {{
+ *   required?: string[],
+ *   forbidden?: string[],
+ *   approvalRequired?: string[]
+ * }} ConstraintCapabilityPolicy
+ */
+
+/**
+ * @typedef {{
+ *   required: boolean,
+ *   gateId?: string,
+ *   reason?: string,
+ *   freshness?: "artifact" | "node" | "state_effect"
+ * }} ConstraintApprovalPolicy
+ */
+
+/**
+ * @typedef {{
+ *   maxAttempts: number,
+ *   retryOn?: string[],
+ *   failOn?: string[],
+ *   repairInstructions?: string
+ * }} ConstraintRetryPolicy
+ */
+
+/**
+ * @typedef {"groundedness" | "entailment" | "contradiction" | "similarity" | "custom"} VerifierCheckKind
+ */
+
+/**
+ * @typedef {"gte" | "lte"} VerifierComparator
+ */
+
+/**
+ * @typedef {"pass" | "concern" | "block" | "review_required"} VerifierAdvisoryState
+ */
+
+/**
+ * @typedef {{
+ *   id: string,
+ *   kind: VerifierCheckKind,
+ *   threshold?: number,
+ *   comparator?: VerifierComparator,
+ *   failureSeverity?: ConstraintFailureSeverity,
+ *   description?: string
+ * }} ConstraintVerifierCheckPolicy
+ */
+
+/**
+ * @typedef {{
+ *   mode: "none" | "advisory" | "required",
+ *   checks?: ConstraintVerifierCheckPolicy[]
+ * }} ConstraintVerifierPolicy
+ */
+
+/**
+ * @typedef {{
+ *   runId?: string,
+ *   nodeId?: string,
+ *   constraintIrId?: string,
+ *   target?: object,
+ *   subject: unknown,
+ *   reference?: unknown,
+ *   context?: object,
+ *   checks: ConstraintVerifierCheckPolicy[]
+ * }} VerifierInput
+ */
+
+/**
+ * @typedef {{
+ *   id?: string,
+ *   kind: VerifierCheckKind,
+ *   score?: number,
+ *   passed?: boolean,
+ *   confidence?: number,
+ *   advisoryState?: VerifierAdvisoryState,
+ *   severity?: VerifierAdvisoryState,
+ *   message?: string,
+ *   evidence?: unknown[]
+ * }} VerifierCheckResult
+ */
+
+/**
+ * @typedef {{
+ *   providerId?: string,
+ *   status?: "available" | "unavailable" | "error",
+ *   checks?: VerifierCheckResult[],
+ *   error?: string,
+ *   latencyMs?: number
+ * }} VerifierResult
+ */
+
+/**
+ * @typedef {{
+ *   required: boolean,
+ *   sources?: string[],
+ *   evidenceRefs?: string[],
+ *   attachToOutput?: boolean
+ * }} ConstraintProvenancePolicy
+ */
+
+/**
+ * @typedef {{
+ *   code: string,
+ *   class: ConstraintFailureClass,
+ *   severity: ConstraintFailureSeverity,
+ *   retryable: boolean,
+ *   message: string
+ * }} ConstraintFailurePolicy
+ */
+
+/**
+ * Durable Phase 2 IR emitted from context, constraint, and ~> lowering.
+ * This is a contract shell only; compiler slices attach executable artifacts
+ * such as concrete validators and policy functions in later tasks.
+ *
+ * @typedef {{
+ *   id: string,
+ *   version: number,
+ *   sourceRef: string,
+ *   target: {
+ *     kind: "semantic_output" | "state_effect" | "tool_call" | "runtime_node",
+ *     nodeId?: string,
+ *     outputRef?: string,
+ *     stateEffectId?: string
+ *   },
+ *   schema?: ConstraintSchemaPolicy,
+ *   pathPolicy?: ConstraintPathPolicy,
+ *   capabilities?: ConstraintCapabilityPolicy,
+ *   approval?: ConstraintApprovalPolicy,
+ *   retry?: ConstraintRetryPolicy,
+ *   verifier?: ConstraintVerifierPolicy,
+ *   provenance?: ConstraintProvenancePolicy,
+ *   failure?: {
+ *     defaultSeverity: ConstraintFailureSeverity,
+ *     classes: ConstraintFailurePolicy[]
+ *   },
+ *   compiledArtifacts?: {
+ *     schemaValidatorRef?: string,
+ *     fieldValidatorRef?: string,
+ *     pathPolicyRef?: string,
+ *     approvalMarkerRef?: string,
+ *     retryPolicyRef?: string,
+ *     failurePolicyRef?: string,
+ *     verifierRef?: string,
+ *     constrainedDecoderRef?: string
+ *   }
+ * }} ConstraintIR
+ */
+
+export const CONSTRAINT_IR_VERSION = 1;
 
 /**
  * @typedef {{
@@ -137,6 +317,7 @@ const DEFAULT_RUNTIME_KIND = "cli_runtime";
  *   inputSummary?: string,
  *   outputSummary?: string,
  *   constraints?: ConstraintSet,
+ *   constraintIrRefs?: string[],
  *   capabilityScope?: CapabilityScope,
  *   runtimeBinding?: RuntimeTarget
  * }} ExecutionNode
@@ -161,7 +342,8 @@ const DEFAULT_RUNTIME_KIND = "cli_runtime";
  *     owner: "phalanx" | "hoplon" | "policy",
  *     status: PolicyState,
  *     details?: string
- *   }
+ *   },
+ *   constraintIrRefs?: string[]
  * }} StateEffect
  */
 
@@ -244,6 +426,7 @@ const DEFAULT_RUNTIME_KIND = "cli_runtime";
  *   edges: ExecutionEdge[],
  *   approvalGates: ApprovalGate[],
  *   stateEffects: StateEffect[],
+ *   constraintIRs?: ConstraintIR[],
  *   checkpoints: ResumeCheckpoint[],
  *   status: PlanStatus
  * }} ExecutionPlan
@@ -378,6 +561,343 @@ export function stableStringify(value) {
 
 export function createArtifactHash(value) {
   return createHash("sha256").update(stableStringify(value)).digest("hex");
+}
+
+export function createConstraintIR({
+  id,
+  sourceRef,
+  target,
+  version = CONSTRAINT_IR_VERSION,
+  schema,
+  pathPolicy,
+  capabilities,
+  approval = { required: false },
+  retry = { maxAttempts: 0 },
+  verifier = { mode: "none" },
+  provenance = { required: false },
+  failure = {
+    defaultSeverity: "hard",
+    classes: [],
+  },
+  compiledArtifacts = {},
+} = {}) {
+  if (!id || typeof id !== "string") {
+    throw new ValidationError("createConstraintIR requires a string id.");
+  }
+  if (!sourceRef || typeof sourceRef !== "string") {
+    throw new ValidationError("createConstraintIR requires a sourceRef.");
+  }
+  if (!target || typeof target !== "object" || !target.kind) {
+    throw new ValidationError("createConstraintIR requires a target.kind.");
+  }
+
+  return {
+    id,
+    version,
+    sourceRef,
+    target: cloneJson(target),
+    ...(schema ? { schema: cloneJson(schema) } : {}),
+    ...(pathPolicy ? { pathPolicy: cloneJson(pathPolicy) } : {}),
+    ...(capabilities ? { capabilities: cloneJson(capabilities) } : {}),
+    approval: cloneJson(approval),
+    retry: cloneJson(retry),
+    verifier: cloneJson(verifier),
+    provenance: cloneJson(provenance),
+    failure: cloneJson(failure),
+    compiledArtifacts: cloneJson(compiledArtifacts),
+  };
+}
+
+export function createConstraintIRIdentity(ir) {
+  if (!ir || typeof ir !== "object") {
+    throw new ValidationError("createConstraintIRIdentity requires a ConstraintIR object.");
+  }
+  return createArtifactHash(ir);
+}
+
+const VERIFIER_CHECK_KINDS = new Set([
+  "groundedness",
+  "entailment",
+  "contradiction",
+  "similarity",
+  "custom",
+]);
+
+function normalizeVerifierCheckKind(kind, details = {}) {
+  if (!VERIFIER_CHECK_KINDS.has(kind)) {
+    throw new ValidationError("Verifier check kind is not supported.", {
+      ...details,
+      kind,
+      supportedKinds: [...VERIFIER_CHECK_KINDS],
+    });
+  }
+  return kind;
+}
+
+function defaultVerifierComparator(kind) {
+  return kind === "contradiction" ? "lte" : "gte";
+}
+
+function defaultVerifierThreshold(kind) {
+  return kind === "contradiction" ? 0.2 : 0.7;
+}
+
+function normalizeConstraintVerifierCheck(check, index = 0, details = {}) {
+  if (!check || typeof check !== "object") {
+    throw new ValidationError("Verifier checks must be objects.", {
+      ...details,
+      index,
+    });
+  }
+  if (!check.id || typeof check.id !== "string") {
+    throw new ValidationError("Verifier checks require a string id.", {
+      ...details,
+      index,
+    });
+  }
+
+  const kind = normalizeVerifierCheckKind(check.kind, {
+    ...details,
+    checkId: check.id,
+  });
+  const comparator = check.comparator ?? defaultVerifierComparator(kind);
+  if (!["gte", "lte"].includes(comparator)) {
+    throw new ValidationError("Verifier check comparator must be gte or lte.", {
+      ...details,
+      checkId: check.id,
+      comparator,
+    });
+  }
+  const threshold = check.threshold ?? defaultVerifierThreshold(kind);
+  if (typeof threshold !== "number" || Number.isNaN(threshold)) {
+    throw new ValidationError("Verifier check threshold must be numeric.", {
+      ...details,
+      checkId: check.id,
+      threshold,
+    });
+  }
+
+  return {
+    id: check.id,
+    kind,
+    threshold,
+    comparator,
+    failureSeverity: check.failureSeverity === "hard" ? "hard" : "soft",
+    ...(check.description ? { description: check.description } : {}),
+  };
+}
+
+function normalizeConstraintVerifierPolicy(policy = { mode: "none" }, details = {}) {
+  const mode = policy?.mode ?? "none";
+  if (!["none", "advisory", "required"].includes(mode)) {
+    throw new ValidationError("Verifier policy mode must be none, advisory, or required.", {
+      ...details,
+      mode,
+    });
+  }
+
+  return {
+    mode,
+    checks: (policy?.checks ?? []).map((check, index) =>
+      normalizeConstraintVerifierCheck(check, index, details),
+    ),
+  };
+}
+
+function findVerifierCheckResult(providerResult, policyCheck) {
+  const checks = Array.isArray(providerResult?.checks) ? providerResult.checks : [];
+  return (
+    checks.find((check) => check?.id === policyCheck.id) ??
+    checks.find((check) => check?.kind === policyCheck.kind) ??
+    null
+  );
+}
+
+function verifierCheckPassed(policyCheck, checkResult) {
+  if (typeof checkResult?.score === "number") {
+    if (Number.isNaN(checkResult.score)) {
+      return false;
+    }
+    return policyCheck.comparator === "gte"
+      ? checkResult.score >= policyCheck.threshold
+      : checkResult.score <= policyCheck.threshold;
+  }
+
+  if (typeof checkResult?.passed === "boolean") {
+    return checkResult.passed;
+  }
+
+  return false;
+}
+
+function verifierFailurePolicyState(mode, failureSeverity) {
+  if (mode === "none") {
+    return "pass";
+  }
+  if (mode === "required" && failureSeverity === "hard") {
+    return "block";
+  }
+  return "review_required";
+}
+
+/**
+ * Builds the direct provider hook payload. The provider can only return evidence;
+ * callers must feed the result through applyVerifierPolicy before affecting plan state.
+ */
+export function createVerifierInput({
+  runId,
+  node,
+  constraintIR,
+  subject,
+  reference,
+  context = {},
+  checks,
+} = {}) {
+  const policy = normalizeConstraintVerifierPolicy(
+    constraintIR?.verifier ?? { mode: "advisory", checks: checks ?? [] },
+    {
+      runId,
+      nodeId: node?.id ?? constraintIR?.target?.nodeId,
+      constraintIrId: constraintIR?.id,
+    },
+  );
+  const verifierChecks = (checks ?? policy.checks).map((check, index) =>
+    normalizeConstraintVerifierCheck(check, index, {
+      runId,
+      nodeId: node?.id ?? constraintIR?.target?.nodeId,
+      constraintIrId: constraintIR?.id,
+    }),
+  );
+
+  if (verifierChecks.length === 0) {
+    throw new ValidationError("Verifier input requires at least one check.", {
+      runId,
+      nodeId: node?.id ?? constraintIR?.target?.nodeId,
+      constraintIrId: constraintIR?.id,
+    });
+  }
+
+  return {
+    runId,
+    nodeId: node?.id ?? constraintIR?.target?.nodeId,
+    constraintIrId: constraintIR?.id,
+    target: cloneJson(constraintIR?.target),
+    subject: cloneJson(subject),
+    reference: cloneJson(reference),
+    context: cloneJson(context),
+    checks: cloneJson(verifierChecks),
+  };
+}
+
+/**
+ * Converts provider verifier output into Semantix-owned policy evidence.
+ * Provider advisory states never directly set policyState.
+ */
+export function applyVerifierPolicy({
+  policy = { mode: "none" },
+  providerResult,
+  providerId = providerResult?.providerId,
+  details = {},
+} = {}) {
+  const verifierPolicy = normalizeConstraintVerifierPolicy(policy, details);
+  const resolvedProviderId = providerId ?? "unknown_verifier";
+
+  if (verifierPolicy.mode === "none") {
+    return {
+      status: "pass",
+      policyState: "pass",
+      enforcement: {
+        owner: "policy",
+        status: "pass",
+        details: "Verifier policy is disabled; provider evidence is ignored.",
+      },
+      evidence: [],
+      riskFlags: [],
+      advisory: true,
+    };
+  }
+
+  if (!providerResult || ["unavailable", "error"].includes(providerResult.status)) {
+    const policyState = verifierFailurePolicyState(verifierPolicy.mode, "hard");
+    return {
+      status: "unavailable",
+      policyState,
+      enforcement: {
+        owner: "policy",
+        status: policyState,
+        details: `Verifier provider '${resolvedProviderId}' was unavailable; Semantix policy selected ${policyState}.`,
+      },
+      evidence: [
+        {
+          kind: "verifier_unavailable",
+          source: "verifier",
+          providerId: resolvedProviderId,
+          providerStatus: providerResult?.status ?? "unavailable",
+          message: providerResult?.error ?? "Verifier provider unavailable.",
+          policyState,
+        },
+      ],
+      riskFlags: ["verifier_unavailable"],
+      advisory: true,
+    };
+  }
+
+  const evidence = [];
+  let policyState = "pass";
+
+  for (const policyCheck of verifierPolicy.checks) {
+    const checkResult = findVerifierCheckResult(providerResult, policyCheck);
+    const passed = checkResult ? verifierCheckPassed(policyCheck, checkResult) : false;
+    const nextPolicyState = passed
+      ? "pass"
+      : verifierFailurePolicyState(verifierPolicy.mode, policyCheck.failureSeverity);
+    if (nextPolicyState === "block" || (nextPolicyState === "review_required" && policyState === "pass")) {
+      policyState = nextPolicyState;
+    }
+
+    evidence.push({
+      kind: "verifier_check",
+      source: "verifier",
+      providerId: resolvedProviderId,
+      checkId: policyCheck.id,
+      checkKind: policyCheck.kind,
+      score: checkResult?.score,
+      threshold: policyCheck.threshold,
+      comparator: policyCheck.comparator,
+      passed,
+      failureSeverity: policyCheck.failureSeverity,
+      providerAdvisoryState:
+        checkResult?.advisoryState ?? checkResult?.severity ?? (passed ? "pass" : "concern"),
+      policyState: nextPolicyState,
+      message:
+        checkResult?.message ??
+        (checkResult ? "Verifier check evaluated by Semantix policy." : "Verifier check result was missing."),
+      providerEvidence: cloneJson(checkResult?.evidence ?? []),
+    });
+  }
+
+  return {
+    status:
+      policyState === "block"
+        ? "block"
+        : policyState === "review_required"
+          ? "concern"
+          : "pass",
+    policyState,
+    enforcement: {
+      owner: "policy",
+      status: policyState,
+      details: `Verifier provider '${resolvedProviderId}' supplied advisory evidence; Semantix policy selected ${policyState}.`,
+    },
+    evidence,
+    riskFlags:
+      policyState === "block"
+        ? ["verifier_block"]
+        : policyState === "review_required"
+          ? ["verifier_concern"]
+          : [],
+    advisory: true,
+  };
 }
 
 export function makeEvent({

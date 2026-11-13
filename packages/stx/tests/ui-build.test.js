@@ -37,6 +37,51 @@ async function loadUiGlobals() {
   return sandbox.window;
 }
 
+async function loadAppGlobals() {
+  const sharedSource = await readFile(
+    join(testDir, "..", "ui", "control-surface", "ui.jsx"),
+    "utf8",
+  );
+  const appSource = await readFile(
+    join(testDir, "..", "ui", "control-surface", "app.jsx"),
+    "utf8",
+  );
+  const shared = await transform(sharedSource, {
+    loader: "jsx",
+    format: "iife",
+  });
+  const app = await transform(
+    `${appSource}
+Object.assign(window, {
+  getSpecStudioQuestions,
+  optionId,
+  optionLabel,
+  specStudioAnswerReady,
+});
+`,
+    {
+      loader: "jsx",
+      format: "iife",
+    },
+  );
+  const sandbox = {
+    window: {},
+    React: {
+      useState() {},
+      useEffect() {},
+      useMemo() {},
+      useRef() {},
+      createElement(type, props, ...children) {
+        return { type, props: props ?? {}, children };
+      },
+    },
+  };
+  vm.runInNewContext(shared.code, sandbox);
+  Object.assign(sandbox, sandbox.window);
+  vm.runInNewContext(app.code, sandbox);
+  return sandbox.window;
+}
+
 test("buildUi emits the bundled Semantix control-surface assets", async (t) => {
   const uiDistDir = await mkdtemp(join(tmpdir(), "semantix-stx-ui-build-"));
 
@@ -58,6 +103,14 @@ test("buildUi emits the bundled Semantix control-surface assets", async (t) => {
   const bundle = await readFile(join(uiDistDir, "assets", "app.js"), "utf8");
   assert.match(bundle, /SemantixApp/);
   assert.match(bundle, /createRoot/);
+  assert.doesNotMatch(bundle, /Load greenfield demo/);
+  assert.match(bundle, /Spec Studio/);
+  assert.match(bundle, /Confidence/);
+  assert.match(bundle, /Alignment/);
+  assert.match(bundle, /Effort/);
+  assert.match(bundle, /Submit alignment answers/);
+  assert.match(bundle, /Continue to compile aligned scope/);
+  assert.doesNotMatch(bundle, /Effort Indicator/);
 
   const manifest = JSON.parse(await readFile(join(uiDistDir, "asset-manifest.json"), "utf8"));
   assert.equal(manifest.entrypoint, "/assets/app.js");
@@ -150,4 +203,51 @@ test("control surface exposes real CodeChangeSet file targets while hiding advis
   assert.equal(ui.getChangeTargetLabel(displayable[0]), "2 files: routes/auth.ts, routes/session.ts");
   assert.match(displayable[0].preview, /modify file .*routes\/auth\.ts/);
   assert.match(displayable[0].preview, /create file .*routes\/session\.ts/);
+});
+
+test("Spec Studio UI extracts answerable questions and recognizes completed answers", async () => {
+  const ui = await loadAppGlobals();
+  const packet = {
+    readiness: "needs_user",
+    nextTurn: {
+      id: "turn-questions",
+      body: {
+        kind: "batch",
+        questions: [
+          {
+            id: "Q-platform",
+            q: "What should the first version run on?",
+            options: [
+              { id: "web", label: "Web app" },
+              { id: "desktop", description: "Desktop app" },
+            ],
+          },
+          {
+            id: "Q-storage",
+            question: "Where should notes be stored?",
+            options: ["Local browser storage", "Cloud sync"],
+          },
+        ],
+      },
+    },
+  };
+
+  const questions = ui.getSpecStudioQuestions(packet);
+
+  assert.deepEqual(
+    questions.map((question) => question.id),
+    ["Q-platform", "Q-storage"],
+  );
+  assert.equal(questions[0].q, "What should the first version run on?");
+  assert.equal(questions[1].q, "Where should notes be stored?");
+  assert.equal(ui.optionId(questions[0].options[0], 0), "web");
+  assert.equal(ui.optionLabel(questions[0].options[0]), "Web app");
+  assert.equal(ui.optionLabel(questions[0].options[1]), "Desktop app");
+  assert.equal(ui.optionId(questions[1].options[0], 0), "OPT-1");
+  assert.equal(ui.optionLabel(questions[1].options[0]), "Local browser storage");
+
+  assert.equal(ui.specStudioAnswerReady(questions[0], {}), false);
+  assert.equal(ui.specStudioAnswerReady(questions[0], { picked: "web" }), true);
+  assert.equal(ui.specStudioAnswerReady(questions[1], { text: "Use IndexedDB." }), true);
+  assert.equal(JSON.stringify(questions).includes("<string>"), false);
 });

@@ -427,6 +427,22 @@ test("createSemantixEvaluator awaits async impl results", async () => {
   assert.equal(response.packet.contractVersion, greenfieldReadyPacket.contractVersion);
 });
 
+test("createSemantixEvaluator normalizes grounded fact confidence at the response boundary", async () => {
+  const packet = deepClone(hoplonGroundedPacket);
+  packet.groundedFacts[0].confidence = "low-confidence";
+  packet.risks = [{ id: "RISK-001", text: "Auth scope is unresolved.", severity: "high" }];
+  packet.acceptanceSummary = { summary: "Authenticated task CRUD works." };
+  const evaluate = createSemantixEvaluator(() => buildEvaluateResponse(packet));
+
+  const response = await evaluate(buildInitialRequest());
+
+  assert.equal(response.packet.groundedFacts[0].confidence, "low");
+  assert.equal(response.packet.risks[0].severity, "blocker");
+  assert.deepEqual(response.packet.acceptanceSummary, ["Authenticated task CRUD works."]);
+  const result = validateSemantixEvaluateResponse(response);
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+});
+
 test("createSemantixEvaluator passes a normalized Phalanx context episode to impl", async () => {
   const evaluate = createSemantixEvaluator((request) => {
     assert.deepEqual(request.contextResponses, [

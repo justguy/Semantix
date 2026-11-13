@@ -242,6 +242,62 @@ async function compileRun(service, runId, workspaceRoot, overrides = {}) {
   });
 }
 
+function createRuntimeAdmissionBlueprint(workspaceRoot, overrides = {}) {
+  const blueprint = createBlueprint({
+    allowedRoot: workspaceRoot,
+    forbiddenRoots: overrides.forbiddenRoots,
+    targetSymbol: overrides.targetSymbol,
+  });
+  blueprint.semantic_frames[0].context.workspace_root = workspaceRoot;
+  blueprint.constraint_irs = [
+    {
+      id: "constraint.runtime-admission",
+      version: 1,
+      sourceRef: "constraint RuntimeAdmission",
+      target: {
+        kind: "semantic_output",
+        nodeId: "node.semantic.generate",
+      },
+      schema: {
+        requiredFields: ["summary"],
+        forbiddenFields: ["internalNotes"],
+      },
+      pathPolicy: {
+        root: ".",
+        allow: ["allowed"],
+        deny: ["allowed/private"],
+        operations: ["modify_file"],
+      },
+      retry: {
+        maxAttempts: 1,
+        retryOn: ["schema"],
+        failOn: ["path_policy"],
+      },
+      failure: {
+        defaultSeverity: "hard",
+        classes: [
+          {
+            code: "schema_mismatch",
+            class: "schema",
+            severity: "hard",
+            retryable: true,
+            message: "Regenerate the semantic output once for schema admission failures.",
+          },
+          {
+            code: "path_outside_allowlist",
+            class: "path_policy",
+            severity: "hard",
+            retryable: false,
+            message: "Paths outside the compiled allowlist fail closed.",
+          },
+        ],
+      },
+    },
+  ];
+  blueprint.execution_graph.nodes[0].constraint_ir_refs = ["constraint.runtime-admission"];
+  return blueprint;
+}
+
 test("admits valid strict JSON, pauses for approval, and passes admitted output to a host function", async (t) => {
   const { service, workspaceRoot, hostInvocations } = await createHarness(t);
   const artifact = await compileRun(service, "run-semantic-flow", workspaceRoot);
@@ -643,6 +699,120 @@ test("rejects forbidden paths and canonicalizes absolute paths before admission"
     }),
     /forbidden/i,
   );
+});
+
+test("runtime admission retries retryable schema failures and persists attempt evidence", async (t) => {
+  let invocationCount = 0;
+  const { service, workspaceRoot } = await createHarness(t, {
+    runner: async () => {
+      invocationCount += 1;
+      if (invocationCount === 1) {
+        return createRunnerResult({
+          workspace_path: join(workspaceRoot, "allowed", "notes.txt"),
+        });
+      }
+      return createRunnerResult({
+        workspace_path: join(workspaceRoot, "allowed", "notes.txt"),
+        summary: "Write the governed output after retry.",
+      });
+    },
+  });
+
+  await compileRun(service, "run-admission-retry-admit", workspaceRoot, {
+    blueprint: createRuntimeAdmissionBlueprint(workspaceRoot),
+  });
+
+  const pausedArtifact = await service.executeApprovedNodes({
+    runId: "run-admission-retry-admit",
+    actor: "operator",
+  });
+  const semanticNode = pausedArtifact.plan.nodes.find((node) => node.id === "node.semantic.generate");
+
+  assert.equal(invocationCount, 2);
+  assert.equal(pausedArtifact.plan.status, "paused");
+  assert.equal(semanticNode.executionStatus, "succeeded");
+  assert.equal(semanticNode.admissionEvidence.status, "admitted");
+  assert.deepEqual(
+    semanticNode.admissionEvidence.attempts.map((attempt) => attempt.status),
+    ["retry_scheduled", "admitted"],
+  );
+});
+
+test("runtime admission exhausts fixed retry budget without storing trusted output", async (t) => {
+  let invocationCount = 0;
+  const { service, store, workspaceRoot } = await createHarness(t, {
+    runner: async () => {
+      invocationCount += 1;
+      return createRunnerResult({
+        workspace_path: join(workspaceRoot, "allowed", "notes.txt"),
+      });
+    },
+  });
+
+  await compileRun(service, "run-admission-retry-exhausted", workspaceRoot, {
+    blueprint: createRuntimeAdmissionBlueprint(workspaceRoot),
+  });
+
+  await assert.rejects(
+    service.executeApprovedNodes({
+      runId: "run-admission-retry-exhausted",
+      actor: "operator",
+    }),
+    (error) =>
+      error?.code === "VALIDATION_ERROR" &&
+      error?.details?.admissionEvidence?.status === "rejected",
+  );
+
+  const failedArtifact = await service.getCurrentArtifact("run-admission-retry-exhausted");
+  const semanticNode = failedArtifact.plan.nodes.find((node) => node.id === "node.semantic.generate");
+  const events = await store.listRunEvents("run-admission-retry-exhausted");
+
+  assert.equal(invocationCount, 2);
+  assert.equal(failedArtifact.plan.status, "failed");
+  assert.equal(semanticNode.executionStatus, "failed");
+  assert.equal(semanticNode.admittedOutput, null);
+  assert.equal(semanticNode.admissionEvidence.status, "rejected");
+  assert.deepEqual(
+    semanticNode.admissionEvidence.attempts.map((attempt) => attempt.status),
+    ["retry_scheduled", "rejected"],
+  );
+  assert.equal(events.some((event) => event.type === "approval.required"), false);
+});
+
+test("runtime admission fail-closes non-retryable compiled path policy violations", async (t) => {
+  let invocationCount = 0;
+  const { service, workspaceRoot } = await createHarness(t, {
+    runner: async () => {
+      invocationCount += 1;
+      return createRunnerResult({
+        workspace_path: join(workspaceRoot, "blocked", "notes.txt"),
+        summary: "Write outside the compiled allowlist.",
+      });
+    },
+  });
+
+  await compileRun(service, "run-admission-path-hard-fail", workspaceRoot, {
+    blueprint: createRuntimeAdmissionBlueprint(workspaceRoot),
+  });
+
+  await assert.rejects(
+    service.executeApprovedNodes({
+      runId: "run-admission-path-hard-fail",
+      actor: "operator",
+    }),
+    (error) =>
+      error?.code === "VALIDATION_ERROR" &&
+      error?.details?.admissionEvidence?.finalAttempt?.reasonCode === "path_outside_allowlist",
+  );
+
+  const failedArtifact = await service.getCurrentArtifact("run-admission-path-hard-fail");
+  const semanticNode = failedArtifact.plan.nodes.find((node) => node.id === "node.semantic.generate");
+
+  assert.equal(invocationCount, 1);
+  assert.equal(failedArtifact.plan.status, "failed");
+  assert.equal(semanticNode.admittedOutput, null);
+  assert.equal(semanticNode.admissionEvidence.status, "rejected");
+  assert.equal(semanticNode.admissionEvidence.finalAttempt.failureClass, "path_policy");
 });
 
 test("fails compilation on unsatisfiable hard-constraint merge", async (t) => {

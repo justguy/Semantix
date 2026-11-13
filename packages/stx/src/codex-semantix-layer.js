@@ -1118,14 +1118,12 @@ function buildFlowSteps({ artifact, issues, approval }) {
   const deterministicRunning = deterministicNode?.executionStatus === "running";
   const steps = [
     { id: 1, label: "Input", status: "complete" },
-    { id: 2, label: "Classification", status: "complete" },
     { id: 3, label: deterministicNode ? "Review Plan" : "Semantic Response", status: hasPlan ? "complete" : "pending" },
     {
       id: 4,
       label: "Issue Detection",
       status: hasIssues ? (hasBlockingIssues ? "blocked" : "warning") : semanticFinished ? "complete" : "pending",
     },
-    { id: 5, label: "Effort Indicator", status: "complete" },
     { id: 6, label: "Why? Explanation", status: hasIssues || hasPlan ? "available" : "pending" },
     { id: 9, label: "Advanced View", status: semanticFinished ? "available" : "pending" },
   ];

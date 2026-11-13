@@ -2,7 +2,7 @@
   "meta": {
     "name": "Semantix",
     "slug": "semantix",
-    "scratchpad": "Completed Phase 2 tasks stx-p2-011 and stx-p2-012. Audit bundles now default to hash/redacted payload retention with size metadata, and verifier drift is locked by deterministic fixtures. Verification: control-plane workspace tests passed 33/33 with localhost approval; verifier policy tests passed 11/11; git diff --check passed.",
+    "scratchpad": "Completed stx-p2-007 for the PMO Phalanx acceptance recovery context: Semantix update-mode handoff now carries explicit target surfaces, negative requirements, do_not_change/compatibility boundaries, and linked verification obligations, with focused and workspace tests passing.",
     "swimlanes": [
       {
         "id": "contract",
@@ -43,8 +43,8 @@
       },
       {
         "id": "phase-2-constraint-engine",
-        "label": "Phase 2 Constraint Engine",
-        "description": "Compiled constraints, runtime admission, audit, provenance, and replay.",
+        "label": "Phase 2 Handoff Verticals",
+        "description": "End-to-end Spec Studio deterministic planning handoff slices; each milestone demonstrates usable delegation value.",
         "collapsed": false
       }
     ],
@@ -66,8 +66,8 @@
         "label": "P3"
       }
     ],
-    "rev": 83,
-    "updatedAt": "2026-05-16T23:29:42.738Z"
+    "rev": 100,
+    "updatedAt": "2026-05-23T14:27:16.737Z"
   },
   "tasks": [
     {
@@ -1608,9 +1608,9 @@
         "stx-p1-005"
       ],
       "id": "stx-p2-000",
-      "title": "Phase 2 Constraint Engine epic",
+      "title": "Phase 2 Spec Studio handoff verticals",
       "kind": "group",
-      "goal": "Track Phase 2 work that turns Semantix constraints into executable admission, audit, provenance, and replay machinery.",
+      "goal": "Track Phase 2 work that proves Semantix can turn locked human intent into a deterministic, evidence-backed planning handoff contract without treating prompts as specs or producing downstream SDLC plans itself.",
       "status": "not_started",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
@@ -1618,37 +1618,55 @@
       },
       "effort": "xl",
       "references": [
-        "docs/plans/semantix-phase-2-plan.md:41-64",
-        "docs/compiler-pipeline-and-neural-bytecode.md:102-151"
+        "README.md:1",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:38-56",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1359-1540"
       ],
       "definition_of_done": [
-        "All child Phase 2 tasks are either complete or explicitly split/deferred with rationale.",
-        "Phase 2 exit criteria in the plan doc are reviewed against implementation evidence."
+        "All child Phase 2 handoff verticals are complete or explicitly split with rationale.",
+        "README principles remain aligned with the implemented handoff behavior: prompt is not spec, handoff is delegation contract, host owns lock, Semantix stops at the handoff boundary, and deterministic guarantees begin after lock.",
+        "Phase 2 evidence shows a locked packet can produce a deterministic handoff that downstream planning can consume without mutable chat state."
       ],
       "constraints": [
-        "This is a grouping task; child tasks carry execution-specific acceptance criteria."
+        "This is a grouping task; child verticals carry execution-specific acceptance criteria.",
+        "Do not expand Semantix into architecture, task graph generation, verification command selection, execution dispatch, or final approval."
       ],
       "expected_changes": [
-        "docs/plans/semantix-phase-2-plan.md",
-        "packages/core/**",
-        "packages/runtime-codex/**",
-        "packages/stx/**"
+        "README.md",
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/src/index.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
+        ".llm-tracker/trackers/semantix.json"
       ],
       "allowed_paths": [
+        "README.md",
         "docs/**",
-        "packages/**",
-        "control-plane/**",
+        "packages/stx/**",
         ".llm-tracker/trackers/semantix.json"
       ],
       "context": {
         "tags": [
-          "phase-2",
-          "epic",
-          "constraint-engine"
+          "spec-studio",
+          "planning-handoff",
+          "verticals"
         ],
-        "roadmap_section": "Phase 2 Scope",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:41-64"
-      }
+        "roadmap_section": "Phase 2 Handoff Verticals",
+        "roadmap_reference": "README.md:57",
+        "notes": "Phase 2 is now organized around demonstrable handoff value, not layer-by-layer implementation."
+      },
+      "assignee": null,
+      "blocker_reason": null,
+      "related": [
+        "stx-p2-005",
+        "stx-p2-007",
+        "stx-p2-009",
+        "stx-p2-010",
+        "stx-p2-013",
+        "stx-p2-008"
+      ],
+      "comment": "Replanned as the Semantix-side deterministic planning handoff epic: prompts are clarified before lock, but downstream planning receives only the locked handoff contract."
     },
     {
       "dependencies": [
@@ -1933,63 +1951,76 @@
       "assignee": "codex-worker"
     },
     {
-      "dependencies": [
-        "stx-p2-003",
-        "stx-p2-004"
-      ],
+      "dependencies": [],
       "id": "stx-p2-005",
-      "title": "Build Constraint Engine proof matrix",
+      "title": "Demo greenfield lock-to-handoff",
       "parent_id": "stx-p2-000",
-      "goal": "Create deterministic fixtures that prove the Constraint Engine handles representative Semantix programs and failure modes.",
-      "status": "not_started",
+      "goal": "Deliver the first end-to-end vertical: a locked greenfield packet plus host audit state compiles into a canonical LockedSpecPlanningHandoff with deterministic handoff ID, input hashes, fingerprint, and planner-visible requirement facts.",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
         "priorityId": "p0"
       },
       "effort": "m",
       "references": [
-        "docs/plans/semantix-phase-2-plan.md:128-141",
-        "docs/plans/semantix-phase-2-plan.md:207-219"
+        "README.md:1",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:225-307",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:308-426",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:878-1162"
       ],
       "definition_of_done": [
-        "Fixture matrix covers extraction, constrained summarization, semantic routing, safe file-change proposal, blocked path mutation, retryable schema failure, and non-retryable policy failure.",
-        "Concrete proof fixture covers a proposed file/API/shell effect rendered structurally, approved, invalidated by an artifact change, rejected as stale, re-approved from the fresh artifact, resumed, and executed.",
-        "The same stale-approval proof runs through the active Codex path and a mock or second runtime adapter path without requiring live external services.",
-        "Each fixture asserts contract shape, admission outcome, policy classification, freshness state, and audit evidence.",
-        "Core matrix passes without live services; any live smoke proof is additive and explicitly labeled."
+        "README states the handoff principles and explains why Phase 2 uses vertical milestones instead of layers.",
+        "packages/stx/src/spec-studio-planning-handoff.js exports the frozen v1 contract constants, default compiler profile, supported packet versions, buildPlanningHandoff, validate/assert helpers, canonicalizePlanningHandoff, fingerprintPlanningHandoff, and classifyFreshnessGateResult placeholder or implemented helper as appropriate for the vertical.",
+        "A minimal greenfield packet, locked artifact, and audit-state fixture build into a valid canonical handoff with requirements, acceptance criteria, assumptions, evidence, governance, data policy, capability scope, provenance, decision audit, freshness gate, planner seeds, input hashes, deterministic handoffId, and fingerprint.",
+        "Omitted compilerProfileId and explicit default compilerProfileId produce identical normalized buildInput hashes.",
+        "Focused tests prove repeated builds from identical inputs produce byte-identical canonical JSON and the same fingerprint."
       ],
       "constraints": [
-        "Do not require Phalanx or external services for deterministic proof coverage.",
-        "Negative tests must fail closed."
+        "No LLM, filesystem, repo reader, network, clock, random, or server dependency inside the builder path.",
+        "Default to local validator and canonical serializer unless a dependency decision is explicitly approved.",
+        "Do not emit architecture, task graphs, implementation plans, or verification command choices."
       ],
       "expected_changes": [
-        "packages/core/tests/**",
-        "packages/runtime-codex/tests/**",
-        "packages/stx/tests/**",
-        "docs/plans/semantix-phase-2-plan.md"
+        "README.md",
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/src/index.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/greenfield-minimal.*.json"
       ],
       "allowed_paths": [
-        "packages/**",
-        "control-plane/**",
-        "docs/**"
+        "README.md",
+        "packages/stx/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
+        ".llm-tracker/trackers/semantix.json"
       ],
-      "approval_required_for": [
-        "Adding live-service tests to the default test suite"
-      ],
+      "approval_required_for": [],
       "context": {
         "tags": [
-          "phase-2",
-          "proof",
-          "fixtures"
+          "vertical-1",
+          "greenfield",
+          "canonical-handoff"
         ],
-        "roadmap_section": "Milestone 5: Proof Matrix",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:128-141"
+        "roadmap_section": "Greenfield lock-to-handoff",
+        "roadmap_reference": "README.md:57",
+        "notes": "Complete. README/planning docs already stated the Phase 2 principles; this slice added the pure builder/export, minimal greenfield fixtures, deterministic canonical/hash/fingerprint tests, fail-closed checks, freshness classifier coverage, and import guard.",
+        "files_touched": [
+          "packages/stx/src/spec-studio-planning-handoff.js",
+          "packages/stx/src/index.js",
+          "packages/stx/tests/spec-studio-planning-handoff.test.js",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/greenfield-minimal.packet.json",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/greenfield-minimal.locked-artifact.json",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/greenfield-minimal.audit-state.json"
+        ],
+        "verification": "node --test packages/stx/tests/spec-studio-planning-handoff.test.js passed; npm run test --workspace @semantix/stx passed."
       },
-      "comment": "Proof matrix now includes the required concrete stale-approval side-effect proof and second-adapter replay scenario.",
-      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-004.",
+      "comment": "Complete: greenfield locked packet plus host audit state now compiles into deterministic LockedSpecPlanningHandoff with canonical bytes, handoffId, input hashes, fingerprint, planner seeds, and verification evidence.",
+      "blocker_reason": null,
       "related": [
-        "stx-p2-009"
-      ]
+        "stx-p2-007",
+        "stx-p2-009",
+        "stx-p2-010"
+      ],
+      "assignee": "codex"
     },
     {
       "dependencies": [
@@ -2059,63 +2090,78 @@
     },
     {
       "dependencies": [
-        "stx-p2-011"
+        "stx-p2-005"
       ],
       "id": "stx-p2-007",
-      "title": "Implement provenance and replay foundation",
+      "title": "Demo update safety handoff",
       "parent_id": "stx-p2-000",
-      "goal": "Connect admitted semantic values to context, constraints, verifier evidence, artifact versions, and deterministic replay of admission decisions.",
-      "status": "not_started",
+      "goal": "Extend the handoff vertical to update-mode work so downstream planners receive target surfaces, do-not-change or compatibility boundaries, negative requirements, and first-class verification obligations.",
+      "status": "complete",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
-        "priorityId": "p1"
+        "priorityId": "p0"
       },
-      "effort": "l",
+      "effort": "m",
       "references": [
-        "docs/plans/semantix-phase-2-plan.md:143-170",
-        "docs/plans/semantix-phase-2-plan.md:196-205"
+        "README.md:33",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:58-224",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:936-1011",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1608-1638"
       ],
       "definition_of_done": [
-        "Admitted semantic values carry provenance links to context, constraints, verifier evidence, artifact identity, and admission attempt metadata.",
-        "Replay can reproduce deterministic admission or rejection from recorded candidate plus compiled constraints.",
-        "Replay shows the approval freshness chain for the concrete proof: artifact seen by reviewer, artifact that changed, rejected stale approval envelope, fresh approval envelope, and executed artifact.",
-        "Replay docs explicitly avoid promising token-level model reproduction.",
-        "Tests cover deterministic replay of at least one admitted candidate, one rejected candidate, and one stale approval rejection."
+        "A minimal update packet fixture builds targetSurfaces, boundaries, negativeRequirements, acceptance criteria, and verificationObligations into the canonical handoff.",
+        "Each must requirement has a requirement obligation and each acceptance criterion has its own linked acceptance obligation.",
+        "Each negative requirement and each do_not_change or compatibility boundary becomes a first-class verification obligation with deterministic source refs and related-obligation linkage.",
+        "Update packets without target surfaces fail closed.",
+        "Update packets without a do_not_change, reuse, or compatibility boundary fail closed."
       ],
       "constraints": [
-        "Replay target is admission decision replay, not model token replay.",
-        "Do not store secrets or raw unbounded transcripts in provenance records."
+        "Update safety must be structural; do not rely on prose-only warnings to downstream planners.",
+        "Do not silently infer target surfaces or boundaries that are absent from locked input."
       ],
       "expected_changes": [
-        "packages/core/src/contracts.js",
-        "packages/core/src/control-plane-service.js",
-        "packages/runtime-codex/src/strict-compiler.js",
-        "packages/**/tests/**",
-        "docs/**"
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/update-minimal.*.json"
       ],
       "allowed_paths": [
-        "packages/**",
-        "control-plane/**",
-        "docs/**"
+        "packages/stx/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
+        ".llm-tracker/trackers/semantix.json"
       ],
-      "approval_required_for": [
-        "Persisting new classes of raw model output or context payloads"
-      ],
+      "approval_required_for": [],
       "context": {
         "tags": [
-          "phase-2",
-          "provenance",
-          "replay"
+          "vertical-2",
+          "update-safety",
+          "verification-obligations"
         ],
-        "roadmap_section": "Milestone 6: Audit, Provenance, And Replay Foundation",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:143-170",
-        "phase2_proof_replay": "Replay must expose exactly what was seen, approved, changed, and executed for the stale-approval proof."
+        "roadmap_section": "Update safety",
+        "roadmap_reference": "README.md:58",
+        "phase2_proof_replay": "Replay must expose exactly what was seen, approved, changed, and executed for the stale-approval proof.",
+        "notes": "This demonstrates the handoff as a delegation contract for risky update work.",
+        "completed_at": "2026-05-23",
+        "pmo_blocker_ref": "blocker://amg-cio-live-closeout/phalanx-acceptance-unavailable-2026-05-23",
+        "files_touched": [
+          "packages/stx/src/spec-studio-planning-handoff.js",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/update-minimal.audit-state.json",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/update-minimal.locked-artifact.json",
+          "packages/stx/tests/fixtures/spec-studio-planning-handoff/update-minimal.packet.json",
+          "packages/stx/tests/spec-studio-planning-handoff.test.js"
+        ],
+        "verification": [
+          "TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-planning-handoff.test.js",
+          "TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/stx"
+        ]
       },
-      "comment": "Replay/provenance now explicitly owns deterministic replay of stale approval rejection and fresh re-approval evidence.",
-      "blocker_reason": "Waiting for stx-p2-003 and stx-p2-006.",
+      "comment": "Complete: update-mode planning handoff now fails closed without target surfaces or safety boundaries, preserves update target surfaces, maps negative requirements and do_not_change/compatibility boundaries into first-class verification obligations, and links safety obligations back to requirement obligations. Verified with focused planning handoff test and full @semantix/stx suite.",
+      "blocker_reason": null,
       "related": [
-        "stx-p2-009"
-      ]
+        "stx-p2-005",
+        "stx-p2-009",
+        "stx-p2-013"
+      ],
+      "assignee": "codex"
     },
     {
       "dependencies": [
@@ -2123,67 +2169,73 @@
         "stx-p2-007",
         "stx-p2-009",
         "stx-p2-010",
-        "stx-p2-011",
-        "stx-p2-012"
+        "stx-p2-013"
       ],
       "id": "stx-p2-008",
-      "title": "Run Phase 2 readiness review",
+      "title": "Close Phase 2 handoff readiness",
       "parent_id": "stx-p2-000",
-      "goal": "Review Phase 2 exit criteria against implementation evidence and decide whether runtime/provider expansion belongs in the next phase.",
+      "goal": "Review Phase 2 handoff verticals against the README principles and handoff plan, then record whether the Semantix-side deterministic boundary is ready for host integration.",
       "status": "not_started",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
-        "priorityId": "p0"
+        "priorityId": "p1"
       },
       "effort": "s",
       "references": [
-        "docs/plans/semantix-phase-2-plan.md:207-219",
-        "docs/semantix-control-plane-spec.md:673-680"
+        "README.md:1",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1541-1606",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:2273-2295"
       ],
       "definition_of_done": [
-        "Every Phase 2 exit criterion is mapped to tests, docs, or explicit deferred work.",
-        "Concrete stale-approval side-effect proof passes through Codex and a mock or second runtime adapter, with audit replay evidence attached.",
-        "Full repo tests pass or any skipped live-service checks are explicitly classified as additive smoke coverage.",
-        "Tracker status explains whether Phase 2 is closed, split, or still blocked.",
-        "A next-phase recommendation is recorded for runtime/provider expansion."
+        "Each Phase 2 vertical has passing focused tests or a documented split with rationale.",
+        "node --test packages/stx/tests/spec-studio-planning-handoff.test.js passes.",
+        "npm run test --workspace @semantix/stx passes or any failure is unrelated and documented with evidence.",
+        "Compiler profile constants, supported packet versions, canonical serializer fixtures, and known fixture fingerprints are pinned by tests.",
+        "The tracker and README clearly state what Semantix owns, what the host owns, and what downstream planning owns next."
       ],
       "constraints": [
-        "Do not expand into multi-runtime execution until Constraint Engine evidence is complete.",
+        "Do not declare host lock integration or planner integration complete from Semantix-only fixtures.",
+        "Do not claim Semantix owns architecture, task planning, dispatch, or final approval.",
         "Deferred work must be explicit and non-blocking."
       ],
       "expected_changes": [
-        "docs/plans/semantix-phase-2-readiness.md",
-        "docs/plans/semantix-phase-2-plan.md",
+        "README.md",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
         ".llm-tracker/trackers/semantix.json"
       ],
       "allowed_paths": [
+        "README.md",
         "docs/**",
+        "packages/stx/**",
         ".llm-tracker/trackers/semantix.json"
       ],
       "approval_required_for": [
-        "Declaring Phase 2 closed",
-        "Opening provider-only or multi-runtime execution as the next phase"
+        "Declaring Phase 2 handoff readiness for host integration"
       ],
       "context": {
         "tags": [
-          "phase-2",
+          "vertical-6",
           "readiness",
-          "next-phase"
+          "closeout"
         ],
-        "roadmap_section": "Exit Criteria",
-        "roadmap_reference": "docs/plans/semantix-phase-2-plan.md:207-219"
+        "roadmap_section": "Readiness closeout",
+        "roadmap_reference": "README.md:62",
+        "notes": "Final readiness is a boundary claim: Semantix-side handoff builder ready, host/planner integration still separately owned."
       },
-      "comment": "Final Phase 2 review waits for the concrete stale-approval/second-adapter proof evidence in addition to proof matrix and replay/provenance evidence.",
-      "blocker_reason": "Waiting for stx-p2-005 and stx-p2-007."
+      "comment": "Final readiness review: close only the Semantix-side handoff boundary and leave host/planner integration ownership explicit.",
+      "blocker_reason": null,
+      "assignee": null,
+      "related": [
+        "stx-p2-000"
+      ]
     },
     {
       "dependencies": [
-        "stx-p2-007",
-        "stx-p2-010"
+        "stx-p2-005"
       ],
       "id": "stx-p2-009",
-      "title": "Prove stale side-effect approval across adapters",
-      "goal": "Build the concrete Phase 2 proof: a proposed side effect is rendered structurally, approved, invalidated by artifact drift, rejected as stale, re-approved from fresh state, executed, and replayed through Codex and a mock or second runtime adapter.",
+      "title": "Demo fail-closed handoff authority",
+      "goal": "Prove the builder acts as a deterministic circuit breaker by rejecting unsafe or unsupported locked inputs with stable validation errors before downstream planning can start.",
       "status": "not_started",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
@@ -2193,59 +2245,59 @@
       "effort": "m",
       "related": [
         "stx-p2-005",
-        "stx-p2-006",
-        "stx-p2-007"
+        "stx-p2-007",
+        "stx-p2-013"
       ],
-      "comment": "This is the concrete proof requested for Phase 2; it should remain deterministic first, with live runtime coverage treated as additive.",
+      "comment": "Authority vertical: prove the deterministic builder refuses unsafe delegation before downstream planning starts.",
       "references": [
-        "semantix-codex-poc-v2.md:301-335",
-        "docs/plans/semantix-phase-2-plan.md:143-170",
-        "docs/plans/semantix-phase-2-plan.md:207-219"
+        "README.md:8",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:427-577",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:799-877",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1639-1654"
       ],
       "definition_of_done": [
-        "Codex/runtime candidate proposes at least one file, API, or shell-style side effect as structured data, not prose-only text.",
-        "Semantix renders the proposed effect structurally with artifact identity, graph version, node revision, state-effect preview, policy state, reversibility, and approval gate identity.",
-        "Reviewer approval binds to the rendered artifact identity and is accepted only while fresh.",
-        "The underlying artifact changes before execution and the old approval envelope is rejected as stale server-side.",
-        "Reviewer re-approves the fresh artifact and execution resumes from the approved checkpoint.",
-        "Audit replay shows exactly what was seen, approved, changed, rejected as stale, freshly approved, resumed, and executed.",
-        "The same flow passes through the active Codex adapter path and through a mock or second runtime adapter path.",
-        "Tests prove no side effect executes before fresh approval."
+        "Non-ready, degraded, unsupported packet version, unsupported compiler profile, unresolved blocker, missing acceptance for must requirements, and invalid update packets fail with stable error codes and JSON paths.",
+        "Missing or unauthorized governance for lock, approval, blocker demotion, or policy gate fails closed.",
+        "Missing data policy, unclassified text, unredacted secret text, unauthorized sensitive persistence, and oversized payloads fail closed.",
+        "Packet evidence refs absent from auditState.evidence fail, and unused auditState.evidence fails.",
+        "Override and demotion audit links are validated, including matching DecisionRecord and OverrideDecision records."
       ],
       "constraints": [
-        "No side effects before fresh approval.",
-        "Do not use a conversational approval gesture as authority; bind approval to artifactHash, planVersion, graphVersion, and node revision.",
-        "The mock or second adapter path must exercise the runtime adapter boundary, not bypass it through test-only direct mutation.",
-        "Live-service proof is optional and must be explicitly separated from deterministic CI coverage."
+        "The builder may refuse unsafe inputs, but it must not make product decisions or mutate host audit state.",
+        "Do not classify sensitive text inside the deterministic builder; verify host-supplied classifications only.",
+        "Validation errors must use stable code families, not ad hoc prose as contract values."
       ],
       "expected_changes": [
-        "packages/core/src/control-plane-service.js",
-        "packages/core/src/contracts.js",
-        "packages/core/src/runtime-registry.js",
-        "packages/runtime-codex/src/**",
-        "control-plane/tests/**",
-        "packages/**/tests/**",
-        "docs/plans/semantix-phase-2-plan.md"
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/invalid-*.json"
       ],
       "allowed_paths": [
-        "packages/**",
-        "control-plane/**",
-        "docs/**",
+        "packages/stx/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
         ".llm-tracker/trackers/semantix.json"
       ],
-      "approval_required_for": [
-        "Changing public approval or freshness semantics",
-        "Adding live-service tests to the default test suite",
-        "Introducing a non-mock second runtime adapter as a default dependency"
-      ]
+      "approval_required_for": [],
+      "assignee": null,
+      "blocker_reason": null,
+      "context": {
+        "tags": [
+          "vertical-3",
+          "fail-closed",
+          "authority"
+        ],
+        "notes": "This slice proves Semantix readiness is advisory and the deterministic builder refuses unsafe delegation.",
+        "roadmap_section": "Fail-closed authority",
+        "roadmap_reference": "README.md:59"
+      }
     },
     {
       "dependencies": [
-        "stx-p2-007"
+        "stx-p2-005"
       ],
       "id": "stx-p2-010",
-      "title": "Add audit replay drift sentinels",
-      "goal": "Build deterministic fixtures that tell us when replay no longer reproduces the same admission, freshness, approval, and state-effect decisions from the same recorded audit bundle.",
+      "title": "Demo deterministic freshness resume",
+      "goal": "Implement the pure freshness classifier so a handoff plus host observations deterministically returns clean_resume, soft_stale, or hard_stale before planning or execution resume.",
       "status": "not_started",
       "placement": {
         "swimlaneId": "phase-2-constraint-engine",
@@ -2253,37 +2305,52 @@
       },
       "effort": "m",
       "references": [
-        "docs/plans/semantix-phase-2-plan.md:272-289",
-        "docs/Semantix Control Plane UI.md:676-716"
+        "README.md:49",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:727-798",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1736-1751",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1752-2272"
       ],
       "definition_of_done": [
-        "Golden audit bundles replay to the same final policy state, artifact identity, state-effect preview fidelity, and approval timeline on repeated runs.",
-        "A fixture intentionally mutating artifact hash, graph version, node revision, preview content, or constraint identity fails with a named drift reason.",
-        "The drift report distinguishes expected version migration from unexpected replay drift.",
-        "Tests run without live services and fail closed when replay evidence is missing or ambiguous."
+        "classifyFreshnessGateResult is pure and performs no external reads.",
+        "git_commit, file_sha256, and external_timestamp observations produce deterministic clean_resume, soft_stale, and hard_stale results according to v1 per-kind semantics.",
+        "Missing observation, source identity mismatch, locked evidence missing, kind mismatch, and unparsable timestamp cases produce stable reason codes.",
+        "FreshnessGateResult and FreshnessObservationSet shapes are schema-validated in tests.",
+        "The aggregate gate state is the maximum severity across evidence results."
       ],
       "constraints": [
-        "No live provider calls in the default drift sentinel suite.",
-        "Do not persist additional raw model output or context payloads for this task."
+        "Observation collection is host-owned; Semantix only classifies supplied observations.",
+        "Do not add clock-dependent checkedAt values inside the classifier; use the observationSet checkedAt value.",
+        "Do not make host-specific judgment calls outside the v1 comparison semantics."
       ],
       "expected_changes": [
-        "control-plane/tests/**",
-        "packages/core/src/control-plane-service.js",
-        "docs/plans/semantix-phase-2-plan.md"
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/freshness-*.json"
       ],
       "allowed_paths": [
-        "control-plane/**",
-        "packages/core/**",
-        "docs/**"
+        "packages/stx/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
+        ".llm-tracker/trackers/semantix.json"
       ],
       "context": {
         "tags": [
-          "phase-2",
-          "drift",
-          "audit-replay"
+          "vertical-4",
+          "freshness",
+          "resume"
         ],
-        "notes": "Detects replay drift by comparing deterministic bundle-derived decisions against stable golden fixtures."
-      }
+        "notes": "This demonstrates that stale evidence is an auditable deterministic state, not planner guesswork.",
+        "roadmap_section": "Freshness resume",
+        "roadmap_reference": "README.md:60"
+      },
+      "parent_id": "stx-p2-000",
+      "assignee": null,
+      "blocker_reason": null,
+      "related": [
+        "stx-p2-005",
+        "stx-p2-013"
+      ],
+      "approval_required_for": [],
+      "comment": "Freshness vertical: prove resume classification is a pure contract result from locked evidence plus host observations."
     },
     {
       "dependencies": [
@@ -2400,6 +2467,369 @@
       "blocker_reason": null,
       "comment": "Completed verifier drift calibration. Added deterministic verifier drift corpus, snapshot tests for Semantix policy decisions, and docs defining drift classes and opt-in live sampling boundary. Verification: verifier-policy tests passed 11/11; control-plane workspace tests passed 33/33; git diff --check passed.",
       "outcome": "partial_slice_landed"
+    },
+    {
+      "dependencies": [
+        "stx-p2-007",
+        "stx-p2-009",
+        "stx-p2-010"
+      ],
+      "id": "stx-p2-013",
+      "parent_id": "stx-p2-000",
+      "title": "Demo planner-ready handoff proof",
+      "goal": "Produce the value demonstration: a locked handoff fixture gives downstream planning requirements, acceptance, boundaries, provenance, capability scopes, semantic obligations, verification obligations, and planner seeds without mutable chat state.",
+      "status": "not_started",
+      "assignee": null,
+      "placement": {
+        "swimlaneId": "phase-2-constraint-engine",
+        "priorityId": "p0"
+      },
+      "blocker_reason": null,
+      "references": [
+        "README.md:57",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1359-1540",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:1541-1606",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md:2273-2295"
+      ],
+      "effort": "m",
+      "related": [
+        "stx-p2-005",
+        "stx-p2-007",
+        "stx-p2-009",
+        "stx-p2-010"
+      ],
+      "definition_of_done": [
+        "A small fixture or proof test shows fuzzy directive alignment ending at a locked packet and then deterministic handoff build from locked input only.",
+        "The proof handoff exposes planner-consumable requirement IDs, acceptance IDs, boundary IDs, verification obligation IDs, capability scopes, provenance records, evidence refs, decision audit, and open non-blocking concerns.",
+        "PlannerInputs contain only ID-tagged seeds or concerns with source refs and grounding, not free-floating requirement strings.",
+        "Import guard tests prove the builder and transitive local helpers do not import LLM connectors, server modules, filesystem modules, repo readers, network clients, clock helpers, or random helpers.",
+        "The demo can be explained from README principles: Semantix solves delegation, not the downstream planner."
+      ],
+      "constraints": [
+        "Do not start from mutable Spec Studio chat state in the proof; the deterministic boundary starts at locked packet plus compiler profile.",
+        "Do not generate downstream architecture, task graphs, or implementation plans as part of this task.",
+        "Host-owned behavior may be represented by typed fixtures, not live host integration."
+      ],
+      "expected_changes": [
+        "README.md",
+        "packages/stx/src/spec-studio-planning-handoff.js",
+        "packages/stx/tests/spec-studio-planning-handoff.test.js",
+        "packages/stx/tests/fixtures/spec-studio-planning-handoff/*proof*.json",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md"
+      ],
+      "allowed_paths": [
+        "README.md",
+        "packages/stx/**",
+        "docs/plans/spec-studio-deterministic-planning-handoff.md",
+        ".llm-tracker/trackers/semantix.json"
+      ],
+      "approval_required_for": [],
+      "context": {
+        "tags": [
+          "vertical-5",
+          "planner-ready",
+          "demo"
+        ],
+        "notes": "This is the show-the-value milestone: downstream gets a delegation contract, not a transcript.",
+        "roadmap_section": "Planner-ready proof",
+        "roadmap_reference": "README.md:61"
+      },
+      "comment": "Planner-ready proof vertical: demonstrate the downstream system gets a delegation contract rather than chat transcript glue."
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-009",
+      "title": "Fail closed on malformed user-facing LLM text repairs",
+      "goal": "Remove or constrain parser repairs that turn placeholder or missing live LLM output into user-visible Spec Studio questions or aligned requirement text. Malformed live output must retry and then degrade, not be locally authored into an answerable turn.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-llm-evaluator.js:1309",
+        "packages/stx/src/spec-studio-llm-evaluator.js:1384",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:640"
+      ],
+      "definition_of_done": [
+        "Tests no longer bless placeholder required fields being repaired into a visible question turn.",
+        "A live evaluator response with placeholder nextTurn text retries and then returns a degraded packet with nextTurn=null.",
+        "A live evaluator response that omits all question text fails validation or degrades; no canned question, blocker, or finding text is promoted into body.q.",
+        "Required field repair is limited to non-user-visible protocol metadata or explicitly documented carry-forward from prior packet state.",
+        "Focused LLM evaluator tests and @semantix/stx package tests pass."
+      ],
+      "constraints": [
+        "Do not add new hardcoded user-facing question, requirement, or acceptance text as a replacement.",
+        "Keep structural protocol normalization separate from generated content repair.",
+        "Preserve stable-ID continuity behavior unless it conflicts with fail-closed user-visible text."
+      ],
+      "expected_changes": [
+        "packages/stx/src/spec-studio-llm-evaluator.js",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/spec-studio-llm-evaluator.js",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "approval_required_for": [],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "llm-evaluator",
+          "no-hardcoded-content"
+        ],
+        "review_findings": [
+          "placeholder repair test blesses synthesized visible question",
+          "parser repair can mask malformed live LLM output"
+        ],
+        "operator_decision": "Fail closed on malformed or missing user-visible LLM text; do not mock, synthesize, or locally author replacement visible content.",
+        "files_touched": [
+          "packages/stx/src/spec-studio-llm-evaluator.js",
+          "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+        ],
+        "notes": "Completed fail-closed user-visible text hardening. Placeholder or missing nextTurn text now retries then degrades with nextTurn=null; openQuestions are not promoted into replacement body.q, and requirement acceptance/alignedRequirement repairs no longer synthesize visible text.",
+        "verification": "Focused: TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-llm-evaluator.test.js. Full: TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/stx."
+      },
+      "blocker_reason": null,
+      "assignee": "codex",
+      "comment": "Fail-closed LLM text repair behavior completed with focused and package tests green."
+    },
+    {
+      "dependencies": [
+        "ss-llm-009"
+      ],
+      "id": "ss-llm-010",
+      "title": "Broaden generic clarification rejection beyond websites",
+      "goal": "Ensure generic or mode-only clarifications are rejected for all underspecified requests, not only website creation prompts. The evaluator should retry/degrade when the LLM asks shallow meta questions instead of concrete request-specific questions.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/src/spec-studio-llm-evaluator.js:413",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:900",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:1508"
+      ],
+      "definition_of_done": [
+        "A non-website request such as a notes app with only a new-vs-update question retries and then degrades if repeated.",
+        "Mode-only generic questions are rejected when they omit concrete unresolved product, behavior, constraint, or acceptance decisions.",
+        "The website-specific mode-only test remains covered, but the quality guard is not limited to website regex matching.",
+        "Green-path initial-turn tests assert the visible question is concrete and not a canned helper default.",
+        "Focused LLM evaluator tests and @semantix/stx package tests pass."
+      ],
+      "constraints": [
+        "Do not hardcode a replacement batch of generic questions.",
+        "Prefer quality rejection and corrective retry over local generation.",
+        "Keep false positives low for legitimate discrete new/update questions that also include concrete scope details."
+      ],
+      "expected_changes": [
+        "packages/stx/src/spec-studio-llm-evaluator.js",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/src/spec-studio-llm-evaluator.js",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "clarification-quality",
+          "test-hardening"
+        ],
+        "review_findings": [
+          "website-only quality guard misses generic non-website prompts",
+          "green initial-turn test accepts helper canned question"
+        ]
+      },
+      "blocker_reason": "Blocked by ss-llm-009 until its decision gate is explicitly approved or resolved."
+    },
+    {
+      "dependencies": [
+        "ss-llm-009",
+        "ss-llm-010"
+      ],
+      "id": "ss-llm-011",
+      "title": "Replace schema-only LLM green tests with content assertions",
+      "goal": "Harden the passing LLM connector and extraction tests so they prove the live output contains acceptable user-visible content and is not a fallback, canned helper, or degraded/probe response hidden behind schema validity.",
+      "status": "not_started",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p1"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:1508",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:1797",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:1839",
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js:1870"
+      ],
+      "definition_of_done": [
+        "Green-path connector tests assert concrete nextTurn text, source, event kind, and non-degraded status where applicable.",
+        "Tests fail if the packet contains known canned helper phrases such as mode-only new/update prompts for unrelated requests.",
+        "Alternate connector shape tests assert extracted content quality, not only readiness and sessionId.",
+        "Helper fixtures are renamed or split so canned probe packets are not reused as live LLM success evidence.",
+        "Focused LLM evaluator tests and @semantix/stx package tests pass."
+      ],
+      "constraints": [
+        "Do not remove useful extraction coverage; add content-quality assertions to it.",
+        "Avoid brittle full-packet snapshots; assert the behavioral properties that prove live/non-fallback output."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/tests/spec-studio-llm-evaluator.test.js"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "tests",
+          "green-test-quality"
+        ],
+        "review_findings": [
+          "transport/extraction tests assert readiness but not generated content quality"
+        ]
+      },
+      "blocker_reason": "Blocked by ss-llm-009 and ss-llm-010 until the fail-closed repair gate is resolved."
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-012",
+      "title": "Cover HTTP trigger flows and degraded visibility",
+      "goal": "Strengthen Spec Studio HTTP tests so skip, delegate, reconsider, context response, and evaluator failure flows prove their trigger-specific behavior and surface degraded/error state instead of passing on generic 200/readiness checks.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js:356",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js:409",
+        "packages/stx/src/spec-studio-degraded.js:139"
+      ],
+      "definition_of_done": [
+        "Skip, delegate, reconsider, and nested context-response HTTP tests assert trigger-specific packet/event behavior beyond status 200 and readiness enum.",
+        "Unavailable/degraded responses assert source, event kind, visible reason, coverage.alignmentPct, nextTurn=null, and no fabricated requirements.",
+        "Evaluator failure test proves the thrown failure reason is surfaced in packet findings or events and remains non-lockable.",
+        "Tests fail if all trigger fixtures receive an indistinguishable generic degraded packet without the expected visibility details.",
+        "Focused HTTP tests and @semantix/stx package tests pass."
+      ],
+      "constraints": [
+        "Keep HTTP 200 degraded behavior only if callers can reliably detect degradation and reason from the response.",
+        "Do not accept a packet as flow coverage unless it proves the intended trigger semantics."
+      ],
+      "expected_changes": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/src/spec-studio-degraded.js",
+        "packages/stx/src/spec-studio-handshake.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/src/spec-studio-degraded.js",
+        "packages/stx/src/spec-studio-handshake.js",
+        "packages/stx/src/http/server.js"
+      ],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "http",
+          "degraded-visibility"
+        ],
+        "review_findings": [
+          "transport-only HTTP tests pass on any readiness enum",
+          "evaluator failure test misses surfaced reason and zero-fabrication checks"
+        ],
+        "files_touched": [
+          "packages/stx/src/spec-studio-handshake.js",
+          "packages/stx/tests/spec-studio-manual-json-http.test.js"
+        ],
+        "notes": "Unavailable responses now include trigger/user-turn/context-response visibility in the degraded reason and event payload. HTTP tests assert trigger-specific degraded packets, non-lockability, no fabricated requirements, evaluator failure reason surfacing, and distinct degraded visibility per trigger fixture.",
+        "verification": "TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-manual-json-http.test.js; TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/stx"
+      },
+      "assignee": "codex",
+      "blocker_reason": null,
+      "comment": "Completed HTTP trigger/degraded visibility coverage with focused and package-level tests passing."
+    },
+    {
+      "dependencies": [],
+      "id": "ss-llm-013",
+      "title": "Quarantine probe evaluators from live readiness proof",
+      "goal": "Keep the hardcoded probe evaluators available as fixture/probe-only code while preventing them from being mistaken for live Spec Studio readiness. Probe success must reject degraded/fallback packets, public server paths must not select probe output as live success, and the manual probe CLI semantics may change only to reject degraded success.",
+      "status": "complete",
+      "placement": {
+        "swimlaneId": "spec-studio-real-evaluator",
+        "priorityId": "p0"
+      },
+      "effort": "m",
+      "references": [
+        "packages/stx/scripts/probe-spec-studio-json.js:228",
+        "packages/stx/src/http/server.js:428",
+        "packages/stx/src/spec-studio-json-probe-evaluator.js:39",
+        "packages/stx/src/spec-studio-batch-probe-evaluator.js:146",
+        "packages/stx/src/spec-studio-multi-turn-probe-evaluator.js:163"
+      ],
+      "definition_of_done": [
+        "Manual probe success fails on source=phalanx-degraded or degraded Semantix packets unless explicitly running an unavailable/degraded negative test.",
+        "Tests cover that SPEC_STUDIO_EVALUATOR=probe cannot select hardcoded probe output through the public server path.",
+        "Probe evaluator source files remain in place and are clearly scoped as fixture/probe-only, not live readiness evidence.",
+        "Any production src probe content has explicit quarantine guards, naming, and tests preventing leakage into default/live LLM modes.",
+        "Focused probe/manual HTTP tests and @semantix/stx package tests pass."
+      ],
+      "constraints": [
+        "Do not delete probe evaluator source files or probe fixtures as part of this task.",
+        "Do not change documented manual probe CLI semantics beyond rejecting degraded/fallback success.",
+        "Do not let manual proof scripts print success for degraded or fallback packets.",
+        "Keep live/default LLM evaluator readiness evidence separate from probe fixtures."
+      ],
+      "expected_changes": [
+        "packages/stx/scripts/probe-spec-studio-json.js",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/tests/spec-studio-json-probe-evaluator.test.js",
+        "packages/stx/tests/spec-studio-probe-evaluators.test.js",
+        "packages/stx/src/http/server.js"
+      ],
+      "allowed_paths": [
+        "packages/stx/scripts/probe-spec-studio-json.js",
+        "packages/stx/tests/spec-studio-manual-json-http.test.js",
+        "packages/stx/tests/spec-studio-json-probe-evaluator.test.js",
+        "packages/stx/tests/spec-studio-probe-evaluators.test.js",
+        "packages/stx/src/http/server.js",
+        "packages/stx/src/spec-studio-json-probe-evaluator.js",
+        "packages/stx/src/spec-studio-batch-probe-evaluator.js",
+        "packages/stx/src/spec-studio-multi-turn-probe-evaluator.js"
+      ],
+      "approval_required_for": [],
+      "context": {
+        "tags": [
+          "spec-studio",
+          "probe-quarantine",
+          "manual-proof"
+        ],
+        "review_findings": [
+          "manual probe passes on phalanx-degraded source",
+          "hardcoded probe evaluators remain in production src and are tested as valid behavior"
+        ],
+        "operator_decision": "Keep probe evaluator source files. Quarantine probe-only behavior and reject degraded/fallback success; do not delete files or broaden manual probe CLI changes beyond degraded-success rejection.",
+        "files_touched": [
+          "packages/stx/scripts/probe-spec-studio-json.js",
+          "packages/stx/src/http/server.js",
+          "packages/stx/src/spec-studio-json-probe-evaluator.js",
+          "packages/stx/src/spec-studio-batch-probe-evaluator.js",
+          "packages/stx/src/spec-studio-multi-turn-probe-evaluator.js",
+          "packages/stx/tests/spec-studio-manual-json-http.test.js",
+          "packages/stx/tests/spec-studio-json-probe-evaluator.test.js",
+          "packages/stx/tests/spec-studio-probe-evaluators.test.js"
+        ],
+        "notes": "Completed probe quarantine review/verification. Manual probe proof rejects phalanx-degraded and Semantix degraded packets, public server SPEC_STUDIO_EVALUATOR=probe remains unavailable instead of selecting probe output, and probe evaluator sources remain fixture-only with quarantine metadata/tests.",
+        "verification": "Focused: TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-manual-json-http.test.js; TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-json-probe-evaluator.test.js; TPF_LLM_TOOL=codex tpf node --test packages/stx/tests/spec-studio-probe-evaluators.test.js. Full: TPF_LLM_TOOL=codex tpf npm run test --workspace @semantix/stx."
+      },
+      "blocker_reason": null,
+      "assignee": "codex",
+      "comment": "Probe quarantine behavior completed with probe/manual HTTP and package tests green."
     }
   ]
 }

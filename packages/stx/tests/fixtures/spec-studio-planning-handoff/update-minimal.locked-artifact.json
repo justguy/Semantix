@@ -1,0 +1,9 @@
+{
+  "id": "locked_artifact:lia-update-minimal",
+  "lockDecisionRef": "decision:dec-lock-update",
+  "lockedAt": "2026-05-23T06:55:00.000Z",
+  "lockedByActorRef": "actor:user-001",
+  "packetRef": "packet:spec_update_minimal:4",
+  "sessionId": "spec_update_minimal",
+  "packetContentHash": "sha256:4fa52f860af74f44b48e582893442664d4f377ac2cd7892310ef63f4969dc823"
+}

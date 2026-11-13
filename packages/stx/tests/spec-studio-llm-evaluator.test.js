@@ -310,8 +310,16 @@ test("parseEvaluatorOutput canonicalizes common live LLM shape drift before vali
   };
   packet.assumptions = ["User means the existing Run View."];
   packet.openQuestions = ["Should this update the existing Run View?"];
-  packet.risks = ["Could duplicate an existing surface."];
+  packet.risks = [
+    {
+      text: "Could duplicate an existing surface.",
+      severity: "high",
+    },
+  ];
   packet.userDecisions = [{ id: "dec_bad", kind: "choice" }];
+  packet.acceptanceSummary = {
+    summary: "Observation summaries render in the existing Run View.",
+  };
   packet.existingSystemContext = {
     mode: "update",
     targetSurfaces: ["Run View"],
@@ -346,6 +354,10 @@ test("parseEvaluatorOutput canonicalizes common live LLM shape drift before vali
   assert.equal(result.packet.assumptions[0].id, "A-LLM-001");
   assert.equal(result.packet.openQuestions[0].section, "scope");
   assert.equal(result.packet.risks[0].section, "risks");
+  assert.equal(result.packet.risks[0].severity, "blocker");
+  assert.deepEqual(result.packet.acceptanceSummary, [
+    "Observation summaries render in the existing Run View.",
+  ]);
   assert.deepEqual(result.packet.userDecisions, []);
   assert.deepEqual(result.packet.existingSystemContext.targetSurfaces[0], {
     id: "surf_run_view",

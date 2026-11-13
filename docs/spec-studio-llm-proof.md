@@ -76,9 +76,9 @@ npm run probe:spec-studio-json --workspace packages/stx -- \
   --mode llm
 ```
 
-The model used defaults to `claude-sonnet-4-6`. Override with
-`SEMANTIX_SPEC_STUDIO_MODEL`. Timeout defaults to 60 seconds;
-override with `SEMANTIX_SPEC_STUDIO_TIMEOUT_MS`.
+The evaluator uses the Codex CLI's configured/default model unless
+`SEMANTIX_SPEC_STUDIO_MODEL` or `SEMANTIX_CODEX_MODEL` is set. Timeout
+defaults to 5 minutes; override with `SEMANTIX_SPEC_STUDIO_TIMEOUT_MS`.
 
 ---
 

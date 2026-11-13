@@ -1,0 +1,339 @@
+{
+  "capabilityScopes": [
+    {
+      "allowed": [
+        {
+          "id": "capability_grant:grant-manual-review",
+          "kind": "manual_review",
+          "mode": "approve",
+          "ref": "role:spec-owner"
+        }
+      ],
+      "appliesTo": "planning",
+      "dataScopes": [
+        "handoff:evidence",
+        "handoff:requirements",
+        "handoff:target-surfaces",
+        "handoff:verification-obligations"
+      ],
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "forbidden": [
+        {
+          "id": "capability_grant:grant-public-publish",
+          "kind": "deployment",
+          "mode": "write",
+          "ref": "public:*"
+        }
+      ],
+      "id": "capability_scope:cap-update-planning",
+      "sourceRef": "decision:dec-lock-update"
+    }
+  ],
+  "dataPolicy": {
+    "allowSensitivePersistence": false,
+    "classification": "public",
+    "maxCanonicalBytes": 1048576,
+    "policyDecisionRefs": [],
+    "redactions": [],
+    "sensitiveFieldRefs": []
+  },
+  "decisions": [
+    {
+      "actorRef": "actor:user-001",
+      "actorRoleRefs": [
+        "role:spec-owner"
+      ],
+      "at": "2026-05-23T06:50:00.000Z",
+      "id": "decision:dec-update-scope",
+      "kind": "user_answer",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sequence": 0,
+      "supersedesDecisionRefs": [],
+      "targetRefs": [
+        "requirement:req-refresh-hero-copy",
+        "target_surface:surface-storefront-hero"
+      ],
+      "valueSummary": "User confirmed the existing storefront hero copy update target plus checkout, selector compatibility, and no-public-publish boundaries."
+    },
+    {
+      "actorRef": "actor:user-001",
+      "actorRoleRefs": [
+        "role:spec-owner"
+      ],
+      "at": "2026-05-23T06:55:00.000Z",
+      "id": "decision:dec-lock-update",
+      "kind": "host_lock",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sequence": 1,
+      "supersedesDecisionRefs": [],
+      "targetRefs": [
+        "locked_artifact:lia-update-minimal"
+      ],
+      "valueSummary": "Host lock ceremony accepted the update packet for deterministic planning handoff."
+    }
+  ],
+  "evidence": [
+    {
+      "capturedAt": "2026-05-23T06:55:00.000Z",
+      "freshness": {
+        "kind": "external_timestamp",
+        "value": "2026-05-23T06:55:00.000Z"
+      },
+      "id": "evidence:ev-update-scope",
+      "ref": "turn:spec_update_minimal:t4",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "user",
+      "summary": "User locked the update target surface, checkout do-not-change boundary, selector compatibility boundary, and no-public-publish negative requirement."
+    }
+  ],
+  "freshnessGate": {
+    "evidenceRefs": [
+      "evidence:ev-update-scope"
+    ],
+    "id": "freshness_gate:frg-update-minimal",
+    "onCleanResume": "continue",
+    "onHardStale": "require_relock_or_amendment",
+    "onSoftStale": "require_reapproval",
+    "requiredBeforeExecutionResume": true,
+    "requiredBeforePlanning": true
+  },
+  "governance": {
+    "actorRoles": [
+      {
+        "actorRef": "actor:user-001",
+        "roleRefs": [
+          "role:spec-owner"
+        ]
+      }
+    ],
+    "approvalDecisionRefs": [],
+    "authority": {
+      "approvalRoleRefs": [
+        "role:spec-owner"
+      ],
+      "blockerDemotionRoleRefs": [],
+      "lockRoleRefs": [
+        "role:spec-owner"
+      ],
+      "policyGateRoleRefs": [],
+      "quorum": "single_actor",
+      "requireSeparateApprover": false
+    },
+    "lockDecisionRef": "decision:dec-lock-update",
+    "model": "single_approver_v1"
+  },
+  "lineage": {
+    "relationship": "root",
+    "supersedesHandoffRefs": []
+  },
+  "lockMetadata": {
+    "lockDecisionRef": "decision:dec-lock-update",
+    "lockedArtifactId": "locked_artifact:lia-update-minimal",
+    "lockedAt": "2026-05-23T06:55:00.000Z",
+    "lockedByActorRef": "actor:user-001",
+    "sourcePacket": {
+      "contractVersion": "semantix.phalanx.spec-studio.v1",
+      "iteration": 4,
+      "sessionId": "spec_update_minimal"
+    }
+  },
+  "overrideDecisions": [],
+  "provenanceRecords": [
+    {
+      "decisionRefs": [
+        "decision:dec-update-scope"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "id": "provenance:prov-boundary-checkout-unchanged",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-update-scope"
+      ],
+      "strength": "direct",
+      "subjectPath": "/boundaries/boundary:boundary-checkout-unchanged/text",
+      "subjectRef": "boundary:boundary-checkout-unchanged",
+      "summary": "Checkout do-not-change boundary copied from locked user answers."
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-update-scope"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "id": "provenance:prov-boundary-existing-css-contract",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-update-scope"
+      ],
+      "strength": "direct",
+      "subjectPath": "/boundaries/boundary:boundary-existing-css-contract/text",
+      "subjectRef": "boundary:boundary-existing-css-contract",
+      "summary": "Selector compatibility boundary copied from locked user answers."
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-update-scope"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "id": "provenance:prov-req-no-public-publish",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-update-scope"
+      ],
+      "strength": "direct",
+      "subjectPath": "/negativeRequirements/negative_requirement:req-no-public-publish/text",
+      "subjectRef": "negative_requirement:req-no-public-publish",
+      "summary": "No-public-publish negative requirement copied from locked user answers."
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-update-scope"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "id": "provenance:prov-req-refresh-hero-copy",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-update-scope"
+      ],
+      "strength": "direct",
+      "subjectPath": "/requirements/requirement:req-refresh-hero-copy/text",
+      "subjectRef": "requirement:req-refresh-hero-copy",
+      "summary": "Update requirement copied from locked user answers."
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-update-scope"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-update-scope"
+      ],
+      "id": "provenance:prov-surface-storefront-hero",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-update-scope"
+      ],
+      "strength": "direct",
+      "subjectPath": "/targetSurfaces/target_surface:surface-storefront-hero/name",
+      "subjectRef": "target_surface:surface-storefront-hero",
+      "summary": "Update target surface copied from locked user answers."
+    }
+  ],
+  "sensitivityClassifications": [
+    {
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/alignedRequirement",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/originalUserRequest",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/requirements/req-no-public-publish/text",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/requirements/req-refresh-hero-copy/acceptance",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-update"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/requirements/req-refresh-hero-copy/text",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    }
+  ]
+}

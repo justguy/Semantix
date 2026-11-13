@@ -1,0 +1,267 @@
+{
+  "capabilityScopes": [
+    {
+      "allowed": [
+        {
+          "id": "capability_grant:grant-manual-review",
+          "kind": "manual_review",
+          "mode": "approve",
+          "ref": "role:spec-owner"
+        }
+      ],
+      "appliesTo": "planning",
+      "dataScopes": [
+        "handoff:evidence",
+        "handoff:requirements"
+      ],
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "forbidden": [
+        {
+          "id": "capability_grant:grant-network-write",
+          "kind": "network",
+          "mode": "write",
+          "ref": "network:*"
+        }
+      ],
+      "id": "capability_scope:cap-planning",
+      "sourceRef": "decision:dec-lock-greenfield"
+    }
+  ],
+  "dataPolicy": {
+    "allowSensitivePersistence": false,
+    "classification": "public",
+    "maxCanonicalBytes": 1048576,
+    "policyDecisionRefs": [],
+    "redactions": [],
+    "sensitiveFieldRefs": []
+  },
+  "decisions": [
+    {
+      "actorRef": "actor:user-001",
+      "actorRoleRefs": [
+        "role:spec-owner"
+      ],
+      "at": "2026-05-17T15:58:00.000Z",
+      "id": "decision:dec-answer-purpose",
+      "kind": "user_answer",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sequence": 0,
+      "supersedesDecisionRefs": [],
+      "targetRefs": [
+        "requirement:req-hero-actions"
+      ],
+      "valueSummary": "User confirmed a greenfield website with visible button interactions."
+    },
+    {
+      "actorRef": "actor:user-001",
+      "actorRoleRefs": [
+        "role:spec-owner"
+      ],
+      "at": "2026-05-17T16:00:00.000Z",
+      "id": "decision:dec-lock-greenfield",
+      "kind": "host_lock",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sequence": 1,
+      "supersedesDecisionRefs": [],
+      "targetRefs": [
+        "locked_artifact:lia-greenfield-minimal"
+      ],
+      "valueSummary": "Host lock ceremony accepted the greenfield packet for planning handoff."
+    }
+  ],
+  "evidence": [
+    {
+      "capturedAt": "2026-05-17T16:00:00.000Z",
+      "freshness": {
+        "kind": "external_timestamp",
+        "value": "2026-05-17T16:00:00.000Z"
+      },
+      "id": "evidence:ev-user-answers",
+      "ref": "turn:spec_greenfield_minimal:t2",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "user",
+      "summary": "User answered purpose, audience, button behavior, and done criteria before lock."
+    }
+  ],
+  "freshnessGate": {
+    "evidenceRefs": [
+      "evidence:ev-user-answers"
+    ],
+    "id": "freshness_gate:frg-greenfield-minimal",
+    "onCleanResume": "continue",
+    "onHardStale": "require_relock_or_amendment",
+    "onSoftStale": "require_reapproval",
+    "requiredBeforeExecutionResume": true,
+    "requiredBeforePlanning": true
+  },
+  "governance": {
+    "actorRoles": [
+      {
+        "actorRef": "actor:user-001",
+        "roleRefs": [
+          "role:spec-owner"
+        ]
+      }
+    ],
+    "approvalDecisionRefs": [],
+    "authority": {
+      "approvalRoleRefs": [
+        "role:spec-owner"
+      ],
+      "blockerDemotionRoleRefs": [],
+      "lockRoleRefs": [
+        "role:spec-owner"
+      ],
+      "policyGateRoleRefs": [],
+      "quorum": "single_actor",
+      "requireSeparateApprover": false
+    },
+    "lockDecisionRef": "decision:dec-lock-greenfield",
+    "model": "single_approver_v1"
+  },
+  "lineage": {
+    "relationship": "root",
+    "supersedesHandoffRefs": []
+  },
+  "lockMetadata": {
+    "lockDecisionRef": "decision:dec-lock-greenfield",
+    "lockedArtifactId": "locked_artifact:lia-greenfield-minimal",
+    "lockedAt": "2026-05-17T16:00:00.000Z",
+    "lockedByActorRef": "actor:user-001",
+    "sourcePacket": {
+      "contractVersion": "semantix.phalanx.spec-studio.v1",
+      "iteration": 3,
+      "sessionId": "spec_greenfield_minimal"
+    }
+  },
+  "overrideDecisions": [],
+  "provenanceRecords": [
+    {
+      "decisionRefs": [
+        "decision:dec-answer-purpose"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-user-answers"
+      ],
+      "id": "provenance:prov-asm-static-site",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-answer-purpose"
+      ],
+      "strength": "direct",
+      "subjectPath": "/assumptions/assumption:asm-static-site/text",
+      "subjectRef": "assumption:asm-static-site",
+      "summary": "Assumption copied from locked user answers."
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-answer-purpose"
+      ],
+      "evidenceRefs": [
+        "evidence:ev-user-answers"
+      ],
+      "id": "provenance:prov-req-hero-actions",
+      "relation": "copied_from",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "sourceFactRefs": [],
+      "sourceRefs": [
+        "decision:dec-answer-purpose"
+      ],
+      "strength": "direct",
+      "subjectPath": "/requirements/requirement:req-hero-actions/text",
+      "subjectRef": "requirement:req-hero-actions",
+      "summary": "Requirement copied from locked user answers."
+    }
+  ],
+  "sensitivityClassifications": [
+    {
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/alignedRequirement",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/assumptions/asm-static-site/text",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/originalUserRequest",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/requirements/req-hero-actions/acceptance",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    },
+    {
+      "decisionRefs": [
+        "decision:dec-lock-greenfield"
+      ],
+      "evidenceRefs": [],
+      "fieldRef": "/packet/requirements/req-hero-actions/text",
+      "sensitivity": {
+        "classification": "public",
+        "policyDecisionRefs": [],
+        "redactionRefs": []
+      },
+      "source": "host"
+    }
+  ]
+}

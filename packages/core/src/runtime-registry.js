@@ -51,6 +51,12 @@ function validateProviderAdapter(adapter) {
 
   assertFunction(adapter.getCapabilities, "getCapabilities");
   assertFunction(adapter.healthCheck, "healthCheck");
+
+  if (adapter.providerKind === "verifier") {
+    assertFunction(adapter.verifierCall, "verifierCall");
+  } else if (adapter.verifierCall != null) {
+    assertFunction(adapter.verifierCall, "verifierCall");
+  }
 }
 
 export class RuntimeRegistry {

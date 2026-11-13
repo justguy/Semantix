@@ -1,0 +1,9 @@
+{
+  "id": "locked_artifact:lia-greenfield-minimal",
+  "lockDecisionRef": "decision:dec-lock-greenfield",
+  "lockedAt": "2026-05-17T16:00:00.000Z",
+  "lockedByActorRef": "actor:user-001",
+  "packetContentHash": "sha256:36094f80bc796dcce28a965eec2e50939389bcbf4fdd93e28f991a293da18f53",
+  "packetRef": "packet:spec_greenfield_minimal:3",
+  "sessionId": "spec_greenfield_minimal"
+}

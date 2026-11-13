@@ -2,10 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { validateSemantixAlignmentPacket } from "../src/spec-studio-contracts.js";
-import { createSpecStudioJsonProbeEvaluator } from "../src/spec-studio-json-probe-evaluator.js";
+import {
+  SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE,
+  createSpecStudioJsonProbeEvaluator,
+} from "../src/spec-studio-json-probe-evaluator.js";
 
 const DOC_GRILL_REQUEST =
   "Use the documentation grill loop to clarify the overloaded project term before Phalanx Staff sees the Spec Studio handoff.";
+
+test("json probe evaluator is explicitly quarantined as fixture-only", () => {
+  const evaluator = createSpecStudioJsonProbeEvaluator();
+
+  assert.equal(SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE.scope, "fixture-probe-only");
+  assert.equal(SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE.publicServerSelectable, false);
+  assert.equal(SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE.liveReadinessEvidence, false);
+  assert.equal(evaluator.evaluatorMode, "probe");
+  assert.equal(evaluator.fixtureOnly, true);
+  assert.equal(evaluator.liveReadinessEvidence, false);
+  assert.equal(evaluator.quarantine, SPEC_STUDIO_JSON_PROBE_EVALUATOR_QUARANTINE);
+});
 
 test("json probe emits a documentation-grill terminology question for matching requests", () => {
   const evaluator = createSpecStudioJsonProbeEvaluator();

@@ -142,6 +142,40 @@ function probeError(message, body) {
   return error;
 }
 
+export function isManualProofDegradedOrFallbackPacket(packet) {
+  if (!isObject(packet)) {
+    return false;
+  }
+  if (packet.source === "phalanx-degraded") {
+    return true;
+  }
+  if (packet.source !== "semantix") {
+    return false;
+  }
+  if (packet.readiness === "ready") {
+    return false;
+  }
+  if (!Array.isArray(packet.findings)) {
+    return false;
+  }
+  return packet.findings.some((finding) =>
+    isObject(finding) &&
+    finding.sev === "blocker" &&
+    finding.resolved !== true &&
+    typeof finding.id === "string" &&
+    /DEGRADED/i.test(finding.id),
+  );
+}
+
+function assertManualProofPacket(packet, label, body) {
+  if (packet.source !== "semantix") {
+    throw probeError(`${label} response used fallback source "${packet.source}"`, body);
+  }
+  if (isManualProofDegradedOrFallbackPacket(packet)) {
+    throw probeError(`${label} response is degraded and cannot prove live readiness`, body);
+  }
+}
+
 async function getJson(url) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
@@ -209,6 +243,7 @@ export async function runProbe({
   if (!isObject(packet1)) {
     throw probeError("initial response did not include packet", r1.body);
   }
+  assertManualProofPacket(packet1, "initial", r1.body);
   log("    ->", JSON.stringify(compact(packet1)));
 
   const choice = loadFixture("choice-turn.json");
@@ -223,12 +258,13 @@ export async function runProbe({
   if (!isObject(packet2)) {
     throw probeError("choice-turn response did not include packet", r2.body);
   }
+  assertManualProofPacket(packet2, "choice-turn", r2.body);
   log("    ->", JSON.stringify(compact(packet2)));
 
   if (!["needs_user", "ready", "blocked"].includes(packet2.readiness)) {
     throw probeError(`unexpected readiness "${packet2.readiness}"`, r2.body);
   }
-  if (packet2.source !== "semantix" && packet2.source !== "phalanx-degraded") {
+  if (packet2.source !== "semantix") {
     throw probeError(`unexpected source "${packet2.source}"`, r2.body);
   }
 
